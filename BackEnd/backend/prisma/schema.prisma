@@ -1,0 +1,139 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model TruckRule {
+  id         String @id @default(uuid())
+  caminhaoId String @unique
+
+  origemViagem  String?
+  destinoViagem String?
+  cidadeParado  String?
+
+  caminhao Caminhao @relation(fields: [caminhaoId], references: [id])
+}
+
+model Upload {
+  id          String   @id @default(uuid())
+  nomeArquivo String
+  mes         String
+  createdAt   DateTime @default(now())
+
+  caminhaoId String
+  caminhao   Caminhao @relation(fields: [caminhaoId], references: [id])
+
+  resumos ResumoOperacao[]
+}
+
+model Caminhao {
+  id    String  @id @default(uuid())
+  ativo Boolean @default(true)
+  placa String  @unique
+
+  resumos             ResumoOperacao[]
+  relatorioPagamentos RelatorioPagamento[]
+  truckRules          TruckRule[]
+  Upload              Upload[]
+
+  truckStatus TruckStatus?
+}
+
+model ResumoOperacao {
+  id            String   @id @default(uuid())
+  mes           String
+  numeroViagens Int
+  diasParados   Int
+  diasRodando   Int
+  createdAt     DateTime @default(now())
+
+  caminhaoId String
+  caminhao   Caminhao @relation(fields: [caminhaoId], references: [id])
+
+  uploadId String?
+  upload   Upload? @relation(fields: [uploadId], references: [id])
+}
+
+model Motorista {
+  id    String  @id @default(uuid())
+  nome  String
+  ativo Boolean @default(true)
+}
+
+model Empresa {
+  id        String   @id @default(uuid())
+  nome      String
+  email     String   @unique
+  createdAt DateTime @default(now())
+
+  usuarios               Usuario[]
+  viagens                Viagem[]
+  configuracaoPagamentos ConfiguracaoPagamento[]
+}
+
+model Usuario {
+  id        String  @id @default(uuid())
+  email     String  @unique
+  senha     String
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id])
+}
+
+model Viagem {
+  id         String   @id @default(uuid())
+  mes        String
+  quantidade Int
+  empresaId  String
+  empresa    Empresa  @relation(fields: [empresaId], references: [id])
+  createdAt  DateTime @default(now())
+}
+
+model ConfiguracaoPagamento {
+  id             String @id @default(uuid())
+  empresaId      String
+  salarioBase    Float // 3352
+  valorDiaria    Float // 200
+  valorPorViagem Float // 150
+  bonus7Viagens  Float // 1500
+  bonusPadrao    Float? // 0, 500 ou 1000
+
+  empresa Empresa @relation(fields: [empresaId], references: [id])
+}
+
+model RelatorioPagamento {
+  id  String @id @default(uuid())
+  mes String
+
+  valorViagens   Float
+  valorDias      Float
+  descontoParado Float
+  total          Float
+
+  caminhaoId String
+  caminhao   Caminhao @relation(fields: [caminhaoId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([caminhaoId, mes])
+}
+
+model TruckStatus {
+  id String @id @default(uuid())
+
+  caminhaoId String @unique
+  caminhao   Caminhao @relation(fields: [caminhaoId], references: [id])
+
+  ultimaCidade String
+  ultimaData   DateTime
+
+  estado String 
+  // 'parado' | 'em_viagem' | 'livre'
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
