@@ -3,9 +3,8 @@ import {
     Post,
     UploadedFile,
     UseInterceptors,
-    Body,
-    Delete,
-    Param,
+    BadRequestException,
+    InternalServerErrorException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadService } from './upload.service';
@@ -16,13 +15,22 @@ export class UploadController {
 
     @Post()
     @UseInterceptors(FileInterceptor('file'))
-    async upload(
-        @UploadedFile() file: Express.Multer.File,
-        @Body() body: { mes: string },
-    ) {
-        console.log("aqui: ", body.mes)
-        console.log('FILE:', file);
-        console.log('BODY:', body);
-        return this.uploadService.processarUpload(file, body.mes);
+    async upload(@UploadedFile() file: Express.Multer.File) {
+        try {
+            if (!file) {
+                console.log('Nenhum arquivo recebido no backend');
+                throw new BadRequestException('Arquivo não enviado');
+            }
+
+            console.log('Arquivo recebido:', file.originalname, file.size, 'bytes');
+
+            const resultado = await this.uploadService.processarUpload(file);
+            console.log('Upload processado com sucesso');
+
+            return resultado;
+        } catch (err) {
+            console.error('Erro ao processar upload:', err);
+            throw new InternalServerErrorException('Erro ao processar arquivo');
+        }
     }
 }

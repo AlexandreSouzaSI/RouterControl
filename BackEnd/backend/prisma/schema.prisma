@@ -28,6 +28,8 @@ model Upload {
   caminhaoId String
   caminhao   Caminhao @relation(fields: [caminhaoId], references: [id])
 
+  uploadPeriods UploadPeriod[]
+
   resumos ResumoOperacao[]
 }
 
@@ -36,12 +38,16 @@ model Caminhao {
   ativo Boolean @default(true)
   placa String  @unique
 
+  uploadPeriods UploadPeriod[]
+  tripRecords   TripRecord[]
+  stopRecords   StopRecord[]
   resumos             ResumoOperacao[]
   relatorioPagamentos RelatorioPagamento[]
   truckRules          TruckRule[]
   Upload              Upload[]
 
   truckStatus TruckStatus?
+  configPagamento ConfiguracaoPagamentoCaminhao?  
 }
 
 model ResumoOperacao {
@@ -105,6 +111,43 @@ model ConfiguracaoPagamento {
   empresa Empresa @relation(fields: [empresaId], references: [id])
 }
 
+enum TipoCalculoPagamento {
+  TRADICIONAL
+  FATURAMENTO
+}
+
+model ConfiguracaoPagamentoCaminhao {
+  id String @id @default(uuid())
+
+  caminhaoId String @unique
+  caminhao   Caminhao @relation(fields: [caminhaoId], references: [id], onDelete: Cascade)
+
+  tipoCalculo TipoCalculoPagamento @default(TRADICIONAL)
+
+  percentualFaturamento Float @default(2)
+  valorDiariaOverride   Float?
+  ativo Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ConfiguracaoPagamentoMotorista {
+  id String @id @default(uuid())
+
+  salarioBase       Float @default(3352)
+  valorDiaria       Float @default(200)
+  valorPorViagem    Float @default(150)
+  bonusMetaViagens  Float @default(1500)
+  metaViagens       Int   @default(7)
+  diasBaseSalario   Int   @default(30)
+
+  adiantamento Float @default(3000)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model RelatorioPagamento {
   id  String @id @default(uuid())
   mes String
@@ -136,4 +179,59 @@ model TruckStatus {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model UploadPeriod {
+  id        String   @id @default(uuid())
+  periodo   String
+  dataInicio DateTime
+  dataFim    DateTime
+  createdAt DateTime @default(now())
+
+  caminhaoId String
+  caminhao   Caminhao @relation(fields: [caminhaoId], references: [id])
+
+  uploadId String?
+  upload   Upload? @relation(fields: [uploadId], references: [id])
+
+  trips TripRecord[]
+  stops StopRecord[]
+
+  @@unique([caminhaoId, periodo])
+}
+
+model TripRecord {
+  id              String   @id @default(uuid())
+  dataHoraChegada DateTime
+  cidade          String
+  latitude        String?
+  createdAt       DateTime @default(now())
+
+  caminhaoId String
+  caminhao   Caminhao @relation(fields: [caminhaoId], references: [id])
+
+  uploadPeriodId String
+  uploadPeriod   UploadPeriod @relation(fields: [uploadPeriodId], references: [id], onDelete: Cascade)
+}
+
+model StopRecord {
+  id String @id @default(uuid())
+
+  dataHoraEntrada DateTime
+  dataHoraSaida   DateTime?
+  diasParados     Int @default(0)
+
+  cidadeEntrada   String
+  latitudeEntrada String?
+
+  cidadeSaida     String?
+  latitudeSaida   String?
+
+  createdAt DateTime @default(now())
+
+  caminhaoId String
+  caminhao   Caminhao @relation(fields: [caminhaoId], references: [id])
+
+  uploadPeriodId String
+  uploadPeriod   UploadPeriod @relation(fields: [uploadPeriodId], references: [id], onDelete: Cascade)
 }

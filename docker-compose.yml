@@ -23,15 +23,18 @@ services:
       - postgres
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/viagens_db
-    volumes:
-      - ./BackEnd/backend:/app
+      PORT: 3000
+    command: sh -c "npx prisma migrate deploy && npm run start:prod"
+
   frontend:
     build:
       context: ./FrontEnd/frontend
     container_name: frontend_viagens
+    restart: always
     ports:
-      - "5173:5173"
-    command: npm run dev
+      - "3001:4173"
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:
