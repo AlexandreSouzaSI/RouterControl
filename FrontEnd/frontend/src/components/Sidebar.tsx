@@ -1,4 +1,12 @@
-import { Home, Truck, BarChart3, Settings, X } from 'lucide-react';
+import {
+    Home,
+    Truck,
+    BarChart3,
+    Settings,
+    X,
+    Wallet,
+    UserRound,
+} from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -12,17 +20,16 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         { name: 'Dashboard', icon: Home, path: '/' },
         { name: 'Caminhões', icon: Truck, path: '/caminhoes' },
         { name: 'Relatórios', icon: BarChart3, path: '/relatorios' },
+        { name: 'Pagamentos', icon: Wallet, path: '/pagamentos' },
+        { name: 'Proprietários', icon: UserRound, path: '/proprietarios' },
         { name: 'Configurações', icon: Settings, path: '/config' },
     ];
 
     return (
         <>
-            {/* MOBILE */}
-            {/* MOBILE MELHORADO */}
             <AnimatePresence>
                 {isOpen && (
                     <>
-                        {/* OVERLAY COM BLUR */}
                         <motion.div
                             className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40"
                             initial={{ opacity: 0 }}
@@ -31,13 +38,12 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                             onClick={onClose}
                         />
 
-                        {/* SIDEBAR COM GESTO */}
                         <motion.div
                             drag="x"
                             dragConstraints={{ left: 0, right: 0 }}
-                            onDragEnd={(event, info) => {
+                            onDragEnd={(_, info) => {
                                 if (info.offset.x < -100) {
-                                    onClose(); // 👈 swipe pra fechar
+                                    onClose();
                                 }
                             }}
                             initial={{ x: -320, opacity: 0 }}
@@ -48,21 +54,21 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                                 stiffness: 260,
                                 damping: 25,
                             }}
-                            className="fixed top-0 left-0 h-full w-72 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl z-50 p-5 shadow-2xl"
+                            className="fixed top-0 left-0 h-full w-72 bg-white/95 dark:bg-[#0F172A]/95 backdrop-blur-xl z-50 p-5 shadow-2xl border-r border-gray-200 dark:border-gray-800"
                         >
-                            {/* HEADER */}
                             <div className="flex justify-between items-center mb-8">
-                                <h1 className="font-bold text-lg">🚛 RotaApp</h1>
+                                <h1 className="font-bold text-lg text-gray-900 dark:text-white">
+                                    🚛 RotaApp
+                                </h1>
 
                                 <button
                                     onClick={onClose}
-                                    className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800"
+                                    className="p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
                                 >
-                                    <X />
+                                    <X size={20} />
                                 </button>
                             </div>
 
-                            {/* MENU */}
                             <nav className="flex flex-col gap-2">
                                 {menu.map((item, index) => {
                                     const Icon = item.icon;
@@ -74,9 +80,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                                             onClick={onClose}
                                             className={({ isActive }) =>
                                                 `flex items-center gap-4 p-3 rounded-xl text-base transition-all
-                                    ${isActive
+                                                ${isActive
                                                     ? 'bg-blue-500 text-white shadow-lg scale-[1.02]'
-                                                    : 'hover:bg-gray-100 dark:hover:bg-gray-800 active:scale-95'
+                                                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-950 dark:hover:text-white active:scale-95'
                                                 }`
                                             }
                                         >
@@ -87,8 +93,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                                 })}
                             </nav>
 
-                            {/* FOOTER */}
-                            <div className="absolute bottom-6 left-5 text-xs text-gray-400">
+                            <div className="absolute bottom-6 left-5 text-xs text-gray-400 dark:text-gray-500">
                                 v1.0
                             </div>
                         </motion.div>
@@ -96,9 +101,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 )}
             </AnimatePresence>
 
-            {/* DESKTOP */}
-            <div className="hidden md:flex h-screen w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 p-4 flex-col">
-                <h1 className="text-xl font-bold mb-6">🚛 RotaApp</h1>
+            <div className="hidden md:flex h-screen w-64 bg-white dark:bg-[#0F172A] border-r border-gray-200 dark:border-gray-800 p-4 flex-col">
+                <h1 className="text-xl font-bold mb-6 text-gray-900 dark:text-white">
+                    🚛 RotaApp
+                </h1>
 
                 <nav className="flex flex-col gap-2">
                     {menu.map((item, index) => {
@@ -109,10 +115,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                                 key={index}
                                 to={item.path}
                                 className={({ isActive }) =>
-                                    `flex items-center gap-3 p-3 rounded-xl
+                                    `flex items-center gap-3 p-3 rounded-xl transition-all
                                     ${isActive
-                                        ? 'bg-blue-500 text-white'
-                                        : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                                        ? 'bg-blue-500 text-white shadow-sm'
+                                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-950 dark:hover:text-white'
                                     }`
                                 }
                             >

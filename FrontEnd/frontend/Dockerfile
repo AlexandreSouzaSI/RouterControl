@@ -6,10 +6,10 @@ COPY package*.json ./
 
 RUN npm install
 
-RUN npm install --force
-
 COPY . .
 
-EXPOSE 5173
+RUN npm run build
 
-CMD ["npm", "run", "dev", "--", "--host"]
+EXPOSE 4173
+
+CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0"]

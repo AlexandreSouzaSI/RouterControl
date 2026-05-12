@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import { api } from '../services/api';
 
 export function TableResumo() {
     const [data, setData] = useState<any[]>([]);
@@ -11,7 +11,7 @@ export function TableResumo() {
     async function fetchData() {
         setLoading(true);
 
-        const response = await axios.get('http://localhost:3000/relatorio', {
+        const response = await api.get('/relatorio', {
             params: {
                 placa: filtro,
                 page,
