@@ -1,40 +1,62 @@
+# services:
+#   postgres_rota:
+#     image: postgres:15
+#     container_name: postgres_rota
+#     restart: always
+#     environment:
+#       POSTGRES_USER: postgres
+#       POSTGRES_PASSWORD: postgres
+#       POSTGRES_DB: viagens_db
+#     ports:
+#       - "5433:5432"
+#     volumes:
+#       - postgres_rota_data:/var/lib/postgresql/data
+
+#   backend_rota:
+#     build:
+#       context: ./BackEnd/backend
+#     container_name: backend_rota
+#     restart: always
+#     ports:
+#       - "4001:3000"
+#     depends_on:
+#       - postgres_rota
+#     environment:
+#       DATABASE_URL: postgresql://postgres:postgres@postgres_rota:5432/viagens_db?schema=public
+#       PORT: 3000
+#     command: sh -c "npx prisma migrate deploy && npm run start:prod"
+
+#   frontend_rota:
+#     build:
+#       context: ./FrontEnd/frontend
+#     container_name: frontend_rota
+#     restart: always
+#     ports:
+#       - "3001:4173"
+#     depends_on:
+#       - backend_rota
+#     environment:
+#       VITE_API_URL: http://localhost:4001
+#       NEXT_PUBLIC_API_URL: http://localhost:4001
+
+# volumes:
+#   postgres_rota_data:
+
+
+
 services:
-  postgres:
+  postgres_rota:
     image: postgres:15
-    container_name: postgres_viagens
+    container_name: postgres_rota
     restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: viagens_db
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  backend:
-    build:
-      context: ./BackEnd/backend
-    container_name: backend_viagens
-    restart: always
-    ports:
-      - "3000:3000"
-    depends_on:
-      - postgres
-    environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/viagens_db
-      PORT: 3000
-    command: sh -c "npx prisma migrate deploy && npm run start:prod"
-
-  frontend:
-    build:
-      context: ./FrontEnd/frontend
-    container_name: frontend_viagens
-    restart: always
-    ports:
-      - "3001:4173"
-    depends_on:
-      - backend
+      - postgres_rota_data:/var/lib/postgresql/data
 
 volumes:
-  postgres_data:
+  postgres_rota_data:

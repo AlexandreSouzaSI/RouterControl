@@ -38,16 +38,19 @@ model Caminhao {
   ativo Boolean @default(true)
   placa String  @unique
 
-  uploadPeriods UploadPeriod[]
-  tripRecords   TripRecord[]
-  stopRecords   StopRecord[]
+  uploadPeriods       UploadPeriod[]
+  tripRecords         TripRecord[]
+  stopRecords         StopRecord[]
   resumos             ResumoOperacao[]
   relatorioPagamentos RelatorioPagamento[]
   truckRules          TruckRule[]
   Upload              Upload[]
 
-  truckStatus TruckStatus?
-  configPagamento ConfiguracaoPagamentoCaminhao?  
+  transacoesFinanceiras TransacaoFinanceira[]
+  regrasFinanceiras     RegraClassificacaoFinanceira[]
+
+  truckStatus     TruckStatus?
+  configPagamento ConfiguracaoPagamentoCaminhao?
 }
 
 model ResumoOperacao {
@@ -119,14 +122,14 @@ enum TipoCalculoPagamento {
 model ConfiguracaoPagamentoCaminhao {
   id String @id @default(uuid())
 
-  caminhaoId String @unique
+  caminhaoId String   @unique
   caminhao   Caminhao @relation(fields: [caminhaoId], references: [id], onDelete: Cascade)
 
   tipoCalculo TipoCalculoPagamento @default(TRADICIONAL)
 
-  percentualFaturamento Float @default(2)
+  percentualFaturamento Float   @default(2)
   valorDiariaOverride   Float?
-  ativo Boolean @default(true)
+  ativo                 Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -135,12 +138,12 @@ model ConfiguracaoPagamentoCaminhao {
 model ConfiguracaoPagamentoMotorista {
   id String @id @default(uuid())
 
-  salarioBase       Float @default(3352)
-  valorDiaria       Float @default(200)
-  valorPorViagem    Float @default(150)
-  bonusMetaViagens  Float @default(1500)
-  metaViagens       Int   @default(7)
-  diasBaseSalario   Int   @default(30)
+  salarioBase      Float @default(3352)
+  valorDiaria      Float @default(200)
+  valorPorViagem   Float @default(150)
+  bonusMetaViagens Float @default(1500)
+  metaViagens      Int   @default(7)
+  diasBaseSalario  Int   @default(30)
 
   adiantamento Float @default(3000)
 
@@ -168,13 +171,13 @@ model RelatorioPagamento {
 model TruckStatus {
   id String @id @default(uuid())
 
-  caminhaoId String @unique
+  caminhaoId String   @unique
   caminhao   Caminhao @relation(fields: [caminhaoId], references: [id])
 
   ultimaCidade String
   ultimaData   DateTime
 
-  estado String 
+  estado String
   // 'parado' | 'em_viagem' | 'livre'
 
   createdAt DateTime @default(now())
@@ -182,11 +185,11 @@ model TruckStatus {
 }
 
 model UploadPeriod {
-  id        String   @id @default(uuid())
-  periodo   String
+  id         String   @id @default(uuid())
+  periodo    String
   dataInicio DateTime
   dataFim    DateTime
-  createdAt DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   caminhaoId String
   caminhao   Caminhao @relation(fields: [caminhaoId], references: [id])
@@ -219,13 +222,13 @@ model StopRecord {
 
   dataHoraEntrada DateTime
   dataHoraSaida   DateTime?
-  diasParados     Int @default(0)
+  diasParados     Int       @default(0)
 
   cidadeEntrada   String
   latitudeEntrada String?
 
-  cidadeSaida     String?
-  latitudeSaida   String?
+  cidadeSaida   String?
+  latitudeSaida String?
 
   createdAt DateTime @default(now())
 
@@ -234,4 +237,89 @@ model StopRecord {
 
   uploadPeriodId String
   uploadPeriod   UploadPeriod @relation(fields: [uploadPeriodId], references: [id], onDelete: Cascade)
+}
+
+enum DirecaoTransacaoFinanceira {
+  ENTRADA
+  SAIDA
+}
+
+enum StatusTransacaoFinanceira {
+  PENDENTE_CLASSIFICACAO
+  CLASSIFICADA
+  IGNORADA
+}
+
+model CategoriaFinanceira {
+  id        String   @id @default(uuid())
+  nome      String   @unique
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transacoes TransacaoFinanceira[]
+  regras     RegraClassificacaoFinanceira[]
+}
+
+model ImportacaoExtrato {
+  id               String   @id @default(uuid())
+  nomeArquivo      String
+  totalLinhas      Int      @default(0)
+  linhasImportadas Int      @default(0)
+  linhasIgnoradas  Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  transacoes TransacaoFinanceira[]
+}
+
+model TransacaoFinanceira {
+  id String @id @default(uuid())
+
+  data        DateTime
+  lancamento  String
+  razaoSocial String?
+  documento   String?
+  descricao   String?
+  valor       Decimal  @db.Decimal(10, 2)
+
+  direcao DirecaoTransacaoFinanceira
+  status  StatusTransacaoFinanceira  @default(PENDENTE_CLASSIFICACAO)
+
+  caminhaoId String?
+  caminhao   Caminhao? @relation(fields: [caminhaoId], references: [id])
+
+  categoriaId String?
+  categoria   CategoriaFinanceira? @relation(fields: [categoriaId], references: [id])
+
+  importacaoId String?
+  importacao   ImportacaoExtrato? @relation(fields: [importacaoId], references: [id], onDelete: SetNull)
+
+  observacao String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([data])
+  @@index([direcao])
+  @@index([caminhaoId])
+  @@index([categoriaId])
+}
+
+model RegraClassificacaoFinanceira {
+  id      String @id @default(uuid())
+  palavra String
+
+  categoriaId String?
+  categoria   CategoriaFinanceira? @relation(fields: [categoriaId], references: [id])
+
+  caminhaoId String?
+  caminhao   Caminhao? @relation(fields: [caminhaoId], references: [id])
+
+  ativo      Boolean @default(true)
+  prioridade Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([palavra])
 }

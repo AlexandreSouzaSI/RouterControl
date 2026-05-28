@@ -6,6 +6,8 @@ import { Relatorios } from './pages/Relatorios';
 import { Pagamentos } from './pages/Pagamentos';
 import { Proprietarios } from './pages/Proprietarios';
 import { Config } from './pages/Config';
+import { Financeiro } from './pages/Financeiro';
+import { FinanceiroRegras } from './pages/FinanceiroRegras';
 
 export default function App() {
   return (
@@ -18,6 +20,8 @@ export default function App() {
           <Route path="/pagamentos" element={<Pagamentos />} />
           <Route path="/proprietarios" element={<Proprietarios />} />
           <Route path="/config" element={<Config />} />
+          <Route path="/financeiro" element={<Financeiro />} />
+          <Route path="/regras" element={<FinanceiroRegras />} />
         </Routes>
       </Layout>
     </BrowserRouter>

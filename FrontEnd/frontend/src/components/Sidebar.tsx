@@ -23,6 +23,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         { name: 'Pagamentos', icon: Wallet, path: '/pagamentos' },
         { name: 'Proprietários', icon: UserRound, path: '/proprietarios' },
         { name: 'Configurações', icon: Settings, path: '/config' },
+        { name: 'Financeiro', icon: Settings, path: '/financeiro' },
+        { name: 'Financeiro Regras', icon: Settings, path: '/regras' },
     ];
 
     return (
