@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "PosicaoCaminhao" ALTER COLUMN "mId" SET DATA TYPE BIGINT;

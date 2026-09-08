@@ -1,10 +1,3 @@
-# Backend e frontend são repositórios Git próprios (RouterControlBackEnd e
-# RouterControlFrontEnd) — o repo da raiz (RouterControl) só versiona o que
-# amarra os dois (docker-compose, .env.example, docs). Sem isso o Git tenta
-# tratar essas pastas como submódulo e a raiz nunca fica limpa.
-/BackEnd/
-/FrontEnd/
-
 # Segredos reais de produção — só o .env.example vai pro Git.
 .env
 .env.local
