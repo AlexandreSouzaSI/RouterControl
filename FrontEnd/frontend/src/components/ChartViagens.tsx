@@ -1,156 +1,191 @@
+import { useEffect, useState } from 'react';
 import {
     LineChart,
     Line,
     XAxis,
+    YAxis,
     Tooltip,
+    Legend,
     ResponsiveContainer,
     CartesianGrid,
-    Area,
-    Dot
 } from 'recharts';
 import { motion } from 'framer-motion';
 
-interface Props {
-    meses: string[];
-    viagens: number[];
+interface Serie {
+    placa: string;
+    valores: number[];
 }
 
-export function ChartViagens({ meses, viagens }: Props) {
-    const data = meses.map((mes, index) => ({
-        mes,
-        atual: viagens[index],
-        anterior: viagens[index - 1] ?? null
-    }));
+interface Props {
+    meses: string[];
+    series: Serie[];
+}
 
-    // 🔥 tendência
-    const ultimo = viagens[viagens.length - 1] ?? 0;
-    const anterior = viagens[viagens.length - 2] ?? 0;
+const PALETA = [
+    '#3b82f6', // azul
+    '#22c55e', // verde
+    '#f59e0b', // âmbar
+    '#a855f7', // roxo
+    '#ec4899', // rosa
+    '#06b6d4', // ciano
+    '#f97316', // laranja
+    '#ef4444', // vermelho
+    '#14b8a6', // teal
+    '#6366f1', // índigo
+];
 
-    const crescimento = anterior
-        ? ((ultimo - anterior) / anterior) * 100
-        : 0;
+function useIsDark() {
+    const [isDark, setIsDark] = useState(
+        () =>
+            typeof document !== 'undefined' &&
+            document.documentElement.classList.contains('dark'),
+    );
 
-    const isUp = crescimento >= 0;
-    const cor = isUp ? '#22c55e' : '#ef4444';
+    useEffect(() => {
+        const root = document.documentElement;
 
-    // 🔮 previsão simples (média de crescimento)
-    const previsao = ultimo + (ultimo - anterior);
+        const observer = new MutationObserver(() => {
+            setIsDark(root.classList.contains('dark'));
+        });
 
-    const dataComPrevisao = [
-        ...data,
-        {
-            mes: 'Próximo',
-            atual: previsao,
-            anterior: null
-        }
+        observer.observe(root, {
+            attributes: true,
+            attributeFilter: ['class'],
+        });
+
+        return () => observer.disconnect();
+    }, []);
+
+    return isDark;
+}
+
+function formatarMes(mes: string) {
+    const [ano, mesNum] = mes.split('-');
+    const nomes = [
+        'Jan',
+        'Fev',
+        'Mar',
+        'Abr',
+        'Mai',
+        'Jun',
+        'Jul',
+        'Ago',
+        'Set',
+        'Out',
+        'Nov',
+        'Dez',
     ];
 
-    if (!meses.length || !viagens.length) {
+    const idx = Number(mesNum) - 1;
+
+    if (!ano || idx < 0 || idx > 11) return mes;
+
+    return `${nomes[idx]}/${ano.slice(2)}`;
+}
+
+export function ChartViagens({ meses, series }: Props) {
+    const isDark = useIsDark();
+
+    if (!meses.length || !series.length) {
         return (
-            <div className="h-[320px] flex items-center justify-center text-gray-400">
+            <div className="h-[280px] flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
                 Sem dados suficientes para gerar gráfico
             </div>
         );
     }
 
+    const data = meses.map((mes, index) => {
+        const ponto: Record<string, string | number> = {
+            mes: formatarMes(mes),
+        };
+
+        series.forEach((serie) => {
+            ponto[serie.placa] = serie.valores[index] ?? 0;
+        });
+
+        return ponto;
+    });
+
+    const corGrade = isDark ? '#1f2937' : '#e5e7eb';
+    const corEixo = isDark ? '#6b7280' : '#9ca3af';
+    const corTooltipBg = isDark ? '#111827' : '#ffffff';
+    const corTooltipBorder = isDark ? '#1f2937' : '#e5e7eb';
+    const corTooltipTexto = isDark ? '#f3f4f6' : '#111827';
+
     return (
-        <div className="w-full h-[300px]">
-            {/* 🧠 INSIGHT AUTOMÁTICO */}
-            <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mb-4 text-sm text-gray-400"
-            >
-                {isUp ? '📈 Crescimento' : '📉 Queda'} de{' '}
-                <span className={isUp ? 'text-green-400' : 'text-red-400'}>
-                    {Math.abs(crescimento).toFixed(1)}%
-                </span>{' '}
-                em relação ao mês anterior
-            </motion.div>
+        <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="w-full h-[300px]"
+        >
+            <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                    data={data}
+                    margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
+                >
+                    <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke={corGrade}
+                        vertical={false}
+                    />
 
-            <motion.div
-                initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6 }}
-                className="w-full h-[300px]"
-            >
-                <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={dataComPrevisao}>
-                        <defs>
-                            <linearGradient id="gradient" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor={cor} stopOpacity={0.4} />
-                                <stop offset="95%" stopColor={cor} stopOpacity={0} />
-                            </linearGradient>
-                        </defs>
+                    <XAxis
+                        dataKey="mes"
+                        stroke={corEixo}
+                        tick={{ fontSize: 12, fill: corEixo }}
+                        axisLine={false}
+                        tickLine={false}
+                    />
 
-                        <CartesianGrid
-                            strokeDasharray="3 3"
-                            stroke="#1f2937"
-                            opacity={0.15}
+                    <YAxis
+                        stroke={corEixo}
+                        tick={{ fontSize: 12, fill: corEixo }}
+                        axisLine={false}
+                        tickLine={false}
+                        allowDecimals={false}
+                        width={30}
+                    />
+
+                    <Tooltip
+                        cursor={{ stroke: corGrade, strokeWidth: 1 }}
+                        contentStyle={{
+                            backgroundColor: corTooltipBg,
+                            border: `1px solid ${corTooltipBorder}`,
+                            borderRadius: '12px',
+                            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                        }}
+                        labelStyle={{
+                            color: corTooltipTexto,
+                            fontWeight: 600,
+                            marginBottom: 4,
+                        }}
+                        itemStyle={{ color: corTooltipTexto }}
+                        formatter={(value: any) => [`${value} viagens`, undefined]}
+                    />
+
+                    {series.length > 1 && (
+                        <Legend
+                            wrapperStyle={{ fontSize: 12, color: corEixo }}
+                            iconType="circle"
+                            iconSize={8}
                         />
+                    )}
 
-                        <XAxis dataKey="mes" stroke="#9ca3af" />
-
-                        <Tooltip
-                            contentStyle={{
-                                backgroundColor: '#020617',
-                                border: '1px solid #1f2937',
-                                borderRadius: '12px',
-                                color: '#fff'
-                            }}
-                        />
-
-                        {/* 🔥 ÁREA */}
-                        <Area
-                            type="monotone"
-                            dataKey="atual"
-                            stroke="none"
-                            fill="url(#gradient)"
-                        />
-
-                        {/* 🔥 LINHA ATUAL */}
+                    {series.map((serie, index) => (
                         <Line
+                            key={serie.placa}
                             type="monotone"
-                            dataKey="atual"
-                            stroke={cor}
-                            strokeWidth={3}
-                            dot={false}
-                            animationDuration={1200}
+                            dataKey={serie.placa}
+                            name={serie.placa}
+                            stroke={PALETA[index % PALETA.length]}
+                            strokeWidth={2.5}
+                            dot={{ r: 3, strokeWidth: 0 }}
+                            activeDot={{ r: 5 }}
                         />
-
-                        {/* 🔥 LINHA ANTERIOR (comparação) */}
-                        <Line
-                            type="monotone"
-                            dataKey="anterior"
-                            stroke="#64748b"
-                            strokeWidth={2}
-                            strokeDasharray="5 5"
-                            dot={false}
-                        />
-
-                        {/* 🔮 PREVISÃO */}
-                        <Line
-                            type="monotone"
-                            dataKey="atual"
-                            stroke={cor}
-                            strokeDasharray="4 4"
-                            dot={(props: any) => {
-                                if (props.index !== dataComPrevisao.length - 1) return null;
-
-                                return (
-                                    <Dot
-                                        {...props}
-                                        r={6}
-                                        fill={cor}
-                                        stroke="#020617"
-                                        strokeWidth={2}
-                                    />
-                                );
-                            }}
-                        />
-                    </LineChart>
-                </ResponsiveContainer>
-            </motion.div>
-        </div>
+                    ))}
+                </LineChart>
+            </ResponsiveContainer>
+        </motion.div>
     );
 }

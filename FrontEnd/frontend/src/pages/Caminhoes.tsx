@@ -11,6 +11,7 @@ type Regra = {
     id?: string;
     caminhaoId: string;
     origemViagem?: string;
+    origemViagem2?: string;
     destinoViagem?: string;
     cidadeParado?: string;
 };
@@ -63,6 +64,7 @@ export function Caminhoes() {
                     setRegra({
                         caminhaoId: selected,
                         origemViagem: '',
+                        origemViagem2: '',
                         destinoViagem: '',
                         cidadeParado: '',
                     });
@@ -73,6 +75,7 @@ export function Caminhoes() {
                 setRegra({
                     caminhaoId: selected,
                     origemViagem: '',
+                    origemViagem2: '',
                     destinoViagem: '',
                     cidadeParado: '',
                 });
@@ -121,7 +124,7 @@ export function Caminhoes() {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-[#0B1120] text-gray-900 dark:text-gray-100 p-6 space-y-6">
+        <div className="space-y-6">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
                 Configuração de Caminhões
             </h1>
@@ -214,6 +217,33 @@ export function Caminhoes() {
 
                     <div>
                         <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
+                            Segunda origem (opcional)
+                        </label>
+
+                        <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">
+                            Se o caminhão também baseia em outra cidade além da
+                            origem acima (ex: Pouso Alegre), chegar nela não
+                            fecha viagem nem conta como parada — só conta 1
+                            viagem quando chega no destino.
+                        </p>
+
+                        <input
+                            type="text"
+                            className="w-full border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0B1120] text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Ex: POUSO ALEGRE"
+                            value={regra.origemViagem2 || ''}
+                            onChange={(e) =>
+                                setRegra({
+                                    ...regra,
+                                    origemViagem2:
+                                        e.target.value.toUpperCase(),
+                                })
+                            }
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
                             Destino da Viagem
                         </label>
 
@@ -234,8 +264,15 @@ export function Caminhoes() {
 
                     <div>
                         <label className="block mb-1 font-medium text-gray-700 dark:text-gray-300">
-                            Cidade considerada parada
+                            Cidade considerada parada (pra desconto de diária)
                         </label>
+
+                        <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">
+                            Só o tempo parado nessa cidade conta como "dia
+                            parado" no pagamento. Tempo na segunda origem ou
+                            no destino conta como serviço, não como parada.
+                            Se deixar em branco, usa a origem principal.
+                        </p>
 
                         <input
                             type="text"

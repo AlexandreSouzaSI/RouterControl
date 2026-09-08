@@ -13,6 +13,7 @@ export class FinanceiroController {
     @Post('importar-extrato')
     @UseInterceptors(FileInterceptor('file'))
     importarExtrato(@UploadedFile() file: Express.Multer.File) {
+        console.log("aqui ", file)
         return this.financeiroService.importarExtrato(file);
     }
 

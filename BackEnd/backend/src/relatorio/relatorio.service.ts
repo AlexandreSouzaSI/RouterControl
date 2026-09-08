@@ -281,6 +281,7 @@ export class RelatorioService {
             if (!mesData.rankingMap.has(item.caminhao.placa)) {
                 mesData.rankingMap.set(item.caminhao.placa, {
                     placa: item.caminhao.placa,
+                    caminhaoId: item.caminhaoId,
                     totalViagens: 0,
                     diasParados: 0,
                     diasRodando: 0,

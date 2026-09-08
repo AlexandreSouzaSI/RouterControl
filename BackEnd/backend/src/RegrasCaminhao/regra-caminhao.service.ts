@@ -8,10 +8,17 @@ export class RegraCaminhaoService {
     async criar(data: {
         caminhaoId: string;
         origemViagem?: string;
+        origemViagem2?: string;
         destinoViagem?: string;
         cidadeParado?: string;
     }) {
-        const { caminhaoId, origemViagem, destinoViagem, cidadeParado } = data;
+        const {
+            caminhaoId,
+            origemViagem,
+            origemViagem2,
+            destinoViagem,
+            cidadeParado,
+        } = data;
 
         if (!caminhaoId) {
             throw new BadRequestException('caminhaoId é obrigatório');
@@ -32,12 +39,14 @@ export class RegraCaminhaoService {
             },
             update: {
                 origemViagem: origemViagem || null,
+                origemViagem2: origemViagem2 || null,
                 destinoViagem: destinoViagem || null,
                 cidadeParado: cidadeParado || null,
             },
             create: {
                 caminhaoId,
                 origemViagem: origemViagem || null,
+                origemViagem2: origemViagem2 || null,
                 destinoViagem: destinoViagem || null,
                 cidadeParado: cidadeParado || null,
             },

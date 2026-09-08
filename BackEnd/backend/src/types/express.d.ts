@@ -7,5 +7,13 @@ declare global {
                 buffer: Buffer;
             }
         }
+
+        interface Request {
+            user?: {
+                sub: string;
+                email: string;
+                empresaId: string;
+            };
+        }
     }
 }

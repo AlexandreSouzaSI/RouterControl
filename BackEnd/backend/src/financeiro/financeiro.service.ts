@@ -258,33 +258,85 @@ export class FinanceiroService {
         const primeiraAba = workbook.SheetNames[0];
         const sheet = workbook.Sheets[primeiraAba];
 
-        const linhas = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+        if (!sheet['!ref']) {
+            throw new Error('Planilha vazia ou inválida.');
+        }
+
+        const linhas = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+            header: 1,
             defval: null,
-            range: 10, // Cabeçalho começa na linha 11 do Excel
+            blankrows: false,
         });
+
+        console.log('TOTAL LINHAS SHEET_TO_JSON:', linhas.length);
+        console.log('LINHA 10:', linhas[9]);
+        console.log('LINHA 11:', linhas[10]);
+        console.log('LINHA 14:', linhas[13]);
+        console.log('ÚLTIMA LINHA:', linhas[linhas.length - 1]);
 
         const importacao = await this.prisma.importacaoExtrato.create({
             data: {
                 nomeArquivo: file.originalname,
-                totalLinhas: linhas.length,
+                totalLinhas: Math.max(linhas.length - 10, 0),
             },
         });
 
         let linhasImportadas = 0;
         let linhasIgnoradas = 0;
         let linhasClassificadas = 0;
+        let linhasComErro = 0;
 
-        for (const linha of linhas) {
-            const data = this.converterDataExcel(linha['Data']);
-            const lancamento = String(linha['Lançamento'] ?? '').trim();
-            const razaoSocial = String(linha['Razão Social'] ?? '').trim();
-            const documento = String(linha['CPF/CNPJ'] ?? '').trim();
+        // Excel:
+        // Linha 10 = cabeçalho
+        // Linha 11 = primeira transação
+        for (let index = 10; index < linhas.length; index++) {
+            const linha = linhas[index];
 
-            const valorOriginal = this.converterValor(
-                linha['Valor (R$)'] ?? linha['Valor'],
-            );
+            const excelRow = index + 1;
 
-            if (!data || !lancamento || valorOriginal === 0) {
+            const dataRaw = linha[0];
+            const lancamentoRaw = linha[1];
+            const razaoRaw = linha[2];
+            const documentoRaw = linha[3];
+            const valorRaw = linha[4];
+
+            console.log('LINHA LIDA:', {
+                excelRow,
+                dataRaw,
+                lancamentoRaw,
+                razaoRaw,
+                documentoRaw,
+                valorRaw,
+            });
+
+            const data = this.converterDataExcel(dataRaw);
+            const lancamento = String(lancamentoRaw ?? '').trim();
+            const razaoSocial = String(razaoRaw ?? '').trim();
+            const documento = String(documentoRaw ?? '').trim();
+            const valorOriginal = this.converterValor(valorRaw);
+
+            const deveIgnorar =
+                !data ||
+                !lancamento ||
+                valorOriginal === 0 ||
+                lancamento.toUpperCase().includes('SALDO TOTAL') ||
+                lancamento.toUpperCase().includes('SALDO ANTERIOR');
+
+            if (deveIgnorar) {
+                console.log('LINHA IGNORADA:', {
+                    excelRow,
+                    motivo: {
+                        semData: !data,
+                        semLancamento: !lancamento,
+                        valorZero: valorOriginal === 0,
+                        saldoTotal: lancamento.toUpperCase().includes('SALDO TOTAL'),
+                        saldoAnterior: lancamento.toUpperCase().includes('SALDO ANTERIOR'),
+                    },
+                    dataRaw,
+                    lancamento,
+                    valorOriginal,
+                });
+
                 linhasIgnoradas++;
                 continue;
             }
@@ -297,27 +349,49 @@ export class FinanceiroService {
 
             const foiClassificada = Boolean(regra.categoriaId || regra.caminhaoId);
 
-            await this.prisma.transacaoFinanceira.create({
-                data: {
+            try {
+                await this.prisma.transacaoFinanceira.create({
+                    data: {
+                        data,
+                        lancamento,
+                        razaoSocial: razaoSocial || null,
+                        documento: documento || null,
+                        valor: Math.abs(valorOriginal),
+                        direcao: this.definirDirecao(valorOriginal),
+                        importacaoId: importacao.id,
+                        categoriaId: regra.categoriaId,
+                        caminhaoId: regra.caminhaoId,
+                        status: foiClassificada
+                            ? StatusTransacaoFinanceira.CLASSIFICADA
+                            : StatusTransacaoFinanceira.PENDENTE_CLASSIFICACAO,
+                    },
+                });
+
+                linhasImportadas++;
+
+                if (foiClassificada) {
+                    linhasClassificadas++;
+                }
+
+                console.log('LINHA IMPORTADA:', {
+                    excelRow,
+                    lancamento,
+                    razaoSocial,
+                    valorOriginal,
+                });
+            } catch (error) {
+                linhasComErro++;
+
+                console.error('ERRO AO SALVAR LINHA:', {
+                    excelRow,
                     data,
                     lancamento,
-                    razaoSocial: razaoSocial || null,
-                    documento: documento || null,
-                    valor: Math.abs(valorOriginal),
-                    direcao: this.definirDirecao(valorOriginal),
-                    importacaoId: importacao.id,
-                    categoriaId: regra.categoriaId,
-                    caminhaoId: regra.caminhaoId,
-                    status: foiClassificada
-                        ? StatusTransacaoFinanceira.CLASSIFICADA
-                        : StatusTransacaoFinanceira.PENDENTE_CLASSIFICACAO,
-                },
-            });
-
-            linhasImportadas++;
-
-            if (foiClassificada) {
-                linhasClassificadas++;
+                    razaoSocial,
+                    documento,
+                    valorOriginal,
+                    regra,
+                    error,
+                });
             }
         }
 
@@ -327,15 +401,16 @@ export class FinanceiroService {
             },
             data: {
                 linhasImportadas,
-                linhasIgnoradas,
+                linhasIgnoradas: linhasIgnoradas + linhasComErro,
             },
         });
 
         return {
             message: 'Extrato importado com sucesso.',
-            totalLinhas: linhas.length,
+            totalLinhas: Math.max(linhas.length - 10, 0),
             linhasImportadas,
             linhasIgnoradas,
+            linhasComErro,
             linhasClassificadas,
             linhasPendentesClassificacao: linhasImportadas - linhasClassificadas,
         };

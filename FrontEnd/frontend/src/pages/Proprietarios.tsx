@@ -371,8 +371,8 @@ export function Proprietarios() {
     }
 
     return (
-        <div className="min-h-screen bg-gray-100 dark:bg-[#0B1120] text-gray-900 dark:text-gray-100 p-4">
-            <h1 className="text-2xl font-bold mb-4">
+        <div className="space-y-4">
+            <h1 className="text-2xl font-bold">
                 Visão dos Proprietários
             </h1>
 

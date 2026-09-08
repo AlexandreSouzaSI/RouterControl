@@ -48,15 +48,44 @@ services:
   postgres_rota:
     image: postgres:15
     container_name: postgres_rota
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: viagens_db
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_rota_data:/var/lib/postgresql/data
+
+  backend_rota:
+    build:
+      context: ./BackEnd/backend
+    container_name: backend_rota
+    restart: unless-stopped
+    depends_on:
+      - postgres_rota
+    ports:
+      - "127.0.0.1:4001:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres_rota:5432/viagens_db?schema=public
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
+      TRUCKS_URL: ${TRUCKS_URL:?defina TRUCKS_URL no .env}
+      TRUCKS_LOGIN: ${TRUCKS_LOGIN:?defina TRUCKS_LOGIN no .env}
+      TRUCKS_SENHA: ${TRUCKS_SENHA:?defina TRUCKS_SENHA no .env}
+
+  frontend_rota:
+    build:
+      context: ./FrontEnd/frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:?defina VITE_API_URL no .env}
+    container_name: frontend_rota
+    restart: unless-stopped
+    depends_on:
+      - backend_rota
+    ports:
+      - "127.0.0.1:3011:4173"
 
 volumes:
   postgres_rota_data:

@@ -123,7 +123,7 @@ export function Financeiro() {
     }, []);
 
     return (
-        <div className="space-y-6 p-6">
+        <div className="space-y-6">
             <div>
                 <h1 className="text-2xl font-bold">Financeiro por Caminhão</h1>
                 <p className="text-zinc-500">

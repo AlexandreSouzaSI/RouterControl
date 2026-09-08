@@ -51,6 +51,26 @@ export class CaminhaoService {
         });
     }
 
+    async removePeriodo(caminhaoId: string, mes: string) {
+        const periodo = await this.prisma.uploadPeriod.findFirst({
+            where: { caminhaoId, periodo: mes },
+        });
+
+        // Apaga o resumo do mês. TripRecord/StopRecord são apagados
+        // automaticamente junto com o UploadPeriod (cascade no schema).
+        await this.prisma.resumoOperacao.deleteMany({
+            where: { caminhaoId, mes },
+        });
+
+        if (periodo) {
+            await this.prisma.uploadPeriod.delete({
+                where: { id: periodo.id },
+            });
+        }
+
+        return { ok: true };
+    }
+
     async remove(id: string) {
         await this.prisma.tripRecord.deleteMany({
             where: { caminhaoId: id },

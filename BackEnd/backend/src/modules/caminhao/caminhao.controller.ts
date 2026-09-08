@@ -50,6 +50,14 @@ export class CaminhaoController {
         return this.service.update(id, body);
     }
 
+    @Delete(':id/periodos/:mes')
+    removePeriodo(
+        @Param('id') id: string,
+        @Param('mes') mes: string,
+    ) {
+        return this.service.removePeriodo(id, mes);
+    }
+
     @Delete(':id')
     remove(@Param('id') id: string) {
         return this.service.remove(id);

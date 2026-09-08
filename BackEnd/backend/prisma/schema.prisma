@@ -13,6 +13,7 @@ model TruckRule {
   caminhaoId String @unique
 
   origemViagem  String?
+  origemViagem2 String?
   destinoViagem String?
   cidadeParado  String?
 
@@ -180,6 +181,13 @@ model TruckStatus {
   estado String
   // 'parado' | 'em_viagem' | 'livre'
 
+  // Estado da máquina de viagens/paradas no fim do último upload
+  // processado, pra continuar corretamente no mês seguinte (ex: se o
+  // caminhão fechou o mês parado em Betim, o próximo upload precisa saber
+  // que a parada já estava aberta desde essa data, e não começar do zero).
+  localConfirmado   String? // 'BETIM' | 'POUSO_ALEGRE' | 'SANTOS' | null
+  paradaAbertaDesde DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -303,6 +311,98 @@ model TransacaoFinanceira {
   @@index([direcao])
   @@index([caminhaoId])
   @@index([categoriaId])
+}
+
+// Lista de veículos vinda da API de rastreamento (trucks-control) —
+// RequestVeiculo só pode ser chamado a cada 5 minutos, e antes disso a
+// gente guardava a lista só em memória, então todo restart do backend
+// zerava tudo e ficava "Nenhum caminhão encontrado" até passar os 5
+// minutos. Agora fica salva aqui, e o cache em memória é só otimização.
+model VeiculoTrucksControl {
+  id String @id @default(uuid())
+
+  veiId Int @unique
+
+  placa         String?
+  equipamento   Int?
+  motorista     String?
+  proprietario  Boolean?
+  identificacao String?
+  chassi        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Histórico de posições dos caminhões vindas da API de rastreamento
+// (trucks-control). A API externa só guarda mensagens por pouco tempo
+// (fila de mensagens não lidas, perdida em poucas horas), então isso
+// aqui é a fonte confiável pra consultar rotas passadas — o cron do
+// TrucksControlService vai salvando os pings novos aqui a cada poucos
+// minutos, além do que a tela ao vivo já busca.
+model PosicaoCaminhao {
+  id String @id @default(uuid())
+
+  // ID da mensagem na API externa — usado pra não salvar duplicado.
+  // BigInt porque a Trucks Control usa uma numeração global (parece
+  // compartilhada entre todos os clientes dela), que já passa de 185
+  // bilhões — muito maior que o limite de um Int de 32 bits (~2,1 bi).
+  mId BigInt @unique
+
+  veiId Int
+  placa String?
+
+  dataHora DateTime
+
+  latitude  Float
+  longitude Float
+
+  municipio String?
+  uf        String?
+  rua       String?
+  rodovia   String?
+
+  velocidade Float?
+  motorista  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([placa, dataHora])
+  @@index([veiId, dataHora])
+}
+
+enum StatusViagemGps {
+  EM_ANDAMENTO
+  CONCLUIDA
+}
+
+// Viagem detectada automaticamente pelo rastreamento GPS (trucks-control) —
+// diferente do model "Viagem" (contagem manual mensal ligada a pagamento) e
+// de TripRecord/StopRecord (vindos de upload de planilha). Essa aqui nasce
+// quando o caminhão sai da região do porto de Santos e é fechada quando ele
+// chega em Betim ou Pouso Alegre. Não alimenta nenhum cálculo de pagamento
+// — é só rastreamento operacional pro Dashboard.
+model ViagemGps {
+  id String @id @default(uuid())
+
+  veiId Int
+  placa String?
+
+  origemMunicipio String
+  origemUf        String?
+  dataHoraInicio  DateTime
+
+  destinoMunicipio String?
+  destinoUf        String?
+  dataHoraFim      DateTime?
+
+  status StatusViagemGps @default(EM_ANDAMENTO)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([veiId, status])
+  @@index([placa])
 }
 
 model RegraClassificacaoFinanceira {
