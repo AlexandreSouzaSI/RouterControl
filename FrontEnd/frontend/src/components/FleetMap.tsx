@@ -28,8 +28,12 @@ const CENTRO_PADRAO: [number, number] = [-18.9, -44.5];
 const BELO_HORIZONTE: [number, number] = [-19.9167, -43.9345];
 const SANTOS: [number, number] = [-23.9608, -46.3339];
 
-function criarIconeCaminhao(emMovimento: boolean) {
+// Mostra as 3 primeiras letras da placa dentro do marcador, em vez do
+// ícone genérico de caminhão — com vários caminhões no mesmo mapa isso
+// ajuda a identificar cada um sem precisar clicar pra abrir o popup.
+function criarIconeCaminhao(emMovimento: boolean, placa: string) {
     const cor = emMovimento ? '#22c55e' : '#6b7280';
+    const sigla = (placa || '').replace(/\s/g, '').slice(0, 3).toUpperCase() || '?';
 
     return L.divIcon({
         className: '',
@@ -39,13 +43,8 @@ function criarIconeCaminhao(emMovimento: boolean) {
                 ? `<div style="position:absolute;width:34px;height:34px;border-radius:9999px;background:${cor};opacity:0.3;animation:fleetPulse 1.6s ease-out infinite;"></div>`
                 : ''
             }
-        <div style="position:relative;width:26px;height:26px;border-radius:9999px;background:${cor};border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M10 17h4V5H2v12h3"/>
-            <path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L19 9h-5v8h1"/>
-            <circle cx="7.5" cy="17.5" r="2.5"/>
-            <circle cx="17.5" cy="17.5" r="2.5"/>
-          </svg>
+        <div style="position:relative;width:28px;height:28px;border-radius:9999px;background:${cor};border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;">
+          <span style="font-size:8.5px;font-weight:800;letter-spacing:0.01em;color:#fff;font-family:inherit;">${sigla}</span>
         </div>
       </div>
     `,
@@ -74,12 +73,19 @@ function AjustarLimites({ pontos }: { pontos: PontoFrota[] }) {
 }
 
 export function FleetMap({ pontos }: FleetMapProps) {
+    // Um ícone por caminhão (não só "em movimento"/"parado" compartilhado),
+    // já que cada um agora mostra a própria sigla da placa.
     const icones = useMemo(() => {
-        return {
-            movimento: criarIconeCaminhao(true),
-            parado: criarIconeCaminhao(false),
-        };
-    }, []);
+        const mapa = new Map<number, L.DivIcon>();
+
+        pontos.forEach((ponto) => {
+            const emMovimento = (ponto.velocidade ?? 0) > 3;
+            mapa.set(ponto.veiID, criarIconeCaminhao(emMovimento, ponto.placa));
+        });
+
+        return mapa;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pontos.map((p) => `${p.veiID}:${p.placa}:${(p.velocidade ?? 0) > 3}`).join('|')]);
 
     const centroInicial = pontos[0]
         ? ([pontos[0].latitude, pontos[0].longitude] as [number, number])
@@ -114,13 +120,14 @@ export function FleetMap({ pontos }: FleetMapProps) {
                 />
 
                 {pontos.map((ponto) => {
-                    const emMovimento = (ponto.velocidade ?? 0) > 3;
+                    const icone = icones.get(ponto.veiID);
+                    if (!icone) return null;
 
                     return (
                         <Marker
                             key={ponto.veiID}
                             position={[ponto.latitude, ponto.longitude]}
-                            icon={emMovimento ? icones.movimento : icones.parado}
+                            icon={icone}
                         >
                             <Popup>
                                 <strong>{ponto.placa}</strong>

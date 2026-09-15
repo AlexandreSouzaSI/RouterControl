@@ -22,8 +22,12 @@ type TruckMapProps = {
     path?: Ponto[];
 };
 
-function criarIconeCaminhao(emMovimento: boolean) {
+// Mostra as 3 primeiras letras da placa dentro do marcador, em vez do
+// ícone genérico de caminhão — fica mais fácil identificar de qual
+// caminhão se trata direto no mapa, sem precisar abrir o popup.
+function criarIconeCaminhao(emMovimento: boolean, placa: string) {
     const cor = emMovimento ? '#22c55e' : '#6b7280';
+    const sigla = (placa || '').replace(/\s/g, '').slice(0, 3).toUpperCase() || '?';
 
     return L.divIcon({
         className: '',
@@ -33,13 +37,8 @@ function criarIconeCaminhao(emMovimento: boolean) {
                 ? `<div style="position:absolute;width:38px;height:38px;border-radius:9999px;background:${cor};opacity:0.3;animation:truckPulse 1.6s ease-out infinite;"></div>`
                 : ''
             }
-        <div style="position:relative;width:30px;height:30px;border-radius:9999px;background:${cor};border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M10 17h4V5H2v12h3"/>
-            <path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L19 9h-5v8h1"/>
-            <circle cx="7.5" cy="17.5" r="2.5"/>
-            <circle cx="17.5" cy="17.5" r="2.5"/>
-          </svg>
+        <div style="position:relative;width:32px;height:32px;border-radius:9999px;background:${cor};border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;">
+          <span style="font-size:10px;font-weight:800;letter-spacing:0.02em;color:#fff;font-family:inherit;">${sigla}</span>
         </div>
       </div>
     `,
@@ -72,7 +71,10 @@ export function TruckMap({
     path,
 }: TruckMapProps) {
     const emMovimento = (velocidade ?? 0) > 3;
-    const icone = useMemo(() => criarIconeCaminhao(emMovimento), [emMovimento]);
+    const icone = useMemo(
+        () => criarIconeCaminhao(emMovimento, placa),
+        [emMovimento, placa],
+    );
 
     const posicoesRota = useMemo(() => {
         if (!path || path.length < 2) return null;

@@ -43,7 +43,7 @@ export function Topbar() {
             {/* AÇÕES */}
             <div className="flex items-center gap-3">
                 {/* SEARCH */}
-                <div className="hidden lg:flex items-center gap-2 bg-gray-100 dark:bg-gray-800/70 px-3 py-2 rounded-xl w-64 text-gray-500 dark:text-gray-400 focus-within:ring-2 focus-within:ring-blue-500/40 transition">
+                <div className="hidden lg:flex items-center gap-2 bg-gray-100 dark:bg-gray-800/70 px-3 py-2 rounded-xl w-64 text-gray-500 dark:text-gray-400 focus-within:ring-2 focus-within:ring-[#E30613]/40 transition">
                     <Search size={16} />
                     <input
                         placeholder="Buscar..."
@@ -64,7 +64,7 @@ export function Topbar() {
                 <div className="relative">
                     <button
                         onClick={() => setOpen(!open)}
-                        className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center rounded-xl cursor-pointer font-semibold text-sm shadow-sm"
+                        className="w-10 h-10 bg-gradient-to-br from-[#E30613] to-[#061A3A] text-white flex items-center justify-center rounded-xl cursor-pointer font-semibold text-sm shadow-sm"
                     >
                         {iniciais}
                     </button>

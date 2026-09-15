@@ -56,4 +56,22 @@ export class TrucksControlController {
             limit: limit ? Number(limit) : undefined,
         });
     }
+
+    // Resumo pro Dashboard: total de viagens concluídas + contagem por
+    // placa (ex: "QPM - 4 viagens concluídas"). `desde` (ISO) opcional
+    // filtra por dataHoraFim, ex: só as concluídas hoje ou no mês.
+    @Get('viagens/resumo-concluidas')
+    resumoViagensConcluidas(@Query('desde') desde?: string) {
+        return this.service.resumoViagensConcluidas({
+            desde: desde ? new Date(desde) : undefined,
+        });
+    }
+
+    // Dias parados (mês) calculados automaticamente a partir do
+    // rastreamento GPS — substitui a dependência do upload manual de
+    // planilha. `mes` no formato 'YYYY-MM' (padrão: mês atual).
+    @Get('dias-parados')
+    resumoDiasParados(@Query('mes') mes?: string) {
+        return this.service.resumoDiasParados({ mes });
+    }
 }

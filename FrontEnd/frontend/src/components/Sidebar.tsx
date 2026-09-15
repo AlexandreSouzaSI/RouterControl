@@ -76,7 +76,7 @@ function Navegacao({ onNavigate }: { onNavigate?: () => void }) {
                                     className={({ isActive }) =>
                                         `group relative flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl text-sm font-medium transition-all
                                         ${isActive
-                                            ? 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400'
+                                            ? 'bg-[#E30613]/10 text-[#E30613] dark:bg-[#E30613]/15 dark:text-red-400'
                                             : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800/70 hover:text-gray-900 dark:hover:text-white'
                                         }`
                                     }
@@ -84,14 +84,14 @@ function Navegacao({ onNavigate }: { onNavigate?: () => void }) {
                                     {({ isActive }) => (
                                         <>
                                             <span
-                                                className={`absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-full bg-blue-500 transition-opacity ${isActive ? 'opacity-100' : 'opacity-0'
+                                                className={`absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-full bg-[#E30613] transition-opacity ${isActive ? 'opacity-100' : 'opacity-0'
                                                     }`}
                                             />
                                             <Icon
                                                 size={18}
                                                 className={
                                                     isActive
-                                                        ? 'text-blue-500'
+                                                        ? 'text-[#E30613]'
                                                         : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300'
                                                 }
                                             />

@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
     Truck,
-    Gauge,
     Clock,
     TrendingUp,
     TrendingDown,
     RefreshCw,
     Navigation,
+    CheckCircle2,
 } from 'lucide-react';
 import {
     BarChart,
@@ -43,16 +43,10 @@ type CaminhaoLocalizacao = {
     localizacao: Localizacao | null;
 };
 
-type RelatorioDashboard = {
-    cards: {
-        diasParados: number;
-    };
-    topCaminhoes: {
-        placa: string;
-        viagens: number;
-        diasParados: number;
-        diasRodando: number;
-    }[];
+type ResumoDiasParadosGps = {
+    mes: string;
+    totalDiasParados: number;
+    porVeiculo: { placa: string; diasParados: number }[];
 };
 
 type ResumoFinanceiro = {
@@ -78,6 +72,11 @@ type ViagemGps = {
     destinoUf: string | null;
     dataHoraFim: string | null;
     status: 'EM_ANDAMENTO' | 'CONCLUIDA';
+};
+
+type ResumoViagensConcluidas = {
+    total: number;
+    porPlaca: { placa: string; quantidade: number }[];
 };
 
 function formatarDataISO(data: Date) {
@@ -152,10 +151,11 @@ export function Dashboard() {
     const dataFim = useMemo(() => formatarDataISO(new Date()), []);
 
     const [localizacoes, setLocalizacoes] = useState<CaminhaoLocalizacao[]>([]);
-    const [relatorio, setRelatorio] = useState<RelatorioDashboard | null>(null);
     const [resumoFinanceiro, setResumoFinanceiro] = useState<ResumoFinanceiro | null>(null);
     const [transacoes, setTransacoes] = useState<Transacao[]>([]);
     const [viagensAtivas, setViagensAtivas] = useState<ViagemGps[]>([]);
+    const [resumoConcluidas, setResumoConcluidas] = useState<ResumoViagensConcluidas | null>(null);
+    const [resumoDiasParados, setResumoDiasParados] = useState<ResumoDiasParadosGps | null>(null);
     const [loading, setLoading] = useState(true);
     const [atualizandoRastreio, setAtualizandoRastreio] = useState(false);
 
@@ -163,9 +163,17 @@ export function Dashboard() {
         try {
             setAtualizandoRastreio(true);
 
-            const [locRes, viagensRes] = await Promise.all([
+            const [locRes, viagensRes, concluidasRes, diasParadosRes] = await Promise.all([
                 api.get('/trucks-control/caminhoes-localizacao'),
                 api.get('/trucks-control/viagens', { params: { status: 'EM_ANDAMENTO' } }),
+                // Concluídas no mês corrente, mesmo recorte dos outros
+                // cards "no mês" (Dias Parados, Receita, Custo).
+                api.get('/trucks-control/viagens/resumo-concluidas', {
+                    params: { desde: `${primeiroDiaDoMes()}T00:00:00` },
+                }),
+                // Dias parados calculados direto do GPS (sem depender de
+                // upload manual) — mês atual por padrão.
+                api.get('/trucks-control/dias-parados'),
             ]);
 
             // O endpoint devolve { caminhoes: [...], origemMensagens }, não
@@ -174,6 +182,8 @@ export function Dashboard() {
 
             setLocalizacoes(Array.isArray(lista) ? lista : []);
             setViagensAtivas(Array.isArray(viagensRes.data) ? viagensRes.data : []);
+            setResumoConcluidas(concluidasRes.data ?? null);
+            setResumoDiasParados(diasParadosRes.data ?? null);
         } catch (error) {
             console.error(error);
         } finally {
@@ -185,13 +195,11 @@ export function Dashboard() {
         try {
             setLoading(true);
 
-            const [relatorioRes, resumoRes, transacoesRes] = await Promise.all([
-                api.get('/relatorio/dashboard', { params: { dataInicio, dataFim } }),
+            const [resumoRes, transacoesRes] = await Promise.all([
                 api.get('/financeiro/resumo', { params: { dataInicio, dataFim } }),
                 api.get('/financeiro/transacoes', { params: { dataInicio, dataFim } }),
             ]);
 
-            setRelatorio(relatorioRes.data);
             setResumoFinanceiro(resumoRes.data);
             setTransacoes(Array.isArray(transacoesRes.data) ? transacoesRes.data : []);
         } catch (error) {
@@ -238,23 +246,13 @@ export function Dashboard() {
     const caminhoesAtivos = pontosFrota.length;
     const totalCaminhoes = localizacoes.length;
 
-    const velocidadeMedia = useMemo(() => {
-        const comVelocidade = pontosFrota.filter((p) => p.velocidade !== null);
-
-        if (comVelocidade.length === 0) return 0;
-
-        const soma = comVelocidade.reduce((acc, p) => acc + (p.velocidade || 0), 0);
-
-        return Math.round(soma / comVelocidade.length);
-    }, [pontosFrota]);
-
-    const diasParadosPeriodo = relatorio?.cards.diasParados ?? 0;
+    const diasParadosPeriodo = resumoDiasParados?.totalDiasParados ?? 0;
 
     const dadosDiasParados = useMemo(() => {
-        return [...(relatorio?.topCaminhoes ?? [])]
+        return [...(resumoDiasParados?.porVeiculo ?? [])]
             .sort((a, b) => b.diasParados - a.diasParados)
             .slice(0, 6);
-    }, [relatorio]);
+    }, [resumoDiasParados]);
 
     const dadosResumoFinanceiro = useMemo(() => {
         const porDia = new Map<string, { data: string; receita: number; custos: number }>();
@@ -301,10 +299,10 @@ export function Dashboard() {
             cor: 'indigo',
         },
         {
-            titulo: 'Velocidade Média',
-            valor: `${velocidadeMedia} km/h`,
-            icone: Gauge,
-            cor: 'purple',
+            titulo: 'Viagens Concluídas (mês)',
+            valor: resumoConcluidas?.total ?? 0,
+            icone: CheckCircle2,
+            cor: 'teal',
         },
         {
             titulo: 'Dias Parados (mês)',
@@ -333,6 +331,7 @@ export function Dashboard() {
         green: 'bg-green-500/10 text-green-500',
         red: 'bg-red-500/10 text-red-500',
         indigo: 'bg-indigo-500/10 text-indigo-500',
+        teal: 'bg-teal-500/10 text-teal-500',
     };
 
     return (
@@ -452,6 +451,38 @@ export function Dashboard() {
                         </div>
                     )}
                 </div>
+            </div>
+
+            <div className="bg-white dark:bg-[#111827] rounded-2xl shadow border border-gray-200 dark:border-gray-800 p-4">
+                <h2 className="font-semibold text-gray-900 dark:text-white">
+                    Viagens Concluídas por Placa (mês)
+                </h2>
+
+                <p className="text-xs text-gray-400 mt-0.5 mb-3">
+                    Total de {resumoConcluidas?.total ?? 0} viagem(ns) concluída(s) desde o início do mês.
+                </p>
+
+                {!resumoConcluidas || resumoConcluidas.porPlaca.length === 0 ? (
+                    <div className="py-6 text-center text-sm text-gray-400 dark:text-gray-500">
+                        Nenhuma viagem concluída no mês ainda
+                    </div>
+                ) : (
+                    <div className="flex flex-wrap gap-2">
+                        {resumoConcluidas.porPlaca.map((item) => (
+                            <div
+                                key={item.placa}
+                                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-100 dark:border-gray-800/60 bg-gray-50 dark:bg-gray-900/40"
+                            >
+                                <span className="font-semibold text-gray-900 dark:text-white">
+                                    {item.placa}
+                                </span>
+                                <span className="text-sm text-gray-500 dark:text-gray-400">
+                                    — {item.quantidade} viagem(ns) concluída(s)
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

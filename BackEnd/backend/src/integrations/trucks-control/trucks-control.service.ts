@@ -701,6 +701,237 @@ export class TrucksControlService implements OnModuleInit {
         });
     }
 
+    /**
+     * Resumo de viagens concluídas pro Dashboard: total geral + contagem
+     * por placa (ex: "QPM - 4 viagens concluídas"). `desde` opcional filtra
+     * por dataHoraFim (ex: só as concluídas hoje/no mês).
+     */
+    async resumoViagensConcluidas(params?: { desde?: Date }) {
+        const where: any = { status: 'CONCLUIDA' };
+
+        if (params?.desde) {
+            where.dataHoraFim = { gte: params.desde };
+        }
+
+        const [total, porPlacaRaw] = await Promise.all([
+            this.prisma.viagemGps.count({ where }),
+            this.prisma.viagemGps.groupBy({
+                by: ['placa'],
+                where,
+                _count: { _all: true },
+            }),
+        ]);
+
+        // Ordena aqui em vez de no orderBy do groupBy — o Prisma só deixa
+        // ordenar por campos de agregado que estejam selecionados em
+        // _count, e aqui só selecionamos "_all" (contagem total da linha),
+        // não um campo específico como "placa".
+        const porPlaca = porPlacaRaw
+            .map((item) => ({
+                placa: item.placa || 'Sem placa',
+                quantidade: item._count._all,
+            }))
+            .sort((a, b) => b.quantidade - a.quantidade);
+
+        return { total, porPlaca };
+    }
+
+    // Igual a estaNaOrigemViagem/estaNoDestinoViagem, mas especificamente
+    // pra detectar "está em Betim" (cidade-base de pagamento) — usado só
+    // pelo cálculo de dias parados via GPS abaixo.
+    private estaEmBetim(municipio: string | null | undefined): boolean {
+        const normalizado = this.normalizarCidade(municipio);
+        return !!normalizado && normalizado.includes('BETIM');
+    }
+
+    // "Parado em Betim" = está na cidade E velocidade zero — mesma regra
+    // do upload manual (estaParadoEm em upload.service.ts, formato novo).
+    // Só isso abre uma estadia nova ou atualiza o "último instante parado"
+    // usado como hora de saída.
+    private estaParadoEmBetim(pos: {
+        municipio: string | null;
+        velocidade: number | null;
+    }): boolean {
+        return this.estaEmBetim(pos.municipio) && pos.velocidade === 0;
+    }
+
+    /**
+     * Varre o histórico de posições (ordenado por data) de UM caminhão e
+     * devolve os períodos em que ele ficou parado em Betim — mesma máquina
+     * de estados do upload manual (ver comentário grande em
+     * upload.service.ts/processarUpload): a estadia abre no primeiro
+     * instante visto parado (vel=0) em Betim, e só fecha quando aparece
+     * uma posição em outra cidade (não importa a velocidade) — usando como
+     * "fim" o último instante em que ele foi visto realmente parado ali,
+     * não o instante da saída em si (pra não contar o início da próxima
+     * viagem como se fosse parada). Uma estadia que segue aberta no fim do
+     * histórico consultado (caminhão ainda em Betim) volta com fim=null.
+     */
+    private detectarEstadiasBetim(
+        posicoes: { dataHora: Date; municipio: string | null; velocidade: number | null }[],
+    ): { inicio: Date; fim: Date | null }[] {
+        const segmentos: { inicio: Date; fim: Date | null }[] = [];
+
+        let estadiaAberta: { inicio: Date } | null = null;
+        let ultimaVezParado: Date | null = null;
+
+        for (const pos of posicoes) {
+            if (!estadiaAberta) {
+                if (this.estaParadoEmBetim(pos)) {
+                    estadiaAberta = { inicio: pos.dataHora };
+                    ultimaVezParado = pos.dataHora;
+                }
+                continue;
+            }
+
+            if (this.estaEmBetim(pos.municipio)) {
+                if (this.estaParadoEmBetim(pos)) {
+                    ultimaVezParado = pos.dataHora;
+                }
+            } else {
+                segmentos.push({
+                    inicio: estadiaAberta.inicio,
+                    fim: ultimaVezParado ?? estadiaAberta.inicio,
+                });
+                estadiaAberta = null;
+                ultimaVezParado = null;
+            }
+        }
+
+        if (estadiaAberta) {
+            segmentos.push({ inicio: estadiaAberta.inicio, fim: null });
+        }
+
+        return segmentos;
+    }
+
+    // Mesma regra de calcularDiasParados do upload.service.ts: só contam
+    // os dias INTEIROS estritamente entre a chegada e a saída — o dia da
+    // chegada e o dia da saída nunca contam. Chegou dia 10 e saiu dia 12 =
+    // 1 (dia 11).
+    private calcularDiasParados(inicio: Date, fim: Date): number {
+        const inicioDia = new Date(inicio);
+        inicioDia.setHours(0, 0, 0, 0);
+
+        const fimDia = new Date(fim);
+        fimDia.setHours(0, 0, 0, 0);
+
+        const diferencaDias = Math.floor(
+            (fimDia.getTime() - inicioDia.getTime()) / (1000 * 60 * 60 * 24),
+        );
+
+        return Math.max(diferencaDias - 1, 0);
+    }
+
+    // Mesma regra de calcularDiasParadosContinuados do upload.service.ts:
+    // pra estadias que já estavam abertas quando o mês pedido começou —
+    // não existe "dia de chegada" dentro do mês pra descontar, então o
+    // dia 1 já conta inteiro; só o dia da saída fica de fora.
+    private calcularDiasParadosContinuados(fim: Date, inicioMes: Date): number {
+        const inicioMesDia = new Date(inicioMes);
+        inicioMesDia.setHours(0, 0, 0, 0);
+
+        const fimDia = new Date(fim);
+        fimDia.setHours(0, 0, 0, 0);
+
+        const diferencaDias = Math.floor(
+            (fimDia.getTime() - inicioMesDia.getTime()) / (1000 * 60 * 60 * 24),
+        );
+
+        return Math.max(diferencaDias, 0);
+    }
+
+    /**
+     * Dias parados (mês) calculados automaticamente a partir do
+     * rastreamento GPS ao vivo, em vez de depender do upload manual de
+     * planilha — mesma regra de negócio de sempre (ver
+     * calcularDiasParados acima): só contam os dias INTEIROS estritamente
+     * entre a chegada e a saída de Betim; o dia da chegada e o dia da
+     * saída nunca contam. Ex.: chegou em Betim dia 10 e só saiu dia 12 =
+     * 1 dia parado (dia 11).
+     *
+     * `mes` no formato 'YYYY-MM' (padrão: mês atual). Estadias que já
+     * estavam abertas quando o mês começou (o caminhão já estava parado
+     * em Betim) contam a partir do dia 1 do mês, sem descontar dia de
+     * chegada — igual à regra "continuada" do fluxo antigo. Estadias
+     * ainda em aberto (caminhão parado em Betim até agora) só contam os
+     * dias já fechados, até hoje ou até o fim do mês pedido (o que vier
+     * primeiro) — por isso o total sobe sozinho dia a dia, sem precisar
+     * de upload nenhum.
+     */
+    async resumoDiasParados(params?: { mes?: string }) {
+        const agora = new Date();
+        const mes =
+            params?.mes ??
+            `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+
+        const [ano, mesNum] = mes.split('-').map(Number);
+        const inicioMes = new Date(ano, mesNum - 1, 1, 0, 0, 0, 0);
+        const fimMes = new Date(ano, mesNum, 1, 0, 0, 0, 0);
+
+        // Busca um pouco antes do início do mês, só o suficiente pra
+        // detectar estadias já abertas quando o mês começou — sem
+        // carregar o histórico inteiro do caminhão a cada consulta.
+        const inicioBusca = new Date(inicioMes);
+        inicioBusca.setDate(inicioBusca.getDate() - 45);
+
+        const limiteAberto = fimMes < agora ? fimMes : agora;
+
+        const veiculosResult = await this.listarVeiculosComCache(false);
+        const veiculos = veiculosResult.veiculos;
+
+        const porVeiculo: { placa: string; diasParados: number }[] = [];
+        let totalGeral = 0;
+
+        for (const veiculo of veiculos) {
+            const veiId = Number(veiculo.veiID);
+            if (!veiId) continue;
+
+            const posicoes = await this.prisma.posicaoCaminhao.findMany({
+                where: {
+                    veiId,
+                    dataHora: { gte: inicioBusca, lt: fimMes },
+                },
+                orderBy: { dataHora: 'asc' },
+                select: { dataHora: true, municipio: true, velocidade: true },
+            });
+
+            if (posicoes.length === 0) continue;
+
+            const segmentos = this.detectarEstadiasBetim(posicoes);
+
+            let diasParadosVeiculo = 0;
+
+            for (const seg of segmentos) {
+                const fimEfetivo = seg.fim ?? limiteAberto;
+
+                // Estadia que nem chegou a tocar o mês pedido (fechou
+                // antes do dia 1) não entra na conta.
+                if (fimEfetivo <= inicioMes) continue;
+
+                const continuada = seg.inicio < inicioMes;
+
+                const dias = continuada
+                    ? this.calcularDiasParadosContinuados(fimEfetivo, inicioMes)
+                    : this.calcularDiasParados(seg.inicio, fimEfetivo);
+
+                diasParadosVeiculo += dias;
+            }
+
+            if (diasParadosVeiculo > 0) {
+                porVeiculo.push({
+                    placa: veiculo.placa ?? 'Sem placa',
+                    diasParados: diasParadosVeiculo,
+                });
+                totalGeral += diasParadosVeiculo;
+            }
+        }
+
+        porVeiculo.sort((a, b) => b.diasParados - a.diasParados);
+
+        return { mes, totalDiasParados: totalGeral, porVeiculo };
+    }
+
     private async postXml(xml: string) {
         try {
             const response = await axios.post(this.url, xml.trim(), {
