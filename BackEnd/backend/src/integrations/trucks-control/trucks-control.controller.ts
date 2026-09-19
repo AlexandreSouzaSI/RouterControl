@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { TrucksControlService } from './trucks-control.service';
 
 @Controller('trucks-control')
@@ -54,6 +54,40 @@ export class TrucksControlController {
             status,
             placa,
             limit: limit ? Number(limit) : undefined,
+        });
+    }
+
+    // Consumo médio (km/L) e autonomia estimada de um caminhão, calculado
+    // a partir do histórico real de litros no tanque + odômetro.
+    @Get('consumo')
+    calcularConsumo(
+        @Query('veiId') veiId: string,
+        @Query('dataInicio') dataInicio?: string,
+        @Query('dataFim') dataFim?: string,
+    ) {
+        return this.service.calcularConsumo({
+            veiId: Number(veiId),
+            dataInicio,
+            dataFim,
+        });
+    }
+
+    // Criação manual de viagem — botão "Nova Viagem" (alguém do
+    // administrativo escolhe o caminhão e digita origem/destino). A
+    // conclusão continua automática pelo GPS.
+    @Post('viagens/manual')
+    criarViagemManual(
+        @Body()
+        body: {
+            veiId: number;
+            origemMunicipio: string;
+            destinoMunicipio: string;
+        },
+    ) {
+        return this.service.criarViagemManual({
+            veiId: Number(body.veiId),
+            origemMunicipio: body.origemMunicipio,
+            destinoMunicipio: body.destinoMunicipio,
         });
     }
 

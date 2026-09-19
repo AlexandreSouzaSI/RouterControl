@@ -237,6 +237,12 @@ export class TrucksControlService implements OnModuleInit {
             velocidade: this.parseNumber(m.vel),
             motorista: m.mot ?? null,
             placaCarreta: m.carreta ?? null,
+            // Campos opcionais — só vêm preenchidos se o equipamento do
+            // veículo tiver o sensor correspondente (ex.: nem todo
+            // rastreador manda nível de combustível).
+            litrosTanque: this.parseNumber(m.lt),
+            odometro: this.parseNumber(m.odm),
+            rpm: this.parseNumber(m.rpm),
         }));
     }
 
@@ -366,6 +372,9 @@ export class TrucksControlService implements OnModuleInit {
                         rua: ultima.rua,
                         rodovia: ultima.rodovia,
                         velocidade: ultima.velocidade,
+                        litrosTanque: ultima.litrosTanque,
+                        odometro: ultima.odometro,
+                        rpm: ultima.rpm,
                     }
                     : null,
             };
@@ -424,6 +433,30 @@ export class TrucksControlService implements OnModuleInit {
                 `[TrucksControl] mensagensRelevantes=${mensagensRelevantes.length}`,
             );
 
+            // Log só pra conferência manual — mostra quantas mensagens
+            // desse lote vieram com combustível/odômetro/rpm preenchidos, e
+            // de quais placas. Ajuda a confirmar se a Trucks Control está
+            // mandando esses campos sem precisar chamar a API de novo (o
+            // que roubaria mensagens da fila real).
+            const comCombustivel = mensagensRelevantes.filter(
+                (m) => m.litrosTanque !== null,
+            );
+            const comOdometro = mensagensRelevantes.filter(
+                (m) => m.odometro !== null,
+            );
+            const comRpm = mensagensRelevantes.filter((m) => m.rpm !== null);
+
+            console.log(
+                `[TrucksControl] combustivel=${comCombustivel.length}/${mensagensRelevantes.length} ` +
+                `odometro=${comOdometro.length}/${mensagensRelevantes.length} ` +
+                `rpm=${comRpm.length}/${mensagensRelevantes.length}` +
+                (comCombustivel.length > 0
+                    ? ` | placas com combustível: ${comCombustivel
+                        .map((m) => veiculosPorId.get(Number(m.veiID))?.placa ?? m.veiID)
+                        .join(', ')}`
+                    : ''),
+            );
+
             for (const msg of mensagensRelevantes) {
                 const veiculo = veiculosPorId.get(Number(msg.veiID));
                 const dataHora = new Date(msg.dataHora);
@@ -446,6 +479,9 @@ export class TrucksControlService implements OnModuleInit {
                         rodovia: msg.rodovia,
                         velocidade: msg.velocidade,
                         motorista: msg.motorista,
+                        litrosTanque: msg.litrosTanque,
+                        odometro: msg.odometro,
+                        rpm: msg.rpm !== null ? Math.round(msg.rpm) : null,
                     },
                 });
             }
@@ -516,6 +552,125 @@ export class TrucksControlService implements OnModuleInit {
         return {
             total: posicoes.length,
             posicoes: posicoes.map((p) => ({ ...p, mId: Number(p.mId) })),
+        };
+    }
+
+    /**
+     * Consumo médio e autonomia de um caminhão, calculado a partir do
+     * histórico real de litrosTanque + odometro salvos (não é estimativa
+     * de tabela do fabricante).
+     *
+     * Lógica, comparando cada ping com o anterior (só entre pings que
+     * tenham os dois campos preenchidos):
+     *   - odômetro subiu E nível do tanque caiu -> isso é consumo: soma a
+     *     distância e os litros gastos nesse trecho.
+     *   - nível do tanque subiu -> isso é abastecimento, não consumo;
+     *     entra numa lista separada, não conta no cálculo de km/L.
+     *   - odômetro não mudou (ou caiu, sinal de leitura ruim) -> ignora
+     *     esse trecho pro cálculo de km/L (não dá pra dividir por zero).
+     *
+     * Só é confiável se o equipamento do veículo realmente mandar o campo
+     * de combustível — por isso devolve `dadosSuficientes` pra tela avisar
+     * quando não tem base pra calcular ainda.
+     */
+    async calcularConsumo(params: {
+        veiId: number;
+        dataInicio?: string;
+        dataFim?: string;
+    }) {
+        const where: any = { veiId: params.veiId };
+
+        if (params.dataInicio || params.dataFim) {
+            where.dataHora = {};
+
+            if (params.dataInicio) {
+                where.dataHora.gte = new Date(`${params.dataInicio}T00:00:00`);
+            }
+
+            if (params.dataFim) {
+                where.dataHora.lte = new Date(`${params.dataFim}T23:59:59`);
+            }
+        }
+
+        const posicoes = await this.prisma.posicaoCaminhao.findMany({
+            where,
+            orderBy: { dataHora: 'asc' },
+            select: {
+                dataHora: true,
+                litrosTanque: true,
+                odometro: true,
+                placa: true,
+            },
+        });
+
+        const comDados = posicoes.filter(
+            (p) => p.litrosTanque !== null && p.odometro !== null,
+        ) as { dataHora: Date; litrosTanque: number; odometro: number; placa: string | null }[];
+
+        let totalKm = 0;
+        let totalLitrosConsumidos = 0;
+        let amostras = 0;
+
+        const abastecimentos: { dataHora: Date; litros: number; odometro: number }[] = [];
+
+        for (let i = 1; i < comDados.length; i++) {
+            const anterior = comDados[i - 1];
+            const atual = comDados[i];
+
+            const deltaOdometro = atual.odometro - anterior.odometro;
+            const deltaLitros = anterior.litrosTanque - atual.litrosTanque;
+
+            if (deltaLitros < -0.5) {
+                // Nível subiu de verdade (não é só ruído de sensor) ->
+                // abastecimento.
+                abastecimentos.push({
+                    dataHora: atual.dataHora,
+                    litros: Math.round(Math.abs(deltaLitros) * 10) / 10,
+                    odometro: atual.odometro,
+                });
+                continue;
+            }
+
+            if (deltaOdometro > 0 && deltaLitros > 0) {
+                totalKm += deltaOdometro;
+                totalLitrosConsumidos += deltaLitros;
+                amostras++;
+            }
+        }
+
+        const ultimaLeitura = comDados[comDados.length - 1] ?? null;
+
+        const consumoMedioKmPorLitro =
+            totalLitrosConsumidos > 0 ? totalKm / totalLitrosConsumidos : null;
+
+        const consumoMedioLPor100km =
+            totalKm > 0 ? (totalLitrosConsumidos / totalKm) * 100 : null;
+
+        const autonomiaEstimadaKm =
+            consumoMedioKmPorLitro !== null && ultimaLeitura
+                ? Math.round(consumoMedioKmPorLitro * ultimaLeitura.litrosTanque)
+                : null;
+
+        return {
+            veiId: params.veiId,
+            placa: ultimaLeitura?.placa ?? null,
+            periodo: { dataInicio: params.dataInicio ?? null, dataFim: params.dataFim ?? null },
+            dadosSuficientes: amostras >= 2,
+            amostras,
+            totalKm: Math.round(totalKm),
+            totalLitrosConsumidos: Math.round(totalLitrosConsumidos * 10) / 10,
+            consumoMedioKmPorLitro:
+                consumoMedioKmPorLitro !== null
+                    ? Math.round(consumoMedioKmPorLitro * 100) / 100
+                    : null,
+            consumoMedioLPor100km:
+                consumoMedioLPor100km !== null
+                    ? Math.round(consumoMedioLPor100km * 100) / 100
+                    : null,
+            autonomiaEstimadaKm,
+            ultimoLitrosTanque: ultimaLeitura?.litrosTanque ?? null,
+            ultimoOdometro: ultimaLeitura?.odometro ?? null,
+            abastecimentos: abastecimentos.reverse(),
         };
     }
 
@@ -649,13 +804,23 @@ export class TrucksControlService implements OnModuleInit {
                         );
                     }
 
-                    // Chegou em Betim/Pouso Alegre com viagem aberta -> fecha.
-                    if (viagemAberta && this.estaNoDestinoViagem(municipioAtual)) {
+                    // Chegou no destino com viagem aberta -> fecha. Viagem
+                    // automática: destino é a lista fixa (Betim/Pouso
+                    // Alegre). Viagem manual: destino é o município que a
+                    // pessoa digitou na criação (já salvo em
+                    // destinoMunicipio desde o início, não só na chegada).
+                    const chegouNoDestino = viagemAberta?.criadaManualmente
+                        ? this.normalizarCidade(municipioAtual) ===
+                        this.normalizarCidade(viagemAberta.destinoMunicipio)
+                        : this.estaNoDestinoViagem(municipioAtual);
+
+                    if (viagemAberta && chegouNoDestino) {
                         await this.prisma.viagemGps.update({
                             where: { id: viagemAberta.id },
                             data: {
-                                destinoMunicipio: municipioAtual,
-                                destinoUf: msg.uf ?? null,
+                                ...(viagemAberta.criadaManualmente
+                                    ? {}
+                                    : { destinoMunicipio: municipioAtual, destinoUf: msg.uf ?? null }),
                                 dataHoraFim: dataHoraAtual,
                                 status: 'CONCLUIDA',
                             },
@@ -682,7 +847,10 @@ export class TrucksControlService implements OnModuleInit {
     /**
      * Lista de viagens detectadas por GPS — pra tela de Viagens/Dashboard.
      * status opcional filtra EM_ANDAMENTO ou CONCLUIDA; sem filtro, traz as
-     * mais recentes de qualquer status.
+     * mais recentes de qualquer status. Viagens manuais em andamento vêm
+     * com "progresso" calculado (0-100) quando origem/destino foram
+     * geocodificados com sucesso na criação — as demais vêm com
+     * progresso: null (a tela mostra só um status sem barra nesse caso).
      */
     async listarViagensGps(params?: {
         status?: 'EM_ANDAMENTO' | 'CONCLUIDA';
@@ -694,11 +862,204 @@ export class TrucksControlService implements OnModuleInit {
         if (params?.status) where.status = params.status;
         if (params?.placa) where.placa = params.placa.toUpperCase();
 
-        return this.prisma.viagemGps.findMany({
+        const viagens = await this.prisma.viagemGps.findMany({
             where,
             orderBy: { dataHoraInicio: 'desc' },
             take: params?.limit ?? 100,
         });
+
+        return Promise.all(
+            viagens.map(async (v) => {
+                if (
+                    !v.criadaManualmente ||
+                    v.status !== 'EM_ANDAMENTO' ||
+                    v.origemLatitude == null ||
+                    v.origemLongitude == null ||
+                    v.destinoLatitude == null ||
+                    v.destinoLongitude == null
+                ) {
+                    return { ...v, progresso: null, distanciaRestanteKm: null };
+                }
+
+                const ultima = await this.prisma.posicaoCaminhao.findFirst({
+                    where: { veiId: v.veiId },
+                    orderBy: { dataHora: 'desc' },
+                });
+
+                if (!ultima) {
+                    return { ...v, progresso: null, distanciaRestanteKm: null };
+                }
+
+                const distanciaTotal = this.distanciaKm(
+                    v.origemLatitude,
+                    v.origemLongitude,
+                    v.destinoLatitude,
+                    v.destinoLongitude,
+                );
+
+                const distanciaRestante = this.distanciaKm(
+                    ultima.latitude,
+                    ultima.longitude,
+                    v.destinoLatitude,
+                    v.destinoLongitude,
+                );
+
+                const progresso =
+                    distanciaTotal > 0
+                        ? Math.min(
+                            100,
+                            Math.max(
+                                0,
+                                Math.round(
+                                    (1 - distanciaRestante / distanciaTotal) * 100,
+                                ),
+                            ),
+                        )
+                        : 100;
+
+                return {
+                    ...v,
+                    progresso,
+                    distanciaRestanteKm: Math.round(distanciaRestante),
+                };
+            }),
+        );
+    }
+
+    /**
+     * Cria uma viagem manualmente (botão "Nova Viagem" — alguém do
+     * administrativo escolhe o caminhão e digita origem/destino), em vez
+     * de esperar o GPS detectar sozinho a saída de Santos. A conclusão
+     * continua automática: o cron de posições (persistirPosicoes ->
+     * processarEventosViagem) fecha essa viagem sozinho assim que o
+     * caminhão for visto no município de destino.
+     */
+    async criarViagemManual(params: {
+        veiId: number;
+        origemMunicipio: string;
+        destinoMunicipio: string;
+    }) {
+        const origemMunicipio = params.origemMunicipio.trim();
+        const destinoMunicipio = params.destinoMunicipio.trim();
+
+        if (!params.veiId || !origemMunicipio || !destinoMunicipio) {
+            throw new InternalServerErrorException(
+                'Informe caminhão, origem e destino.',
+            );
+        }
+
+        const veiculosResult = await this.listarVeiculosComCache(false);
+        const veiculo = veiculosResult.veiculos.find(
+            (v) => Number(v.veiID) === Number(params.veiId),
+        );
+
+        if (!veiculo) {
+            throw new InternalServerErrorException('Caminhão não encontrado.');
+        }
+
+        const viagemAberta = await this.prisma.viagemGps.findFirst({
+            where: { veiId: params.veiId, status: 'EM_ANDAMENTO' },
+        });
+
+        if (viagemAberta) {
+            throw new InternalServerErrorException(
+                'Esse caminhão já tem uma viagem em andamento.',
+            );
+        }
+
+        // Geocodificação é best-effort — se falhar (sem internet, cidade não
+        // encontrada etc.), a viagem é criada do mesmo jeito, só sem barra
+        // de progresso (a conclusão automática por nome de município
+        // continua funcionando normalmente).
+        const [coordOrigem, coordDestino] = await Promise.all([
+            this.geocodificarCidade(origemMunicipio),
+            this.geocodificarCidade(destinoMunicipio),
+        ]);
+
+        return this.prisma.viagemGps.create({
+            data: {
+                veiId: params.veiId,
+                placa: veiculo.placa,
+                origemMunicipio,
+                origemUf: null,
+                dataHoraInicio: new Date(),
+                destinoMunicipio,
+                destinoUf: null,
+                status: 'EM_ANDAMENTO',
+                criadaManualmente: true,
+                origemLatitude: coordOrigem?.lat ?? null,
+                origemLongitude: coordOrigem?.lon ?? null,
+                destinoLatitude: coordDestino?.lat ?? null,
+                destinoLongitude: coordDestino?.lon ?? null,
+            },
+        });
+    }
+
+    // Nominatim (OpenStreetMap) — gratuito, sem chave de API. Exige um
+    // User-Agent identificando a aplicação (política de uso deles) e não
+    // deve ser chamado em loop apertado, mas aqui é só 2 chamadas por
+    // criação manual de viagem, então tá bem dentro do limite.
+    private async geocodificarCidade(
+        nomeCidade: string,
+    ): Promise<{ lat: number; lon: number } | null> {
+        try {
+            const resposta = await axios.get(
+                'https://nominatim.openstreetmap.org/search',
+                {
+                    params: {
+                        q: `${nomeCidade}, Brasil`,
+                        format: 'json',
+                        limit: 1,
+                        countrycodes: 'br',
+                    },
+                    headers: {
+                        'User-Agent': 'NuGalhoControleRota/1.0 (rota.nugalho)',
+                    },
+                    timeout: 8000,
+                },
+            );
+
+            const resultado = Array.isArray(resposta.data) ? resposta.data[0] : null;
+
+            if (!resultado) return null;
+
+            const lat = this.parseNumber(resultado.lat);
+            const lon = this.parseNumber(resultado.lon);
+
+            if (lat === null || lon === null) return null;
+
+            return { lat, lon };
+        } catch (error: any) {
+            console.warn(
+                `Erro ao geocodificar "${nomeCidade}":`,
+                error.message ?? error,
+            );
+            return null;
+        }
+    }
+
+    // Distância em linha reta (haversine) entre dois pontos, em km — só
+    // pra estimar o progresso da viagem manual, não é a distância real da
+    // estrada.
+    private distanciaKm(
+        lat1: number,
+        lon1: number,
+        lat2: number,
+        lon2: number,
+    ): number {
+        const R = 6371;
+        const toRad = (graus: number) => (graus * Math.PI) / 180;
+
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+
+        const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        return R * c;
     }
 
     /**

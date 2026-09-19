@@ -8,6 +8,8 @@ import {
     RefreshCw,
     Navigation,
     CheckCircle2,
+    Plus,
+    X,
 } from 'lucide-react';
 import {
     BarChart,
@@ -72,6 +74,16 @@ type ViagemGps = {
     destinoUf: string | null;
     dataHoraFim: string | null;
     status: 'EM_ANDAMENTO' | 'CONCLUIDA';
+    criadaManualmente?: boolean;
+    // Só vem preenchido pra viagem manual em andamento cuja origem/destino
+    // foram geocodificados com sucesso — o resto vem null.
+    progresso?: number | null;
+    distanciaRestanteKm?: number | null;
+};
+
+type VeiculoOpcao = {
+    veiID: number;
+    placa: string | null;
 };
 
 type ResumoViagensConcluidas = {
@@ -158,6 +170,69 @@ export function Dashboard() {
     const [resumoDiasParados, setResumoDiasParados] = useState<ResumoDiasParadosGps | null>(null);
     const [loading, setLoading] = useState(true);
     const [atualizandoRastreio, setAtualizandoRastreio] = useState(false);
+
+    const [veiculosOpcoes, setVeiculosOpcoes] = useState<VeiculoOpcao[]>([]);
+    const [modalNovaViagemAberto, setModalNovaViagemAberto] = useState(false);
+    const [veiIdSelecionado, setVeiIdSelecionado] = useState<number | null>(null);
+    const [origemNova, setOrigemNova] = useState('');
+    const [destinoNova, setDestinoNova] = useState('');
+    const [salvandoViagem, setSalvandoViagem] = useState(false);
+    const [erroNovaViagem, setErroNovaViagem] = useState<string | null>(null);
+
+    function fecharModalNovaViagem() {
+        setModalNovaViagemAberto(false);
+    }
+
+    // Clique fora só fecha se o formulário ainda estiver vazio — se a
+    // pessoa já escolheu caminhão ou digitou algo, evita perder o que foi
+    // preenchido por engano.
+    function aoClicarNoFundo() {
+        if (!veiIdSelecionado && !origemNova.trim() && !destinoNova.trim()) {
+            fecharModalNovaViagem();
+        }
+    }
+
+    async function abrirModalNovaViagem() {
+        setErroNovaViagem(null);
+        setVeiIdSelecionado(null);
+        setOrigemNova('');
+        setDestinoNova('');
+        setModalNovaViagemAberto(true);
+
+        try {
+            const res = await api.get('/trucks-control/veiculos');
+            setVeiculosOpcoes(res.data?.veiculos ?? []);
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    async function salvarNovaViagem() {
+        if (!veiIdSelecionado || !origemNova.trim() || !destinoNova.trim()) {
+            setErroNovaViagem('Escolha o caminhão e preencha origem e destino.');
+            return;
+        }
+
+        try {
+            setSalvandoViagem(true);
+            setErroNovaViagem(null);
+
+            await api.post('/trucks-control/viagens/manual', {
+                veiId: veiIdSelecionado,
+                origemMunicipio: origemNova.trim(),
+                destinoMunicipio: destinoNova.trim(),
+            });
+
+            setModalNovaViagemAberto(false);
+            await carregarRastreio();
+        } catch (error: any) {
+            setErroNovaViagem(
+                error?.response?.data?.message ?? 'Erro ao criar a viagem.',
+            );
+        } finally {
+            setSalvandoViagem(false);
+        }
+    }
 
     async function carregarRastreio() {
         try {
@@ -348,6 +423,14 @@ export function Dashboard() {
 
                 <div className="flex flex-wrap items-end gap-3">
                     <button
+                        onClick={abrirModalNovaViagem}
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#E30613] text-white text-sm font-medium hover:bg-red-700 transition"
+                    >
+                        <Plus size={16} />
+                        Nova Viagem
+                    </button>
+
+                    <button
                         onClick={carregarRastreio}
                         title="Atualizar rastreamento"
                         className="p-2.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
@@ -413,7 +496,7 @@ export function Dashboard() {
                         </h2>
 
                         <p className="text-xs text-gray-400 mt-0.5">
-                            Saída de Santos → chegada em Betim ou Pouso Alegre
+                            Detectadas por GPS (Santos → Betim/Pouso Alegre) ou criadas manualmente
                         </p>
                     </div>
 
@@ -441,11 +524,40 @@ export function Dashboard() {
                                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                         {v.origemMunicipio}
                                         {v.origemUf ? ` - ${v.origemUf}` : ''}
+                                        {v.criadaManualmente && v.destinoMunicipio
+                                            ? ` → ${v.destinoMunicipio}`
+                                            : ''}
                                     </p>
 
                                     <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
                                         Saiu em {new Date(v.dataHoraInicio).toLocaleString('pt-BR')}
                                     </p>
+
+                                    {v.criadaManualmente && (
+                                        <div className="mt-2">
+                                            {v.progresso != null ? (
+                                                <>
+                                                    <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
+                                                        <div
+                                                            className="h-full rounded-full bg-[#E30613] transition-all"
+                                                            style={{ width: `${v.progresso}%` }}
+                                                        />
+                                                    </div>
+
+                                                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+                                                        {v.progresso}% do caminho
+                                                        {v.distanciaRestanteKm != null
+                                                            ? ` · faltam ~${v.distanciaRestanteKm} km`
+                                                            : ''}
+                                                    </p>
+                                                </>
+                                            ) : (
+                                                <span className="inline-block px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-800 text-[11px] text-gray-500 dark:text-gray-400">
+                                                    Viagem manual — em rota
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -633,6 +745,111 @@ export function Dashboard() {
                     )}
                 </div>
             </div>
+
+            {modalNovaViagemAberto && (
+                <div
+                    className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+                    onClick={aoClicarNoFundo}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full max-w-md bg-white dark:bg-[#111827] rounded-2xl shadow-xl border border-gray-200 dark:border-gray-800 p-5"
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="font-semibold text-gray-900 dark:text-white">
+                                Nova Viagem
+                            </h2>
+
+                            <button
+                                onClick={fecharModalNovaViagem}
+                                className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-sm text-gray-500 dark:text-gray-400 block mb-2">
+                                    Caminhão
+                                </label>
+
+                                <div className="flex flex-wrap gap-2">
+                                    {veiculosOpcoes.map((v) => {
+                                        const selecionado = v.veiID === veiIdSelecionado;
+
+                                        return (
+                                            <button
+                                                key={v.veiID}
+                                                onClick={() => setVeiIdSelecionado(v.veiID)}
+                                                className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${selecionado
+                                                    ? 'border-[#E30613] bg-[#E30613]/10 text-[#E30613]'
+                                                    : 'border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60'
+                                                    }`}
+                                            >
+                                                {v.placa ?? `Veículo ${v.veiID}`}
+                                            </button>
+                                        );
+                                    })}
+
+                                    {veiculosOpcoes.length === 0 && (
+                                        <p className="text-sm text-gray-400">
+                                            Carregando caminhões...
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="text-sm text-gray-500 dark:text-gray-400 block mb-1">
+                                    Origem
+                                </label>
+
+                                <input
+                                    type="text"
+                                    value={origemNova}
+                                    onChange={(e) => setOrigemNova(e.target.value)}
+                                    placeholder="Ex.: Santos"
+                                    className="w-full px-3 py-2 rounded-xl text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="text-sm text-gray-500 dark:text-gray-400 block mb-1">
+                                    Destino
+                                </label>
+
+                                <input
+                                    type="text"
+                                    value={destinoNova}
+                                    onChange={(e) => setDestinoNova(e.target.value)}
+                                    placeholder="Ex.: Betim"
+                                    className="w-full px-3 py-2 rounded-xl text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
+                                />
+                            </div>
+
+                            {erroNovaViagem && (
+                                <p className="text-sm text-red-600 dark:text-red-400">
+                                    {erroNovaViagem}
+                                </p>
+                            )}
+
+                            <p className="text-xs text-gray-400 dark:text-gray-500">
+                                A viagem é concluída sozinha assim que o rastreamento do
+                                caminhão mostrar ele chegando no município de destino.
+                            </p>
+
+                            <button
+                                onClick={salvarNovaViagem}
+                                disabled={salvandoViagem}
+                                className="w-full py-2.5 rounded-xl bg-[#E30613] text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition"
+                            >
+                                {salvandoViagem ? 'Salvando...' : 'Salvar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

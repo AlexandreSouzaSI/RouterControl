@@ -13,6 +13,7 @@ import { Config } from './pages/Config';
 import { Financeiro } from './pages/Financeiro';
 import { FinanceiroRegras } from './pages/FinanceiroRegras';
 import { TrackingPage } from './pages/TrackingPage';
+import { DadosCapturados } from './pages/DadosCapturados';
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
                     <Route path="/financeiro" element={<Financeiro />} />
                     <Route path="/regras" element={<FinanceiroRegras />} />
                     <Route path="/Rotas" element={<TrackingPage />} />
+                    <Route path="/dados-capturados" element={<DadosCapturados />} />
                   </Routes>
                 </Layout>
               </ProtectedRoute>

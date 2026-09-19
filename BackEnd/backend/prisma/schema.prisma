@@ -365,6 +365,14 @@ model PosicaoCaminhao {
   velocidade Float?
   motorista  String?
 
+  // Campos que a API da Trucks Control já manda dentro de RequestMensagemCB
+  // (junto com cada ping de posição) mas que até agora não eram lidos nem
+  // salvos — só passaram a ser gravados a partir daqui pra frente; pings
+  // antigos ficam com esses campos null.
+  litrosTanque Float? // "lt" — nível de combustível no tanque, se o veículo tiver o sensor
+  odometro     Float? // "odm" — odômetro do veículo
+  rpm          Int? // "rpm" — rotação do motor no momento do ping
+
   createdAt DateTime @default(now())
 
   @@index([placa, dataHora])
@@ -397,6 +405,24 @@ model ViagemGps {
   dataHoraFim      DateTime?
 
   status StatusViagemGps @default(EM_ANDAMENTO)
+
+  // Viagem criada manualmente por alguém do administrativo (botão "Nova
+  // Viagem"), em vez de detectada sozinha pelo GPS saindo de Santos. Nesse
+  // caso origemMunicipio/destinoMunicipio já vêm preenchidos na criação
+  // (não só quando a viagem termina) — a conclusão automática compara a
+  // posição atual do caminhão com destinoMunicipio, e não com a lista fixa
+  // de cidades (Betim/Pouso Alegre) usada pelas viagens automáticas.
+  criadaManualmente Boolean @default(false)
+
+  // Coordenadas de origem/destino (geocodificadas a partir do nome da
+  // cidade na criação da viagem manual) — usadas só pra calcular a barra
+  // de progresso ("está chegando ou não"); a conclusão em si não depende
+  // delas, só do nome do município bater. Ficam null se a viagem for
+  // automática ou se a geocodificação falhar.
+  origemLatitude   Float?
+  origemLongitude  Float?
+  destinoLatitude  Float?
+  destinoLongitude Float?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

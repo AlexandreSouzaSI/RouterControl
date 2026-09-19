@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Gauge, MapPin, Clock, RefreshCw, Navigation2, Radio } from 'lucide-react';
+import {
+    Gauge,
+    MapPin,
+    Clock,
+    RefreshCw,
+    Navigation2,
+    Radio,
+    Fuel,
+    Activity,
+    TrendingDown,
+    Route as RouteIcon,
+    Droplet,
+} from 'lucide-react';
 import { TruckMap } from '../components/TruckMap';
 import { api } from '../services/api';
 
@@ -19,6 +31,11 @@ type Localizacao = {
     rua: string | null;
     rodovia: string | null;
     velocidade: number | null;
+    // Só vêm preenchidos se o rastreador do veículo mandar esses dados —
+    // nem todo equipamento tem sensor de combustível, por exemplo.
+    litrosTanque: number | null;
+    odometro: number | null;
+    rpm: number | null;
 };
 
 type CaminhaoLocalizacao = {
@@ -29,6 +46,22 @@ type CaminhaoLocalizacao = {
     equipamento: number | null;
     localizacao: Localizacao | null;
     historico: Localizacao[];
+};
+
+type Consumo = {
+    veiId: number;
+    placa: string | null;
+    periodo: { dataInicio: string | null; dataFim: string | null };
+    dadosSuficientes: boolean;
+    amostras: number;
+    totalKm: number;
+    totalLitrosConsumidos: number;
+    consumoMedioKmPorLitro: number | null;
+    consumoMedioLPor100km: number | null;
+    autonomiaEstimadaKm: number | null;
+    ultimoLitrosTanque: number | null;
+    ultimoOdometro: number | null;
+    abastecimentos: { dataHora: string; litros: number; odometro: number }[];
 };
 
 type TimelineItem = {
@@ -95,6 +128,14 @@ export function TrackingPage() {
     const [dataFim, setDataFim] = useState(() => formatarDataISO(new Date()));
     const [historico, setHistorico] = useState<Localizacao[]>([]);
     const [loadingHistorico, setLoadingHistorico] = useState(false);
+
+    // Período próprio pro consumo — separado da timeline porque consumo
+    // confiável precisa de mais histórico (30 dias por padrão) do que a
+    // janela curta usada pra ver o trajeto recente.
+    const [dataInicioConsumo, setDataInicioConsumo] = useState(() => dataDiasAtras(30));
+    const [dataFimConsumo, setDataFimConsumo] = useState(() => formatarDataISO(new Date()));
+    const [consumo, setConsumo] = useState<Consumo | null>(null);
+    const [loadingConsumo, setLoadingConsumo] = useState(false);
 
     async function carregarVeiculos() {
         try {
@@ -163,6 +204,29 @@ export function TrackingPage() {
         }
     }
 
+    async function carregarConsumo() {
+        if (!veiculoSelecionado) return;
+
+        try {
+            setLoadingConsumo(true);
+
+            const res = await api.get('/trucks-control/consumo', {
+                params: {
+                    veiId: String(veiculoSelecionado),
+                    dataInicio: dataInicioConsumo,
+                    dataFim: dataFimConsumo,
+                },
+            });
+
+            setConsumo(res.data ?? null);
+        } catch (err) {
+            console.error(err);
+            setConsumo(null);
+        } finally {
+            setLoadingConsumo(false);
+        }
+    }
+
     useEffect(() => {
         carregarVeiculos();
         carregarLocalizacoes();
@@ -181,6 +245,7 @@ export function TrackingPage() {
 
     useEffect(() => {
         carregarHistorico();
+        carregarConsumo();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [veiculoSelecionado]);
 
@@ -330,6 +395,13 @@ export function TrackingPage() {
                                     ? `${loc.velocidade ?? 0} km/h · ${loc.municipio ?? '-'}/${loc.uf ?? '-'}`
                                     : 'Sem ponto novo'}
                             </div>
+
+                            {loc?.litrosTanque != null && (
+                                <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    <Fuel size={12} />
+                                    {loc.litrosTanque} L
+                                </div>
+                            )}
                         </button>
                     );
                 })}
@@ -424,6 +496,240 @@ export function TrackingPage() {
                                 )}
                             </div>
                         </div>
+
+                        {posicao && (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+                                <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#0B1120] border border-gray-200 dark:border-gray-800">
+                                    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs font-medium mb-1.5">
+                                        <Fuel size={14} />
+                                        Combustível
+                                    </div>
+
+                                    {posicao.litrosTanque != null ? (
+                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                            {posicao.litrosTanque}
+                                            <span className="text-sm font-normal text-gray-400 ml-1">
+                                                L
+                                            </span>
+                                        </p>
+                                    ) : (
+                                        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                                            Esperando informação
+                                        </p>
+                                    )}
+                                </div>
+
+                                <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#0B1120] border border-gray-200 dark:border-gray-800">
+                                    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs font-medium mb-1.5">
+                                        <Navigation2 size={14} />
+                                        Odômetro
+                                    </div>
+
+                                    {posicao.odometro != null ? (
+                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                            {posicao.odometro.toLocaleString('pt-BR')}
+                                            <span className="text-sm font-normal text-gray-400 ml-1">
+                                                km
+                                            </span>
+                                        </p>
+                                    ) : (
+                                        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                                            Esperando informação
+                                        </p>
+                                    )}
+                                </div>
+
+                                <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#0B1120] border border-gray-200 dark:border-gray-800">
+                                    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs font-medium mb-1.5">
+                                        <Activity size={14} />
+                                        RPM
+                                    </div>
+
+                                    {posicao.rpm != null ? (
+                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                            {posicao.rpm}
+                                        </p>
+                                    ) : (
+                                        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                                            Esperando informação
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl shadow p-6">
+                        <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
+                            <div>
+                                <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                    <TrendingDown size={16} />
+                                    Consumo &amp; Autonomia
+                                </h3>
+                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                                    Calculado a partir do combustível e odômetro reais desse caminhão
+                                </p>
+                            </div>
+
+                            <div className="flex flex-wrap items-end gap-2">
+                                <div>
+                                    <label className="text-xs text-gray-500 block mb-1">
+                                        De
+                                    </label>
+
+                                    <input
+                                        type="date"
+                                        value={dataInicioConsumo}
+                                        onChange={(e) => setDataInicioConsumo(e.target.value)}
+                                        className="px-2 py-1.5 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="text-xs text-gray-500 block mb-1">
+                                        Até
+                                    </label>
+
+                                    <input
+                                        type="date"
+                                        value={dataFimConsumo}
+                                        onChange={(e) => setDataFimConsumo(e.target.value)}
+                                        className="px-2 py-1.5 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
+                                    />
+                                </div>
+
+                                <button
+                                    onClick={carregarConsumo}
+                                    disabled={loadingConsumo}
+                                    className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
+                                >
+                                    {loadingConsumo ? 'Calculando...' : 'Buscar'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {loadingConsumo && (
+                            <p className="text-sm text-gray-400 dark:text-gray-500 py-4">
+                                Calculando...
+                            </p>
+                        )}
+
+                        {!loadingConsumo && (!consumo || !consumo.dadosSuficientes) && (
+                            <div className="py-4">
+                                <p className="text-sm text-gray-500 dark:text-gray-400">
+                                    Ainda não há dados suficientes de combustível pra calcular
+                                    consumo desse caminhão nesse período
+                                    {consumo && consumo.amostras > 0
+                                        ? ` (${consumo.amostras} leitura${consumo.amostras === 1 ? '' : 's'} útil${consumo.amostras === 1 ? '' : 'eis'} até agora — precisa de pelo menos 2).`
+                                        : '.'}
+                                </p>
+                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
+                                    Isso é normal logo no início — pode ser porque ainda não
+                                    passou tempo suficiente, ou porque o rastreador desse
+                                    caminhão não manda nível de combustível.
+                                </p>
+                            </div>
+                        )}
+
+                        {!loadingConsumo && consumo && consumo.dadosSuficientes && (
+                            <>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#0B1120] border border-gray-200 dark:border-gray-800">
+                                        <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs font-medium mb-1.5">
+                                            <Fuel size={14} />
+                                            Consumo médio
+                                        </div>
+
+                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                            {consumo.consumoMedioKmPorLitro ?? '-'}
+                                            <span className="text-sm font-normal text-gray-400 ml-1">
+                                                km/L
+                                            </span>
+                                        </p>
+
+                                        {consumo.consumoMedioLPor100km != null && (
+                                            <p className="text-xs text-gray-400 mt-0.5">
+                                                {consumo.consumoMedioLPor100km} L/100km
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#0B1120] border border-gray-200 dark:border-gray-800">
+                                        <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs font-medium mb-1.5">
+                                            <Gauge size={14} />
+                                            Autonomia estimada
+                                        </div>
+
+                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                            {consumo.autonomiaEstimadaKm ?? '-'}
+                                            <span className="text-sm font-normal text-gray-400 ml-1">
+                                                km
+                                            </span>
+                                        </p>
+
+                                        <p className="text-xs text-gray-400 mt-0.5">
+                                            com {consumo.ultimoLitrosTanque ?? '-'} L no tanque
+                                        </p>
+                                    </div>
+
+                                    <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#0B1120] border border-gray-200 dark:border-gray-800">
+                                        <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs font-medium mb-1.5">
+                                            <RouteIcon size={14} />
+                                            Percorrido no período
+                                        </div>
+
+                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                            {consumo.totalKm.toLocaleString('pt-BR')}
+                                            <span className="text-sm font-normal text-gray-400 ml-1">
+                                                km
+                                            </span>
+                                        </p>
+                                    </div>
+
+                                    <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#0B1120] border border-gray-200 dark:border-gray-800">
+                                        <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs font-medium mb-1.5">
+                                            <Droplet size={14} />
+                                            Consumido no período
+                                        </div>
+
+                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                            {consumo.totalLitrosConsumidos.toLocaleString('pt-BR')}
+                                            <span className="text-sm font-normal text-gray-400 ml-1">
+                                                L
+                                            </span>
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">
+                                    Baseado em {consumo.amostras} trecho{consumo.amostras === 1 ? '' : 's'} de rodagem com leitura de combustível válida.
+                                </p>
+
+                                {consumo.abastecimentos.length > 0 && (
+                                    <div className="mt-5">
+                                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                                            Abastecimentos identificados no período
+                                        </h4>
+
+                                        <div className="space-y-1.5">
+                                            {consumo.abastecimentos.map((a, index) => (
+                                                <div
+                                                    key={`${a.dataHora}-${index}`}
+                                                    className="flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#0B1120] border border-gray-100 dark:border-gray-800"
+                                                >
+                                                    <span className="text-gray-600 dark:text-gray-300">
+                                                        {a.dataHora}
+                                                    </span>
+                                                    <span className="font-medium text-gray-900 dark:text-white">
+                                                        +{a.litros} L
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">

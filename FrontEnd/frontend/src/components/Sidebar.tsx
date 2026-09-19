@@ -3,6 +3,7 @@ import {
     Truck,
     X,
     Route,
+    Database,
     LogOut,
     type LucideIcon,
 } from 'lucide-react';
@@ -33,6 +34,7 @@ const grupos: MenuGroup[] = [
             { name: 'Dashboard', icon: LayoutDashboard, path: '/' },
             { name: 'Viagens', icon: Truck, path: '/viagens' },
             { name: 'Rotas', icon: Route, path: '/Rotas' },
+            { name: 'Dados Capturados', icon: Database, path: '/dados-capturados' },
         ],
     },
 ];
