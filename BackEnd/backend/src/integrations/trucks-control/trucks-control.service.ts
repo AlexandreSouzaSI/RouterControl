@@ -1482,7 +1482,7 @@ export class TrucksControlService implements OnModuleInit {
         status?: 'EM_ANDAMENTO' | 'CONCLUIDA';
     }) {
         const viagem = await this.prisma.viagemGps.findFirst({
-            where: { id, empresaId },
+            where: { id, ...this.filtroEmpresa(empresaId) },
         });
 
         if (!viagem) {
@@ -1531,7 +1531,7 @@ export class TrucksControlService implements OnModuleInit {
     // ela se foi engano ou duplicada.
     async excluirViagemGps(empresaId: string, id: string) {
         const viagem = await this.prisma.viagemGps.findFirst({
-            where: { id, empresaId },
+            where: { id, ...this.filtroEmpresa(empresaId) },
         });
 
         if (!viagem) {

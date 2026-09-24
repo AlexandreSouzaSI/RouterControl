@@ -342,9 +342,9 @@ export function Dashboard() {
             setExcluindoId(v.id);
             await api.delete(`/trucks-control/viagens/${v.id}`);
             await carregarRastreio();
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
-            alert('Não foi possível excluir a viagem.');
+            alert(error?.response?.data?.message ?? 'Não foi possível excluir a viagem.');
         } finally {
             setExcluindoId(null);
         }
