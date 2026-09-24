@@ -43,6 +43,28 @@ export class FinanceiroNfController {
         private readonly certificadoService: CertificadoDigitalService,
     ) { }
 
+    // ---------------- Empresa (dados fiscais próprios) ----------------
+
+    // Self-service: a própria empresa lê/edita os PRÓPRIOS dados fiscais
+    // (nome, CNPJ, telefone, endereço estruturado, IE) — sempre filtrado
+    // pelo empresaId do JWT via @EmpresaAtual(), nunca por id no
+    // body/params. Não confundir com /admin/empresas/:id (módulo admin),
+    // que é o Admin Master editando nome/módulos de QUALQUER empresa.
+    // Sem restrição extra de perfil por enquanto: não existe hoje no
+    // backend um guard de "só Proprietário edita X" pra seguir de padrão
+    // (só há o CompanyAdminGuard, que restringe por perfil ADMIN e é
+    // específico da aba Colaboradores) — qualquer usuário logado da
+    // empresa pode editar estes dados.
+    @Get('empresa')
+    obterEmpresa(@EmpresaAtual() empresaId: string) {
+        return this.service.obterDadosFiscaisEmpresa(empresaId);
+    }
+
+    @Patch('empresa')
+    atualizarEmpresa(@EmpresaAtual() empresaId: string, @Body() body: Record<string, unknown>) {
+        return this.service.atualizarDadosFiscaisEmpresa(empresaId, body as any);
+    }
+
     // ---------------- Fornecedores ----------------
 
     @Get('fornecedores')

@@ -75,6 +75,110 @@ export class FinanceiroNfService {
     ) { }
 
     // -----------------------------------------------------------------
+    // Empresa (dados fiscais próprios — self-service, sempre filtrado
+    // pelo empresaId do JWT, nunca por id vindo do body/params)
+    // -----------------------------------------------------------------
+
+    async obterDadosFiscaisEmpresa(empresaId: string) {
+        const empresa = await this.prisma.empresa.findUnique({
+            where: { id: empresaId },
+            select: {
+                id: true,
+                nome: true,
+                email: true,
+                cnpj: true,
+                telefone: true,
+                uf: true,
+                logradouro: true,
+                numero: true,
+                complemento: true,
+                bairro: true,
+                municipio: true,
+                codigoMunicipioIbge: true,
+                cep: true,
+                inscricaoEstadual: true,
+            },
+        });
+
+        if (!empresa) throw new NotFoundException('Empresa não encontrada.');
+        return empresa;
+    }
+
+    async atualizarDadosFiscaisEmpresa(
+        empresaId: string,
+        body: Partial<{
+            nome: string;
+            cnpj: string;
+            telefone: string;
+            uf: string;
+            logradouro: string;
+            numero: string;
+            complemento: string;
+            bairro: string;
+            municipio: string;
+            codigoMunicipioIbge: string;
+            cep: string;
+            inscricaoEstadual: string;
+        }>,
+    ) {
+        const data: Record<string, unknown> = {};
+
+        if (body.nome !== undefined) {
+            const nome = body.nome.trim();
+            if (!nome) throw new BadRequestException('Informe o nome da empresa.');
+            data.nome = nome;
+        }
+
+        const camposTexto: (keyof typeof body)[] = [
+            'cnpj',
+            'telefone',
+            'logradouro',
+            'numero',
+            'complemento',
+            'bairro',
+            'municipio',
+            'codigoMunicipioIbge',
+            'cep',
+            'inscricaoEstadual',
+        ];
+
+        for (const campo of camposTexto) {
+            if (body[campo] !== undefined) {
+                data[campo] = (body[campo] as string)?.trim() || null;
+            }
+        }
+
+        if (body.uf !== undefined) {
+            const uf = body.uf?.trim().toUpperCase() || null;
+            if (uf && uf.length !== 2) {
+                throw new BadRequestException('UF deve ter 2 letras.');
+            }
+            data.uf = uf;
+        }
+
+        return this.prisma.empresa.update({
+            where: { id: empresaId },
+            data,
+            select: {
+                id: true,
+                nome: true,
+                email: true,
+                cnpj: true,
+                telefone: true,
+                uf: true,
+                logradouro: true,
+                numero: true,
+                complemento: true,
+                bairro: true,
+                municipio: true,
+                codigoMunicipioIbge: true,
+                cep: true,
+                inscricaoEstadual: true,
+            },
+        });
+    }
+
+    // -----------------------------------------------------------------
     // Fornecedor
     // -----------------------------------------------------------------
 

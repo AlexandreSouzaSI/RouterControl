@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Satellite, Info, Loader2, CheckCircle2, Pencil, Trash2, ShieldCheck, Upload, Users, Plus, X, ShieldAlert } from 'lucide-react';
+import { Satellite, Info, Loader2, CheckCircle2, Pencil, Trash2, ShieldCheck, Upload, Users, Plus, X, ShieldAlert, Building2, Save } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -13,6 +13,224 @@ import { useAuth } from '../context/AuthContext';
 const campoClasse =
     'w-full px-3 py-2 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400';
 const labelClasse = 'text-xs font-medium text-gray-500 dark:text-gray-400 block mb-1';
+
+// =============================================================================
+// Empresa (dados cadastrais + fiscais — usados pra emitir/consultar NF-e
+// e NFS-e da própria empresa junto à Sefaz/ADN)
+// =============================================================================
+
+type DadosFiscaisEmpresa = {
+    id: string;
+    nome: string;
+    email: string;
+    cnpj: string | null;
+    telefone: string | null;
+    uf: string | null;
+    logradouro: string | null;
+    numero: string | null;
+    complemento: string | null;
+    bairro: string | null;
+    municipio: string | null;
+    codigoMunicipioIbge: string | null;
+    cep: string | null;
+    inscricaoEstadual: string | null;
+};
+
+const formVazioEmpresa = {
+    nome: '',
+    cnpj: '',
+    telefone: '',
+    uf: '',
+    logradouro: '',
+    numero: '',
+    complemento: '',
+    bairro: '',
+    municipio: '',
+    codigoMunicipioIbge: '',
+    cep: '',
+    inscricaoEstadual: '',
+};
+
+function EmpresaTab() {
+    const [empresa, setEmpresa] = useState<DadosFiscaisEmpresa | null>(null);
+    const [carregando, setCarregando] = useState(true);
+    const [salvando, setSalvando] = useState(false);
+    const [erro, setErro] = useState<string | null>(null);
+    const [salvo, setSalvo] = useState(false);
+
+    const [form, setForm] = useState(formVazioEmpresa);
+
+    async function carregar() {
+        setCarregando(true);
+        try {
+            const res = await api.get('/financeiro-nf/empresa');
+            const dados: DadosFiscaisEmpresa = res.data;
+            setEmpresa(dados);
+            setForm({
+                nome: dados.nome || '',
+                cnpj: dados.cnpj || '',
+                telefone: dados.telefone || '',
+                uf: dados.uf || '',
+                logradouro: dados.logradouro || '',
+                numero: dados.numero || '',
+                complemento: dados.complemento || '',
+                bairro: dados.bairro || '',
+                municipio: dados.municipio || '',
+                codigoMunicipioIbge: dados.codigoMunicipioIbge || '',
+                cep: dados.cep || '',
+                inscricaoEstadual: dados.inscricaoEstadual || '',
+            });
+        } catch {
+            setErro('Não foi possível carregar os dados da empresa.');
+        } finally {
+            setCarregando(false);
+        }
+    }
+
+    useEffect(() => {
+        carregar();
+    }, []);
+
+    async function salvar() {
+        if (!form.nome.trim()) {
+            setErro('Informe o nome da empresa.');
+            return;
+        }
+
+        setSalvando(true);
+        setErro(null);
+        setSalvo(false);
+        try {
+            const res = await api.patch('/financeiro-nf/empresa', form);
+            setEmpresa(res.data);
+            setSalvo(true);
+            setTimeout(() => setSalvo(false), 2500);
+        } catch (e: any) {
+            setErro(e?.response?.data?.message || 'Não foi possível salvar os dados da empresa.');
+        } finally {
+            setSalvando(false);
+        }
+    }
+
+    if (carregando) {
+        return <p className="text-sm text-gray-400 py-8 text-center">Carregando...</p>;
+    }
+
+    return (
+        <div className="space-y-5 max-w-2xl">
+            <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 text-sm text-blue-800 dark:text-blue-300">
+                <Info size={16} className="shrink-0 mt-0.5" />
+                <p>
+                    Esses dados são usados para emitir e consultar notas fiscais da
+                    empresa junto à Sefaz (NF-e de compra e NFS-e de serviço). Sem UF,
+                    Município e CNPJ preenchidos, a busca automática de notas pode
+                    ficar limitada.
+                </p>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 space-y-5">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center shrink-0">
+                        <Building2 size={18} className="text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div className="min-w-0">
+                        <p className="font-semibold text-gray-900 dark:text-white text-sm truncate">{empresa?.nome}</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{empresa?.email}</p>
+                    </div>
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-3">
+                    <div>
+                        <label className={labelClasse}>Nome *</label>
+                        <input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} className={campoClasse} />
+                    </div>
+                    <div>
+                        <label className={labelClasse}>CNPJ</label>
+                        <input value={form.cnpj} onChange={(e) => setForm({ ...form, cnpj: e.target.value })} className={campoClasse} placeholder="Só números" />
+                    </div>
+                    <div>
+                        <label className={labelClasse}>Telefone</label>
+                        <input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} className={campoClasse} />
+                    </div>
+                    <div>
+                        <label className={labelClasse}>Inscrição Estadual</label>
+                        <input value={form.inscricaoEstadual} onChange={(e) => setForm({ ...form, inscricaoEstadual: e.target.value })} className={campoClasse} placeholder="Ou deixe em branco se isento" />
+                    </div>
+                </div>
+
+                <div className="pt-3 border-t border-gray-100 dark:border-gray-800 space-y-3">
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Endereço</h3>
+
+                    <div className="grid sm:grid-cols-4 gap-3">
+                        <div>
+                            <label className={labelClasse}>UF</label>
+                            <input
+                                value={form.uf}
+                                maxLength={2}
+                                placeholder="Ex: SP, MG"
+                                onChange={(e) => setForm({ ...form, uf: e.target.value.toUpperCase() })}
+                                className={campoClasse}
+                            />
+                        </div>
+                        <div className="sm:col-span-2">
+                            <label className={labelClasse}>Município</label>
+                            <input value={form.municipio} onChange={(e) => setForm({ ...form, municipio: e.target.value })} className={campoClasse} />
+                        </div>
+                        <div>
+                            <label className={labelClasse}>Código IBGE do município</label>
+                            <input value={form.codigoMunicipioIbge} onChange={(e) => setForm({ ...form, codigoMunicipioIbge: e.target.value })} className={campoClasse} placeholder="Ex: 3106200" />
+                        </div>
+                    </div>
+
+                    <div className="grid sm:grid-cols-4 gap-3">
+                        <div className="sm:col-span-2">
+                            <label className={labelClasse}>Logradouro</label>
+                            <input value={form.logradouro} onChange={(e) => setForm({ ...form, logradouro: e.target.value })} className={campoClasse} />
+                        </div>
+                        <div>
+                            <label className={labelClasse}>Número</label>
+                            <input value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} className={campoClasse} />
+                        </div>
+                        <div>
+                            <label className={labelClasse}>Complemento</label>
+                            <input value={form.complemento} onChange={(e) => setForm({ ...form, complemento: e.target.value })} className={campoClasse} />
+                        </div>
+                    </div>
+
+                    <div className="grid sm:grid-cols-4 gap-3">
+                        <div className="sm:col-span-2">
+                            <label className={labelClasse}>Bairro</label>
+                            <input value={form.bairro} onChange={(e) => setForm({ ...form, bairro: e.target.value })} className={campoClasse} />
+                        </div>
+                        <div>
+                            <label className={labelClasse}>CEP</label>
+                            <input value={form.cep} onChange={(e) => setForm({ ...form, cep: e.target.value })} className={campoClasse} />
+                        </div>
+                    </div>
+                </div>
+
+                {erro && <p className="text-sm text-red-600 dark:text-red-400">{erro}</p>}
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                    {salvo && (
+                        <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                            <CheckCircle2 size={14} />
+                            Salvo
+                        </span>
+                    )}
+                    <button
+                        onClick={salvar}
+                        disabled={salvando}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
+                    >
+                        {salvando ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                        Salvar
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 // =============================================================================
 // Rastreador (Trucks Control)
@@ -649,12 +867,13 @@ function ColaboradoresTab() {
 // Página
 // =============================================================================
 
-type AbaCadastros = 'rastreador' | 'certificado' | 'colaboradores';
+type AbaCadastros = 'empresa' | 'rastreador' | 'certificado' | 'colaboradores';
 
 export function Cadastros() {
-    const [aba, setAba] = useState<AbaCadastros>('rastreador');
+    const [aba, setAba] = useState<AbaCadastros>('empresa');
 
     const abas: { id: AbaCadastros; nome: string; icone: any }[] = [
+        { id: 'empresa', nome: 'Empresa', icone: Building2 },
         { id: 'rastreador', nome: 'Rastreador', icone: Satellite },
         { id: 'certificado', nome: 'Certificado Digital', icone: ShieldCheck },
         { id: 'colaboradores', nome: 'Colaboradores', icone: Users },
@@ -690,6 +909,7 @@ export function Cadastros() {
                 })}
             </div>
 
+            {aba === 'empresa' && <EmpresaTab />}
             {aba === 'rastreador' && <RastreadorTab />}
             {aba === 'certificado' && <CertificadoDigitalTab />}
             {aba === 'colaboradores' && <ColaboradoresTab />}

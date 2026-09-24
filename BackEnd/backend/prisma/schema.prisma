@@ -114,6 +114,26 @@ model Empresa {
   // pra futuras validações no módulo Financeiro/NF.
   cnpj String?
 
+  // Telefone de contato da empresa — não existia antes; útil pra suporte e
+  // pra eventuais avisos, sem relação com o CNPJ/dados fiscais abaixo.
+  telefone String?
+
+  // Endereço estruturado + Inscrição Estadual — exigido pra emitir/consultar
+  // NF-e própria e pra distribuição via Sefaz (cUFAutor depende da UF real
+  // da empresa; antes disso o módulo Financeiro/NF usava um código fixo de
+  // UF "91" — Ambiente Nacional — por falta desse campo). Mesma pegada de
+  // campos do Store do Controle NF (schema.prisma daquele projeto), só que
+  // aqui pertence à Empresa (tenant), não a uma loja física.
+  uf                  String?
+  logradouro          String?
+  numero              String?
+  complemento         String?
+  bairro              String?
+  municipio           String?
+  codigoMunicipioIbge String?
+  cep                 String?
+  inscricaoEstadual   String?
+
   // Controle do Admin Master (Quadro do Administrador) — nada disso é
   // editável pela própria empresa. "ativo = false" bloqueia login (checado
   // no login e em toda requisição via JwtStrategy). "pagamentoEmDia" é só
