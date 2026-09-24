@@ -1602,14 +1602,30 @@ export class TrucksControlService implements OnModuleInit {
 
     /**
      * Resumo de viagens concluídas pro Dashboard: total geral + contagem
-     * por placa (ex: "QPM - 4 viagens concluídas"). `desde` opcional filtra
-     * por dataHoraFim (ex: só as concluídas hoje/no mês).
+     * por placa (ex: "QPM - 4 viagens concluídas"). `mes` (YYYY-MM) filtra
+     * o mês inteiro (início ao fim, mesmo padrão de resumoDiasParados).
+     * `desde`/`ate` continuam aceitos separadamente pra quem só quer um
+     * dos dois limites (ex: "desde hoje", sem fim).
      */
-    async resumoViagensConcluidas(empresaId: string, params?: { desde?: Date }) {
+    async resumoViagensConcluidas(
+        empresaId: string,
+        params?: { mes?: string; desde?: Date; ate?: Date },
+    ) {
         const where: any = { empresaId, status: 'CONCLUIDA' };
 
-        if (params?.desde) {
-            where.dataHoraFim = { gte: params.desde };
+        let gte = params?.desde;
+        let lte = params?.ate;
+
+        if (params?.mes) {
+            const [ano, mesNum] = params.mes.split('-').map(Number);
+            gte = gte ?? new Date(ano, mesNum - 1, 1, 0, 0, 0, 0);
+            lte = lte ?? new Date(ano, mesNum, 1, 0, 0, 0, 0);
+        }
+
+        if (gte || lte) {
+            where.dataHoraFim = {};
+            if (gte) where.dataHoraFim.gte = gte;
+            if (lte) where.dataHoraFim.lt = lte;
         }
 
         const wherePropria = { ...where, terceiro: false };

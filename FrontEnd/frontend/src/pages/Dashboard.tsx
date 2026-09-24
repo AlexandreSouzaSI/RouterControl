@@ -13,6 +13,7 @@ import {
     Pencil,
     Trash2,
     Users,
+    Calendar,
 } from 'lucide-react';
 import {
     BarChart,
@@ -102,10 +103,25 @@ function formatarDataISO(data: Date) {
     return data.toISOString().slice(0, 10);
 }
 
-function primeiroDiaDoMes() {
+// 'YYYY-MM' do mês atual — valor padrão do seletor de mês do Dashboard.
+function mesAtual() {
     const data = new Date();
-    data.setDate(1);
-    return formatarDataISO(data);
+    return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Primeiro e último dia (ISO, 'YYYY-MM-DD') de um mês 'YYYY-MM'. Pro mês
+// atual, "último dia" fica em hoje (não faz sentido pedir dado futuro).
+function limitesDoMes(mes: string) {
+    const [ano, mesNum] = mes.split('-').map(Number);
+    const inicio = new Date(ano, mesNum - 1, 1);
+    const fim = new Date(ano, mesNum, 0);
+    const hoje = new Date();
+
+    if (fim > hoje) {
+        return { inicio: formatarDataISO(inicio), fim: formatarDataISO(hoje) };
+    }
+
+    return { inicio: formatarDataISO(inicio), fim: formatarDataISO(fim) };
 }
 
 function formatarMoeda(valor: number) {
@@ -163,11 +179,14 @@ function useIsDark() {
 export function Dashboard() {
     const isDark = useIsDark();
 
-    // Período fixo (mês atual) por enquanto — sem seletor pro usuário.
-    // Se um dia fizer sentido escolher outro período, dá pra reativar os
-    // inputs de data que já existiam aqui.
-    const dataInicio = useMemo(() => primeiroDiaDoMes(), []);
-    const dataFim = useMemo(() => formatarDataISO(new Date()), []);
+    // Mês selecionado no Dashboard (padrão: mês atual). Controla os cards
+    // "no mês" (Viagens Concluídas, Dias Parados, Receita, Custo).
+    const [mesSelecionado, setMesSelecionado] = useState(() => mesAtual());
+
+    const { inicio: dataInicio, fim: dataFim } = useMemo(
+        () => limitesDoMes(mesSelecionado),
+        [mesSelecionado],
+    );
 
     const [localizacoes, setLocalizacoes] = useState<CaminhaoLocalizacao[]>([]);
     const [resumoFinanceiro, setResumoFinanceiro] = useState<ResumoFinanceiro | null>(null);
@@ -338,14 +357,16 @@ export function Dashboard() {
             const [locRes, viagensRes, concluidasRes, diasParadosRes] = await Promise.all([
                 api.get('/trucks-control/caminhoes-localizacao'),
                 api.get('/trucks-control/viagens', { params: { status: 'EM_ANDAMENTO' } }),
-                // Concluídas no mês corrente, mesmo recorte dos outros
+                // Concluídas no mês selecionado, mesmo recorte dos outros
                 // cards "no mês" (Dias Parados, Receita, Custo).
                 api.get('/trucks-control/viagens/resumo-concluidas', {
-                    params: { desde: `${primeiroDiaDoMes()}T00:00:00` },
+                    params: { mes: mesSelecionado },
                 }),
                 // Dias parados calculados direto do GPS (sem depender de
-                // upload manual) — mês atual por padrão.
-                api.get('/trucks-control/dias-parados'),
+                // upload manual) — mês selecionado.
+                api.get('/trucks-control/dias-parados', {
+                    params: { mes: mesSelecionado },
+                }),
             ]);
 
             // O endpoint devolve { caminhoes: [...], origemMensagens }, não
@@ -385,10 +406,13 @@ export function Dashboard() {
         carregarRastreio();
 
         // Rastreamento em tempo real: atualiza sozinho a cada 60s, sem
-        // depender do usuário ficar recarregando a página.
+        // depender do usuário ficar recarregando a página. Troca de mês
+        // recarrega na hora (via dependência abaixo), o intervalo só
+        // repete a consulta do mês selecionado no momento.
         const intervalo = setInterval(carregarRastreio, 60000);
         return () => clearInterval(intervalo);
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mesSelecionado]);
 
     useEffect(() => {
         carregarPeriodo();
@@ -514,11 +538,32 @@ export function Dashboard() {
                         Dashboard Operacional
                     </h1>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Visão geral da frota e do financeiro neste mês.
+                        Visão geral da frota e do financeiro
+                        {mesSelecionado === mesAtual() ? ' neste mês.' : ' no mês selecionado.'}
                     </p>
                 </div>
 
                 <div className="flex flex-wrap items-end gap-3">
+                    <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 bg-white dark:bg-[#111827]">
+                        <Calendar size={16} className="text-gray-400 shrink-0" />
+                        <input
+                            type="month"
+                            value={mesSelecionado}
+                            max={mesAtual()}
+                            onChange={(e) => setMesSelecionado(e.target.value || mesAtual())}
+                            className="text-sm bg-transparent outline-none [color-scheme:light] dark:[color-scheme:dark]"
+                        />
+                    </label>
+
+                    {mesSelecionado !== mesAtual() && (
+                        <button
+                            onClick={() => setMesSelecionado(mesAtual())}
+                            className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white underline underline-offset-2 transition"
+                        >
+                            Mês atual
+                        </button>
+                    )}
+
                     <button
                         onClick={abrirModalNovaViagem}
                         className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#E30613] text-white text-sm font-medium hover:bg-red-700 transition"

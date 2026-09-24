@@ -185,15 +185,20 @@ export class TrucksControlController {
     }
 
     // Resumo pro Dashboard: total de viagens concluídas + contagem por
-    // placa (ex: "QPM - 4 viagens concluídas"). `desde` (ISO) opcional
-    // filtra por dataHoraFim, ex: só as concluídas hoje ou no mês.
+    // placa (ex: "QPM - 4 viagens concluídas"). `mes` (YYYY-MM) filtra o
+    // mês inteiro (início ao fim); `desde`/`ate` (ISO) continuam aceitos
+    // pra quem já usava só o início do período.
     @Get('viagens/resumo-concluidas')
     resumoViagensConcluidas(
         @EmpresaAtual() empresaId: string,
+        @Query('mes') mes?: string,
         @Query('desde') desde?: string,
+        @Query('ate') ate?: string,
     ) {
         return this.service.resumoViagensConcluidas(empresaId, {
+            mes,
             desde: desde ? new Date(desde) : undefined,
+            ate: ate ? new Date(ate) : undefined,
         });
     }
 
