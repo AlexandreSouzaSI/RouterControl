@@ -31,6 +31,16 @@ interface EstadoEmpresaTrucks {
 export class TrucksControlService implements OnModuleInit {
     constructor(private readonly prisma: PrismaService) { }
 
+    // Grandfathering igual ao CaminhaoService/FiscalService: mostra os
+    // registros da empresa logada e, transitoriamente, os que ainda não
+    // têm empresa definida (veículos/posições/viagens capturados antes
+    // do retrofit multi-empresa desse módulo, quando ainda não existia
+    // a coluna empresaId). Sem isso, todo o histórico anterior ao
+    // retrofit fica invisível mesmo intacto no banco.
+    private filtroEmpresa(empresaId: string) {
+        return { OR: [{ empresaId }, { empresaId: null }] };
+    }
+
     private readonly url = process.env.TRUCKS_URL!;
 
     private parser = new XMLParser({
@@ -237,7 +247,7 @@ export class TrucksControlService implements OnModuleInit {
     private async carregarVeiculosDoBanco(empresaId: string) {
         try {
             const salvos = await this.prisma.veiculoTrucksControl.findMany({
-                where: { empresaId },
+                where: this.filtroEmpresa(empresaId),
             });
 
             if (salvos.length > 0) {
@@ -740,7 +750,7 @@ export class TrucksControlService implements OnModuleInit {
         const veiIds = veiculos.map((v) => Number(v.veiID));
 
         const ultimasPosicoes = await this.prisma.posicaoCaminhao.findMany({
-            where: { empresaId, veiId: { in: veiIds } },
+            where: { ...this.filtroEmpresa(empresaId), veiId: { in: veiIds } },
             orderBy: { dataHora: 'desc' },
             distinct: ['veiId'],
         });
@@ -929,7 +939,7 @@ export class TrucksControlService implements OnModuleInit {
         dataInicio?: string;
         dataFim?: string;
     }) {
-        const where: any = { empresaId };
+        const where: any = { ...this.filtroEmpresa(empresaId) };
 
         if (params.placa) {
             where.placa = params.placa.toUpperCase();
@@ -989,7 +999,7 @@ export class TrucksControlService implements OnModuleInit {
         dataInicio?: string;
         dataFim?: string;
     }) {
-        const where: any = { empresaId, veiId: params.veiId };
+        const where: any = { ...this.filtroEmpresa(empresaId), veiId: params.veiId };
 
         if (params.dataInicio || params.dataFim) {
             where.dataHora = {};
@@ -1270,7 +1280,7 @@ export class TrucksControlService implements OnModuleInit {
         placa?: string;
         limit?: number;
     }) {
-        const where: any = { empresaId };
+        const where: any = { ...this.filtroEmpresa(empresaId) };
 
         if (params?.status) where.status = params.status;
         if (params?.placa) where.placa = params.placa.toUpperCase();
@@ -1611,7 +1621,7 @@ export class TrucksControlService implements OnModuleInit {
         empresaId: string,
         params?: { mes?: string; desde?: Date; ate?: Date },
     ) {
-        const where: any = { empresaId, status: 'CONCLUIDA' };
+        const where: any = { ...this.filtroEmpresa(empresaId), status: 'CONCLUIDA' };
 
         let gte = params?.desde;
         let lte = params?.ate;
@@ -1822,7 +1832,7 @@ export class TrucksControlService implements OnModuleInit {
 
             const posicoes = await this.prisma.posicaoCaminhao.findMany({
                 where: {
-                    empresaId,
+                    ...this.filtroEmpresa(empresaId),
                     veiId,
                     dataHora: { gte: inicioBusca, lt: fimMes },
                 },
