@@ -19,6 +19,7 @@ import { DashboardFinanceiro } from './pages/DashboardFinanceiro';
 import { NfEntrada } from './pages/NfEntrada';
 import { NfServico } from './pages/NfServico';
 import { ContasPagar } from './pages/ContasPagar';
+import { ContasPagarConciliar } from './pages/ContasPagarConciliar';
 import { Cadastros } from './pages/Cadastros';
 import { Admin } from './pages/Admin';
 
@@ -51,6 +52,7 @@ export default function App() {
                     <Route path="/financeiro-nf/entrada" element={<NfEntrada />} />
                     <Route path="/financeiro-nf/servico" element={<NfServico />} />
                     <Route path="/financeiro-nf/contas-pagar" element={<ContasPagar />} />
+                    <Route path="/financeiro-nf/contas-pagar/conciliar" element={<ContasPagarConciliar />} />
                     <Route path="/cadastros" element={<Cadastros />} />
                     <Route path="/admin" element={<Admin />} />
                   </Routes>

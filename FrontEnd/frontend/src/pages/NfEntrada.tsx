@@ -1,13 +1,23 @@
 import { useEffect, useState } from 'react';
-import { Info, Download, Loader2 } from 'lucide-react';
+import { Info, Download, Loader2, RefreshCw } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { api } from '../services/api';
 
 // =============================================================================
 // NF de Entrada — página própria (grupo Financeiro no menu).
-// A lista fica vazia até a Fase 4 (cliente Sefaz NF-e) entrar — o filtro
-// de período e o download em ZIP já ficam prontos pra quando isso
-// acontecer, sem precisar mexer aqui de novo.
+// O botão "Buscar agora" dispara a sincronização com a Sefaz sob demanda
+// (POST /financeiro-nf/nf-entrada/buscar) além do cron automático que já
+// roda a cada 10 minutos no backend.
 // =============================================================================
+
+type SefazSyncLog = {
+    id: string;
+    origem: string;
+    sucesso: boolean;
+    mensagem: string;
+    totalBuscado: number;
+    createdAt: string;
+};
 
 const campoClasse =
     'w-full px-3 py-2 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400';
@@ -52,6 +62,8 @@ export function NfEntrada() {
     const [items, setItems] = useState<NfEntradaItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [baixando, setBaixando] = useState(false);
+    const [buscando, setBuscando] = useState(false);
+    const [ultimoLog, setUltimoLog] = useState<SefazSyncLog | null>(null);
 
     async function carregar() {
         setLoading(true);
@@ -67,10 +79,40 @@ export function NfEntrada() {
         }
     }
 
+    async function carregarUltimoLog() {
+        try {
+            const res = await api.get<SefazSyncLog[]>('/financeiro-nf/sefaz-logs');
+            const logNfEntrada = (res.data ?? []).find((log) => log.origem === 'NFE_ENTRADA');
+            setUltimoLog(logNfEntrada ?? null);
+        } catch {
+            // histórico é só informativo — não precisa travar a tela
+        }
+    }
+
     useEffect(() => {
         carregar();
+        carregarUltimoLog();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    async function buscarAgora() {
+        setBuscando(true);
+        try {
+            const res = await api.post('/financeiro-nf/nf-entrada/buscar');
+            const totalNovas = res.data?.totalNovas ?? 0;
+            toast.success(
+                totalNovas > 0
+                    ? `${totalNovas} NF-e nova(s) encontrada(s).`
+                    : 'Busca concluída, nenhuma NF-e nova.',
+            );
+            await carregar();
+            await carregarUltimoLog();
+        } catch (e) {
+            toast.error(await extrairMensagemErro(e, 'Não foi possível buscar as NFs agora.'));
+        } finally {
+            setBuscando(false);
+        }
+    }
 
     async function baixarZip() {
         setBaixando(true);
@@ -108,18 +150,32 @@ export function NfEntrada() {
                 <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-500/10 flex items-center justify-center shrink-0">
                     <Info size={18} className="text-amber-600 dark:text-amber-400" />
                 </div>
-                <div>
+                <div className="flex-1">
                     <h3 className="font-semibold text-gray-900 dark:text-white text-sm mb-1">
-                        Busca automática de NF de entrada — em construção
+                        Busca na Sefaz
                     </h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Essa lista vai preencher sozinha quando o cliente Sefaz (assinatura XML +
-                        distribuição) entrar. O filtro por período e o download em ZIP abaixo já estão
-                        prontos e vão trazer as NFs — aceitas ou não — assim que existirem. O
-                        certificado digital já pode ser cadastrado em Cadastros → Certificado Digital,
-                        adiantando esse passo.
+                        A lista abaixo é alimentada automaticamente a cada 10 minutos (quando há
+                        certificado digital cadastrado em Financeiro → Certificado Digital e CNPJ
+                        preenchido). Use "Buscar agora" pra forçar uma busca imediata.
                     </p>
+                    {ultimoLog && (
+                        <p className="text-xs text-gray-400 mt-2">
+                            Última busca: {new Date(ultimoLog.createdAt).toLocaleString('pt-BR')} —{' '}
+                            <span className={ultimoLog.sucesso ? 'text-green-600 dark:text-green-400' : 'text-red-500'}>
+                                {ultimoLog.mensagem}
+                            </span>
+                        </p>
+                    )}
                 </div>
+                <button
+                    onClick={buscarAgora}
+                    disabled={buscando}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition shrink-0"
+                >
+                    {buscando ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                    Buscar agora
+                </button>
             </div>
 
             <div className="flex flex-wrap items-end gap-3">
@@ -140,7 +196,7 @@ export function NfEntrada() {
                 <button
                     onClick={baixarZip}
                     disabled={baixando}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 transition"
                 >
                     {baixando ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                     Baixar ZIP {de || ate ? 'do período' : ''}

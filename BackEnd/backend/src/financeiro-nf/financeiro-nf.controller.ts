@@ -190,6 +190,30 @@ export class FinanceiroNfController {
         return this.service.removerContaPagar(id, empresaId);
     }
 
+    // Lê o extrato OFX só pra devolver as movimentações — não salva o
+    // arquivo nem grava nada no banco (mesmo padrão do Controle NF).
+    @Post('contas-pagar/reconcile/import')
+    @UseInterceptors(
+        FileInterceptor('file', {
+            storage: memoryStorage(),
+            fileFilter: (_req, file, callback) => {
+                const isOfx = /\.(ofx)$/i.test(file.originalname || '');
+
+                if (!isOfx) {
+                    return callback(
+                        new Error('Arquivo inválido. Envie um extrato .ofx.'),
+                        false,
+                    );
+                }
+
+                callback(null, true);
+            },
+        }),
+    )
+    importarOfx(@UploadedFile() file: Express.Multer.File) {
+        return this.service.parseOfxStatement(file.buffer.toString('utf-8'));
+    }
+
     // ---------------- Dashboard ----------------
 
     @Get('dashboard')
@@ -281,5 +305,29 @@ export class FinanceiroNfController {
         @Query('ate') ate?: string,
     ) {
         return this.service.listarNfServico(empresaId, { de, ate });
+    }
+
+    // ---------------- Busca manual na Sefaz/ADN ----------------
+
+    // Dispara a busca de NF-e de mercadoria sob demanda (botão "Buscar
+    // agora" da tela) pra empresa autenticada. Devolve quantas notas novas
+    // vieram; se a Sefaz recusar (sem certificado, sem CNPJ, bloqueio de
+    // cooldown etc.) o erro vem como BadRequestException, tratado no front.
+    @Post('nf-entrada/buscar')
+    buscarNfEntrada(@EmpresaAtual() empresaId: string) {
+        return this.service.buscarNfEntradaManual(empresaId);
+    }
+
+    // Mesma coisa, só que pro ADN de NFS-e de serviço.
+    @Post('nf-servico/buscar')
+    buscarNfServico(@EmpresaAtual() empresaId: string) {
+        return this.service.buscarNfServicoManual(empresaId);
+    }
+
+    // Histórico das últimas tentativas de busca (manuais e automáticas) —
+    // mesmo painel que o Controle NF mostra na aba Lojas.
+    @Get('sefaz-logs')
+    listarLogsSefaz(@EmpresaAtual() empresaId: string) {
+        return this.service.listarLogsSefaz(empresaId);
     }
 }

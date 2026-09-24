@@ -1,11 +1,59 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
+import { CertificadoDigitalService } from './certificado-digital.service';
+import { parseOfx } from './ofx-parser';
+import {
+    fetchGoodsDistribution,
+    parseFullNfeXml,
+    parseResNFe,
+} from './sefaz-nfe-client';
+import {
+    decodeArquivoXml,
+    fetchDistribution,
+    parseNfseXml,
+} from './sefaz-nfse-client';
 import {
     FormaPagamentoContaPagar,
     StatusContaPagar,
     TipoChavePix,
     TipoContaPagar,
 } from '@prisma/client';
+
+// Pausa entre consultas à Sefaz/ADN — as duas exigem espaçamento entre
+// chamadas pra não estourar o limite de consultas/hora por certificado
+// (mesmo critério do Controle NF, ver purchases.service.ts/services.service.ts).
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Pasta própria do Controle Rota pros XMLs baixados da Sefaz/ADN — fora de
+// qualquer pasta servida como estática, igual ao certificado digital.
+const nfEntradaStoragePath = join(process.cwd(), 'storage', 'nf-entrada');
+const nfServicoStoragePath = join(process.cwd(), 'storage', 'nf-servico');
+
+// Limite de "lotes" (páginas) consultados numa única chamada de sync —
+// evita que uma empresa com histórico grande prenda a requisição; o NSU
+// salvo garante que a próxima tentativa continua de onde parou.
+const MAX_SYNC_BATCHES = 25;
+
+// Recomendado pela doc oficial do webservice: pelo menos ~2s entre
+// consultas dentro do mesmo loop, pra não estourar o limite de consultas
+// por hora que a Sefaz/ADN aplica por certificado.
+const SYNC_DELAY_MS = 2000;
+
+// Depois de "nada de novo" ou de um bloqueio por consumo indevido, a
+// Sefaz/ADN só libera consulta de novo depois de 1h — e reinicia essa
+// contagem se a gente insistir antes da hora passar.
+const SEFAZ_COOLDOWN_MS = 60 * 60 * 1000;
+
+function parseDataEmissaoServico(value?: string): Date | undefined {
+    if (!value) return undefined;
+    const data = new Date(value);
+    return Number.isNaN(data.getTime()) ? undefined : data;
+}
 
 // Remove acento, espaços duplicados e caixa alta pra comparar nomes de
 // forma tolerante (ex.: "Distribuidora Souza" === "distribuidora   souza")
@@ -21,7 +69,10 @@ export function normalizarNome(nome: string): string {
 
 @Injectable()
 export class FinanceiroNfService {
-    constructor(private readonly prisma: PrismaService) { }
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly certificadoService: CertificadoDigitalService,
+    ) { }
 
     // -----------------------------------------------------------------
     // Fornecedor
@@ -415,6 +466,22 @@ export class FinanceiroNfService {
         return { ok: true };
     }
 
+    // Lê o extrato OFX só pra devolver as movimentações — não salva o
+    // arquivo nem grava nada no banco. A conciliação de fato acontece
+    // quando o usuário confirma cada conta pelo endpoint de pagar (mesmo
+    // padrão do Controle NF em bills.service.ts).
+    parseOfxStatement(content: string) {
+        const transactions = parseOfx(content);
+
+        if (transactions.length === 0) {
+            throw new BadRequestException(
+                'Não encontramos movimentações nesse arquivo. Confira se é um extrato OFX válido.',
+            );
+        }
+
+        return { transactions };
+    }
+
     // -----------------------------------------------------------------
     // NF de Entrada / NF de Serviço — listagem e download por período
     // -----------------------------------------------------------------
@@ -699,5 +766,523 @@ export class FinanceiroNfService {
             graficoPorCategoria,
             graficoStatus,
         };
+    }
+
+    // -----------------------------------------------------------------
+    // Sincronização com a Sefaz (NF-e de compra) / ADN (NFS-e de serviço)
+    // -----------------------------------------------------------------
+    //
+    // Fase 4/5 portada do Controle NF: busca automaticamente, a partir do
+    // certificado digital já cadastrado da empresa, os documentos fiscais
+    // novos desde o último NSU salvo. Não cria conta a pagar nem vincula
+    // nada sozinho — só deixa os documentos em NfEntrada/NfServico
+    // disponíveis pra conciliação manual (botão "Aceitar" na tela).
+    //
+    // Limitação assumida nesta portagem: a manifestação do destinatário
+    // (Ciência da Operação) do Controle NF não foi portada — ela exige
+    // assinatura de XML (node-forge + xml-crypto), pacotes que não estão
+    // instalados neste projeto e este ambiente não tem acesso à rede pra
+    // instalar. Sem a manifestação automática, a Sefaz pode continuar
+    // devolvendo só o resumo (resNFe) de algumas notas em vez do XML
+    // completo (procNFe) — o resumo já basta pra listar/conciliar a nota,
+    // só não traz os itens detalhados.
+
+    // Busca (clique manual) as NF-e de mercadoria novas emitidas pro CNPJ
+    // da empresa desde o último NSU salvo.
+    async buscarNfEntradaManual(empresaId: string) {
+        try {
+            const resultado = await this.runSyncNfEntrada(empresaId);
+
+            await this.registrarLogSefaz(
+                empresaId,
+                'NFE_ENTRADA',
+                true,
+                resultado.totalNovas > 0
+                    ? `${resultado.totalNovas} NF-e nova(s) encontrada(s).`
+                    : 'Busca concluída, nenhuma NF-e nova.',
+                resultado.totalNovas,
+            );
+
+            return resultado;
+        } catch (error: any) {
+            await this.registrarLogSefaz(
+                empresaId,
+                'NFE_ENTRADA',
+                false,
+                String(error?.message || error),
+                0,
+            );
+            throw error;
+        }
+    }
+
+    // Busca (clique manual) as NFS-e de serviço novas emitidas pro CNPJ da
+    // empresa desde o último NSU salvo.
+    async buscarNfServicoManual(empresaId: string) {
+        try {
+            const resultado = await this.runSyncNfServico(empresaId);
+
+            await this.registrarLogSefaz(
+                empresaId,
+                'NFSE_SERVICO',
+                true,
+                resultado.totalNovas > 0
+                    ? `${resultado.totalNovas} documento(s) novo(s) encontrado(s).`
+                    : 'Busca concluída, nenhum documento novo.',
+                resultado.totalNovas,
+            );
+
+            return resultado;
+        } catch (error: any) {
+            await this.registrarLogSefaz(
+                empresaId,
+                'NFSE_SERVICO',
+                false,
+                String(error?.message || error),
+                0,
+            );
+            throw error;
+        }
+    }
+
+    // Últimas tentativas de sincronização (manuais e automáticas) dessa
+    // empresa — histórico pra dar visibilidade a erros que aconteceram sem
+    // ninguém olhando (ex: a busca automática de madrugada).
+    async listarLogsSefaz(empresaId: string) {
+        return this.prisma.sefazSincronizacaoLog.findMany({
+            where: { empresaId },
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+        });
+    }
+
+    private async registrarLogSefaz(
+        empresaId: string,
+        origem: 'NFE_ENTRADA' | 'NFSE_SERVICO',
+        sucesso: boolean,
+        mensagem: string,
+        totalBuscado: number,
+    ) {
+        try {
+            await this.prisma.sefazSincronizacaoLog.create({
+                data: { empresaId, origem, sucesso, mensagem, totalBuscado },
+            });
+        } catch {
+            // O log é só auxiliar — nunca deve derrubar a sincronização.
+        }
+    }
+
+    // Núcleo da busca de NF-e de mercadoria, sem checagem de módulo/perfil
+    // (quem chama — buscarNfEntradaManual ou o cron abaixo — já garantiu o
+    // acesso). Persiste o NSU incrementalmente a cada lote (não só no
+    // final) pra não perder progresso se a Sefaz bloquear no meio de uma
+    // rodada grande.
+    private async runSyncNfEntrada(empresaId: string) {
+        const empresa = await this.prisma.empresa.findUnique({ where: { id: empresaId } });
+
+        if (!empresa) {
+            throw new NotFoundException('Empresa não encontrada.');
+        }
+
+        if (!empresa.cnpj) {
+            throw new BadRequestException(
+                'Cadastre o CNPJ da empresa antes de buscar notas.',
+            );
+        }
+
+        const certificadoRegistro = await this.prisma.certificadoDigitalEmpresa.findUnique({
+            where: { empresaId },
+        });
+
+        if (!certificadoRegistro) {
+            throw new BadRequestException(
+                'Essa empresa não tem certificado digital cadastrado. Cadastre em Financeiro → Certificado Digital antes de buscar notas.',
+            );
+        }
+
+        // A Sefaz pune insistência: se a última rodada terminou em "nada de
+        // novo" (137) ou em bloqueio por consumo indevido (656), só vale a
+        // pena tentar de novo depois de 1h.
+        if (certificadoRegistro.nfeBloqueadoAte && certificadoRegistro.nfeBloqueadoAte > new Date()) {
+            throw new BadRequestException(
+                `A Sefaz pediu espera depois da última consulta. Tente de novo às ${certificadoRegistro.nfeBloqueadoAte.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`,
+            );
+        }
+
+        const cert = await this.certificadoService.carregar(empresaId);
+
+        if (!cert) {
+            throw new BadRequestException(
+                'Cadastre o certificado digital da empresa antes de buscar notas.',
+            );
+        }
+
+        let cursor = certificadoRegistro.ultimoNsuNfe;
+        let totalNovas = 0;
+
+        for (let lote = 0; lote < MAX_SYNC_BATCHES; lote++) {
+            const resultado = await fetchGoodsDistribution(cert, {
+                cnpj: empresa.cnpj,
+                ultNsu: cursor,
+                tpAmb: 1,
+            });
+
+            if (resultado.cStat !== '137' && resultado.cStat !== '138') {
+                // Qualquer status fora desses dois é rejeição/bloqueio (ex:
+                // 656 = consumo indevido) — guarda o cooldown antes de
+                // avisar, pra não deixar a próxima tentativa reiniciar o
+                // bloqueio.
+                await this.prisma.certificadoDigitalEmpresa.update({
+                    where: { empresaId },
+                    data: {
+                        ultimoNsuNfe: cursor,
+                        nfeBloqueadoAte: new Date(Date.now() + SEFAZ_COOLDOWN_MS),
+                    },
+                });
+
+                throw new BadRequestException(
+                    resultado.cStat === '656'
+                        ? 'A Sefaz bloqueou temporariamente por excesso de consultas (consumo indevido). Só dá pra tentar de novo daqui a 1h.'
+                        : `A Sefaz recusou a consulta: ${resultado.xMotivo || resultado.cStat}`,
+                );
+            }
+
+            for (const doc of resultado.docs) {
+                if (!doc.schema.startsWith('resNFe') && !doc.schema.startsWith('procNFe')) {
+                    // Eventos (cancelamento, ciência de terceiros etc.) não
+                    // interessam ainda — só as NF-e propriamente ditas.
+                    continue;
+                }
+
+                const parsedNf = doc.schema.startsWith('procNFe')
+                    ? parseFullNfeXml(doc.xml)
+                    : parseResNFe(doc.xml);
+
+                if (!parsedNf?.chaveAcesso) {
+                    continue;
+                }
+
+                const pastaEmpresa = join(nfEntradaStoragePath, empresaId);
+
+                if (!existsSync(pastaEmpresa)) {
+                    mkdirSync(pastaEmpresa, { recursive: true });
+                }
+
+                const nomeArquivo = `sefaz-${parsedNf.chaveAcesso}.xml`;
+                writeFileSync(join(pastaEmpresa, nomeArquivo), doc.xml, 'utf-8');
+
+                const arquivoUrl = `/storage/nf-entrada/${empresaId}/${nomeArquivo}`;
+                const dataEmissao = parsedNf.issueDate ? new Date(parsedNf.issueDate) : undefined;
+
+                await this.prisma.nfEntrada.upsert({
+                    where: {
+                        empresaId_chaveAcesso: { empresaId, chaveAcesso: parsedNf.chaveAcesso },
+                    },
+                    update: {
+                        nsu: BigInt(doc.nsu || '0'),
+                        tipoDocumento: doc.schema,
+                        emitenteCnpj: parsedNf.issuerCnpj,
+                        emitenteNome: parsedNf.issuerName,
+                        valor: parsedNf.value,
+                        dataEmissao,
+                        situacao: parsedNf.situacao,
+                        arquivoUrl,
+                    },
+                    create: {
+                        empresaId,
+                        chaveAcesso: parsedNf.chaveAcesso,
+                        nsu: BigInt(doc.nsu || '0'),
+                        tipoDocumento: doc.schema,
+                        emitenteCnpj: parsedNf.issuerCnpj,
+                        emitenteNome: parsedNf.issuerName,
+                        valor: parsedNf.value,
+                        dataEmissao,
+                        situacao: parsedNf.situacao,
+                        arquivoUrl,
+                    },
+                });
+
+                totalNovas += 1;
+            }
+
+            const maxNsu = BigInt(resultado.maxNSU || '0');
+            const respUltNsu = BigInt(resultado.ultNSU || '0');
+
+            cursor = respUltNsu;
+
+            // Salva o progresso a cada lote (não só no final) — se a Sefaz
+            // bloquear no meio de uma rodada grande, o que já avançou não
+            // se perde.
+            await this.prisma.certificadoDigitalEmpresa.update({
+                where: { empresaId },
+                data: { ultimoNsuNfe: cursor },
+            });
+
+            if (resultado.cStat === '137' || respUltNsu >= maxNsu) {
+                // Chegou ao fim do que existe pra consultar agora — só
+                // libera consulta de novo depois de 1h.
+                await this.prisma.certificadoDigitalEmpresa.update({
+                    where: { empresaId },
+                    data: { nfeBloqueadoAte: new Date(Date.now() + SEFAZ_COOLDOWN_MS) },
+                });
+                break;
+            }
+
+            // Ainda tem mais lote pela frente — espera antes da próxima
+            // consulta pra não martelar o webservice da Sefaz.
+            await sleep(SYNC_DELAY_MS);
+        }
+
+        return { totalNovas };
+    }
+
+    // Núcleo da busca de NFS-e de serviço (ADN), mesmo espírito do
+    // runSyncNfEntrada acima — cursor próprio (ultimoNsu, não ultimoNsuNfe)
+    // e bloqueio próprio (nfseBloqueadoAte).
+    private async runSyncNfServico(empresaId: string) {
+        const empresa = await this.prisma.empresa.findUnique({ where: { id: empresaId } });
+
+        if (!empresa) {
+            throw new NotFoundException('Empresa não encontrada.');
+        }
+
+        if (!empresa.cnpj) {
+            throw new BadRequestException(
+                'Cadastre o CNPJ da empresa antes de buscar notas.',
+            );
+        }
+
+        const certificadoRegistro = await this.prisma.certificadoDigitalEmpresa.findUnique({
+            where: { empresaId },
+        });
+
+        if (!certificadoRegistro) {
+            throw new BadRequestException(
+                'Essa empresa não tem certificado digital cadastrado. Cadastre em Financeiro → Certificado Digital antes de buscar notas.',
+            );
+        }
+
+        if (certificadoRegistro.nfseBloqueadoAte && certificadoRegistro.nfseBloqueadoAte > new Date()) {
+            throw new BadRequestException(
+                `A Sefaz/ADN pediu espera depois da última consulta. Tente de novo às ${certificadoRegistro.nfseBloqueadoAte.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`,
+            );
+        }
+
+        const cert = await this.certificadoService.carregar(empresaId);
+
+        if (!cert) {
+            throw new BadRequestException(
+                'Cadastre o certificado digital da empresa antes de buscar notas.',
+            );
+        }
+
+        let cursor = certificadoRegistro.ultimoNsu;
+        let totalNovas = 0;
+
+        for (let lote = 0; lote < MAX_SYNC_BATCHES; lote++) {
+            let resposta: Awaited<ReturnType<typeof fetchDistribution>>;
+
+            try {
+                resposta = await fetchDistribution(cert, cursor);
+            } catch (error: any) {
+                // Rejeição do ADN (inclui possível bloqueio por excesso de
+                // consultas) — guarda o cursor já avançado e o cooldown
+                // antes de propagar o erro.
+                await this.prisma.certificadoDigitalEmpresa.update({
+                    where: { empresaId },
+                    data: {
+                        ultimoNsu: cursor,
+                        nfseBloqueadoAte: new Date(Date.now() + SEFAZ_COOLDOWN_MS),
+                    },
+                });
+
+                throw new BadRequestException(String(error?.message || error));
+            }
+
+            if (resposta.StatusProcessamento === 'NENHUM_DOCUMENTO_LOCALIZADO') {
+                await this.prisma.certificadoDigitalEmpresa.update({
+                    where: { empresaId },
+                    data: {
+                        ultimoNsu: cursor,
+                        nfseBloqueadoAte: new Date(Date.now() + SEFAZ_COOLDOWN_MS),
+                    },
+                });
+                break;
+            }
+
+            const loteDfe = resposta.LoteDFe || [];
+
+            if (loteDfe.length === 0) {
+                await this.prisma.certificadoDigitalEmpresa.update({
+                    where: { empresaId },
+                    data: {
+                        ultimoNsu: cursor,
+                        nfseBloqueadoAte: new Date(Date.now() + SEFAZ_COOLDOWN_MS),
+                    },
+                });
+                break;
+            }
+
+            let maxNsuNoLote = cursor;
+
+            for (const item of loteDfe) {
+                const itemNsu = BigInt(item.NSU);
+
+                if (itemNsu > maxNsuNoLote) {
+                    maxNsuNoLote = itemNsu;
+                }
+
+                if (!item.ChaveAcesso) {
+                    continue;
+                }
+
+                let arquivoUrl: string | undefined;
+                let parsedNfse: ReturnType<typeof parseNfseXml> = null;
+
+                if (item.ArquivoXml) {
+                    const xml = decodeArquivoXml(item.ArquivoXml);
+                    const pastaEmpresa = join(nfServicoStoragePath, empresaId);
+
+                    if (!existsSync(pastaEmpresa)) {
+                        mkdirSync(pastaEmpresa, { recursive: true });
+                    }
+
+                    const nomeArquivo = `sefaz-${item.ChaveAcesso}.xml`;
+                    writeFileSync(join(pastaEmpresa, nomeArquivo), xml, 'utf-8');
+
+                    arquivoUrl = `/storage/nf-servico/${empresaId}/${nomeArquivo}`;
+
+                    // Só documentos de verdade (NFSE) trazem prestador/valor
+                    // — eventos (cancelamento etc.) não.
+                    if (item.TipoDocumento === 'NFSE') {
+                        parsedNfse = parseNfseXml(xml);
+                    }
+                }
+
+                const dataEmissao = parseDataEmissaoServico(parsedNfse?.issueDate);
+
+                await this.prisma.nfServico.upsert({
+                    where: {
+                        empresaId_chaveAcesso: { empresaId, chaveAcesso: item.ChaveAcesso },
+                    },
+                    update: {
+                        nsu: itemNsu,
+                        tipoDocumento: item.TipoDocumento,
+                        tipoEvento: item.TipoEvento || undefined,
+                        arquivoUrl,
+                        geradoEm: item.DataHoraGeracao ? new Date(item.DataHoraGeracao) : undefined,
+                        numeroNf: parsedNfse?.numeroNf,
+                        prestadorNome: parsedNfse?.issuerName,
+                        prestadorDoc: parsedNfse?.issuerDoc,
+                        valor: parsedNfse?.value,
+                        dataEmissao,
+                    },
+                    create: {
+                        empresaId,
+                        chaveAcesso: item.ChaveAcesso,
+                        nsu: itemNsu,
+                        tipoDocumento: item.TipoDocumento,
+                        tipoEvento: item.TipoEvento || undefined,
+                        arquivoUrl,
+                        geradoEm: item.DataHoraGeracao ? new Date(item.DataHoraGeracao) : undefined,
+                        numeroNf: parsedNfse?.numeroNf,
+                        prestadorNome: parsedNfse?.issuerName,
+                        prestadorDoc: parsedNfse?.issuerDoc,
+                        valor: parsedNfse?.value,
+                        dataEmissao,
+                    },
+                });
+
+                totalNovas += 1;
+            }
+
+            cursor = maxNsuNoLote + 1n;
+
+            // Salva o progresso a cada lote — se a próxima consulta for
+            // rejeitada, o que já avançou aqui não se perde.
+            await this.prisma.certificadoDigitalEmpresa.update({
+                where: { empresaId },
+                data: { ultimoNsu: cursor },
+            });
+
+            // Ainda tem lote pela frente — espera antes de consultar de
+            // novo, pra não martelar o webservice nacional.
+            await sleep(SYNC_DELAY_MS);
+        }
+
+        return { totalNovas };
+    }
+
+    // Roda sozinho a cada 10 minutos e tenta buscar NF-e/NFS-e pra toda
+    // empresa com o módulo Financeiro/NF habilitado e certificado
+    // cadastrado, desde que não esteja em cooldown no momento (ver
+    // nfeBloqueadoAte/nfseBloqueadoAte). Todo resultado (sucesso ou erro)
+    // fica registrado em SefazSincronizacaoLog.
+    @Cron(CronExpression.EVERY_10_MINUTES)
+    async autoSincronizarNfs() {
+        const agora = new Date();
+
+        const empresas = await this.prisma.empresa.findMany({
+            where: {
+                ativo: true,
+                modulosHabilitados: { has: 'FINANCEIRO_NF' },
+                certificadoDigital: { isNot: null },
+            },
+            include: { certificadoDigital: true },
+        });
+
+        for (const empresa of empresas) {
+            const certificado = empresa.certificadoDigital;
+
+            if (!certificado) continue;
+
+            if (!certificado.nfeBloqueadoAte || certificado.nfeBloqueadoAte <= agora) {
+                try {
+                    const resultado = await this.runSyncNfEntrada(empresa.id);
+
+                    await this.registrarLogSefaz(
+                        empresa.id,
+                        'NFE_ENTRADA',
+                        true,
+                        resultado.totalNovas > 0
+                            ? `${resultado.totalNovas} NF-e nova(s) encontrada(s).`
+                            : 'Busca automática rodou, nenhuma NF-e nova.',
+                        resultado.totalNovas,
+                    );
+                } catch (error: any) {
+                    await this.registrarLogSefaz(
+                        empresa.id,
+                        'NFE_ENTRADA',
+                        false,
+                        String(error?.message || error),
+                        0,
+                    );
+                }
+            }
+
+            if (!certificado.nfseBloqueadoAte || certificado.nfseBloqueadoAte <= agora) {
+                try {
+                    const resultado = await this.runSyncNfServico(empresa.id);
+
+                    await this.registrarLogSefaz(
+                        empresa.id,
+                        'NFSE_SERVICO',
+                        true,
+                        resultado.totalNovas > 0
+                            ? `${resultado.totalNovas} documento(s) novo(s) encontrado(s).`
+                            : 'Busca automática rodou, nenhum documento novo.',
+                        resultado.totalNovas,
+                    );
+                } catch (error: any) {
+                    await this.registrarLogSefaz(
+                        empresa.id,
+                        'NFSE_SERVICO',
+                        false,
+                        String(error?.message || error),
+                        0,
+                    );
+                }
+            }
+        }
     }
 }

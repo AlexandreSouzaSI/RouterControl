@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Plus, Loader2, CheckCircle2, Trash2, Pencil } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Loader2, CheckCircle2, Trash2, Pencil, Landmark } from 'lucide-react';
 import { api } from '../services/api';
 
 // =============================================================================
@@ -72,6 +73,7 @@ const FORMAS_PAGAMENTO = [
 ];
 
 export function ContasPagar() {
+    const navigate = useNavigate();
     const [mesFiltro, setMesFiltro] = useState(mesAtual());
     const [contas, setContas] = useState<ContaPagar[]>([]);
     const [resumo, setResumo] = useState<Resumo | null>(null);
@@ -255,13 +257,23 @@ export function ContasPagar() {
                     <input type="month" value={mesFiltro} onChange={(e) => setMesFiltro(e.target.value)} className={campoClasse} />
                 </div>
 
-                <button
-                    onClick={() => { limparForm(); setFormAberto((v) => !v); }}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition"
-                >
-                    <Plus size={16} />
-                    Nova Conta
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => navigate('/financeiro-nf/contas-pagar/conciliar')}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                    >
+                        <Landmark size={16} />
+                        Conciliar com banco
+                    </button>
+
+                    <button
+                        onClick={() => { limparForm(); setFormAberto((v) => !v); }}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition"
+                    >
+                        <Plus size={16} />
+                        Nova Conta
+                    </button>
+                </div>
             </div>
 
             {resumo && (
