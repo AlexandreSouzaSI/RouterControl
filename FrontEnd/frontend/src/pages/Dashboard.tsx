@@ -10,6 +10,9 @@ import {
     CheckCircle2,
     Plus,
     X,
+    Pencil,
+    Trash2,
+    Users,
 } from 'lucide-react';
 import {
     BarChart,
@@ -65,7 +68,7 @@ type Transacao = {
 
 type ViagemGps = {
     id: string;
-    veiId: number;
+    veiId: number | null;
     placa: string | null;
     origemMunicipio: string;
     origemUf: string | null;
@@ -75,6 +78,9 @@ type ViagemGps = {
     dataHoraFim: string | null;
     status: 'EM_ANDAMENTO' | 'CONCLUIDA';
     criadaManualmente?: boolean;
+    // Viagem de caminhão de terceiro/agregado — sem rastreamento GPS, sem
+    // conclusão automática.
+    terceiro?: boolean;
     // Só vem preenchido pra viagem manual em andamento cuja origem/destino
     // foram geocodificados com sucesso — o resto vem null.
     progresso?: number | null;
@@ -89,6 +95,7 @@ type VeiculoOpcao = {
 type ResumoViagensConcluidas = {
     total: number;
     porPlaca: { placa: string; quantidade: number }[];
+    porPlacaTerceiros?: { placa: string; quantidade: number }[];
 };
 
 function formatarDataISO(data: Date) {
@@ -173,11 +180,23 @@ export function Dashboard() {
 
     const [veiculosOpcoes, setVeiculosOpcoes] = useState<VeiculoOpcao[]>([]);
     const [modalNovaViagemAberto, setModalNovaViagemAberto] = useState(false);
+    const [tipoViagemNova, setTipoViagemNova] = useState<'propria' | 'terceiro'>('propria');
     const [veiIdSelecionado, setVeiIdSelecionado] = useState<number | null>(null);
+    const [placaTerceiroNova, setPlacaTerceiroNova] = useState('');
     const [origemNova, setOrigemNova] = useState('');
     const [destinoNova, setDestinoNova] = useState('');
     const [salvandoViagem, setSalvandoViagem] = useState(false);
     const [erroNovaViagem, setErroNovaViagem] = useState<string | null>(null);
+
+    // Edição/exclusão de uma viagem já criada (própria ou de terceiro).
+    const [viagemEditando, setViagemEditando] = useState<ViagemGps | null>(null);
+    const [placaEdit, setPlacaEdit] = useState('');
+    const [origemEdit, setOrigemEdit] = useState('');
+    const [destinoEdit, setDestinoEdit] = useState('');
+    const [statusEdit, setStatusEdit] = useState<'EM_ANDAMENTO' | 'CONCLUIDA'>('EM_ANDAMENTO');
+    const [salvandoEdicao, setSalvandoEdicao] = useState(false);
+    const [erroEdicao, setErroEdicao] = useState<string | null>(null);
+    const [excluindoId, setExcluindoId] = useState<string | null>(null);
 
     function fecharModalNovaViagem() {
         setModalNovaViagemAberto(false);
@@ -187,14 +206,21 @@ export function Dashboard() {
     // pessoa já escolheu caminhão ou digitou algo, evita perder o que foi
     // preenchido por engano.
     function aoClicarNoFundo() {
-        if (!veiIdSelecionado && !origemNova.trim() && !destinoNova.trim()) {
+        if (
+            !veiIdSelecionado &&
+            !placaTerceiroNova.trim() &&
+            !origemNova.trim() &&
+            !destinoNova.trim()
+        ) {
             fecharModalNovaViagem();
         }
     }
 
     async function abrirModalNovaViagem() {
         setErroNovaViagem(null);
+        setTipoViagemNova('propria');
         setVeiIdSelecionado(null);
+        setPlacaTerceiroNova('');
         setOrigemNova('');
         setDestinoNova('');
         setModalNovaViagemAberto(true);
@@ -208,7 +234,12 @@ export function Dashboard() {
     }
 
     async function salvarNovaViagem() {
-        if (!veiIdSelecionado || !origemNova.trim() || !destinoNova.trim()) {
+        if (tipoViagemNova === 'terceiro') {
+            if (!placaTerceiroNova.trim() || !origemNova.trim() || !destinoNova.trim()) {
+                setErroNovaViagem('Informe a placa e preencha origem e destino.');
+                return;
+            }
+        } else if (!veiIdSelecionado || !origemNova.trim() || !destinoNova.trim()) {
             setErroNovaViagem('Escolha o caminhão e preencha origem e destino.');
             return;
         }
@@ -217,11 +248,19 @@ export function Dashboard() {
             setSalvandoViagem(true);
             setErroNovaViagem(null);
 
-            await api.post('/trucks-control/viagens/manual', {
-                veiId: veiIdSelecionado,
-                origemMunicipio: origemNova.trim(),
-                destinoMunicipio: destinoNova.trim(),
-            });
+            if (tipoViagemNova === 'terceiro') {
+                await api.post('/trucks-control/viagens/terceiro', {
+                    placa: placaTerceiroNova.trim(),
+                    origemMunicipio: origemNova.trim(),
+                    destinoMunicipio: destinoNova.trim(),
+                });
+            } else {
+                await api.post('/trucks-control/viagens/manual', {
+                    veiId: veiIdSelecionado,
+                    origemMunicipio: origemNova.trim(),
+                    destinoMunicipio: destinoNova.trim(),
+                });
+            }
 
             setModalNovaViagemAberto(false);
             await carregarRastreio();
@@ -231,6 +270,64 @@ export function Dashboard() {
             );
         } finally {
             setSalvandoViagem(false);
+        }
+    }
+
+    function abrirEdicaoViagem(v: ViagemGps) {
+        setErroEdicao(null);
+        setViagemEditando(v);
+        setPlacaEdit(v.placa ?? '');
+        setOrigemEdit(v.origemMunicipio ?? '');
+        setDestinoEdit(v.destinoMunicipio ?? '');
+        setStatusEdit(v.status);
+    }
+
+    function fecharEdicaoViagem() {
+        setViagemEditando(null);
+    }
+
+    async function salvarEdicaoViagem() {
+        if (!viagemEditando) return;
+
+        if (!placaEdit.trim() || !origemEdit.trim()) {
+            setErroEdicao('Informe ao menos a placa e a origem.');
+            return;
+        }
+
+        try {
+            setSalvandoEdicao(true);
+            setErroEdicao(null);
+
+            await api.patch(`/trucks-control/viagens/${viagemEditando.id}`, {
+                placa: placaEdit.trim(),
+                origemMunicipio: origemEdit.trim(),
+                destinoMunicipio: destinoEdit.trim(),
+                status: statusEdit,
+            });
+
+            setViagemEditando(null);
+            await carregarRastreio();
+        } catch (error: any) {
+            setErroEdicao(
+                error?.response?.data?.message ?? 'Erro ao salvar a viagem.',
+            );
+        } finally {
+            setSalvandoEdicao(false);
+        }
+    }
+
+    async function excluirViagem(v: ViagemGps) {
+        if (!confirm(`Excluir a viagem de ${v.placa ?? 'placa não informada'}?`)) return;
+
+        try {
+            setExcluindoId(v.id);
+            await api.delete(`/trucks-control/viagens/${v.id}`);
+            await carregarRastreio();
+        } catch (error) {
+            console.error(error);
+            alert('Não foi possível excluir a viagem.');
+        } finally {
+            setExcluindoId(null);
         }
     }
 
@@ -511,14 +608,45 @@ export function Dashboard() {
                                     key={v.id}
                                     className="p-3 rounded-xl border border-gray-100 dark:border-gray-800/60 bg-gray-50 dark:bg-gray-900/40"
                                 >
-                                    <div className="flex items-center justify-between">
-                                        <span className="font-medium text-gray-900 dark:text-white">
-                                            {v.placa || v.veiId}
-                                        </span>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <span className="font-medium text-gray-900 dark:text-white truncate">
+                                                {v.placa || v.veiId}
+                                            </span>
 
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-500/10 text-indigo-500">
-                                            {formatarTempoDecorrido(v.dataHoraInicio)}
-                                        </span>
+                                            {v.terceiro && (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-500/10 text-purple-500 shrink-0">
+                                                    <Users size={10} />
+                                                    Terceiro
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5 shrink-0">
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-500/10 text-indigo-500">
+                                                {formatarTempoDecorrido(v.dataHoraInicio)}
+                                            </span>
+
+                                            {v.criadaManualmente && (
+                                                <>
+                                                    <button
+                                                        onClick={() => abrirEdicaoViagem(v)}
+                                                        title="Editar viagem"
+                                                        className="p-1 rounded-lg text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 transition"
+                                                    >
+                                                        <Pencil size={12} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => excluirViagem(v)}
+                                                        disabled={excluindoId === v.id}
+                                                        title="Excluir viagem"
+                                                        className="p-1 rounded-lg text-gray-400 hover:bg-red-100 hover:text-red-500 dark:hover:bg-red-500/10 transition disabled:opacity-50"
+                                                    >
+                                                        <Trash2 size={12} />
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
 
                                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -535,7 +663,11 @@ export function Dashboard() {
 
                                     {v.criadaManualmente && (
                                         <div className="mt-2">
-                                            {v.progresso != null ? (
+                                            {v.terceiro ? (
+                                                <span className="inline-block px-2 py-0.5 rounded-full bg-purple-500/10 text-[11px] text-purple-500">
+                                                    Viagem de terceiro — sem rastreamento, conclua editando
+                                                </span>
+                                            ) : v.progresso != null ? (
                                                 <>
                                                     <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
                                                         <div
@@ -574,25 +706,60 @@ export function Dashboard() {
                     Total de {resumoConcluidas?.total ?? 0} viagem(ns) concluída(s) desde o início do mês.
                 </p>
 
-                {!resumoConcluidas || resumoConcluidas.porPlaca.length === 0 ? (
+                {!resumoConcluidas ||
+                (resumoConcluidas.porPlaca.length === 0 &&
+                    (resumoConcluidas.porPlacaTerceiros ?? []).length === 0) ? (
                     <div className="py-6 text-center text-sm text-gray-400 dark:text-gray-500">
                         Nenhuma viagem concluída no mês ainda
                     </div>
                 ) : (
-                    <div className="flex flex-wrap gap-2">
-                        {resumoConcluidas.porPlaca.map((item) => (
-                            <div
-                                key={item.placa}
-                                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-100 dark:border-gray-800/60 bg-gray-50 dark:bg-gray-900/40"
-                            >
-                                <span className="font-semibold text-gray-900 dark:text-white">
-                                    {item.placa}
-                                </span>
-                                <span className="text-sm text-gray-500 dark:text-gray-400">
-                                    — {item.quantidade} viagem(ns) concluída(s)
-                                </span>
+                    <div className="space-y-3">
+                        {resumoConcluidas.porPlaca.length > 0 && (
+                            <div>
+                                <p className="text-xs font-medium text-gray-400 dark:text-gray-500 mb-1.5">
+                                    Frota própria
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                    {resumoConcluidas.porPlaca.map((item) => (
+                                        <div
+                                            key={item.placa}
+                                            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-100 dark:border-gray-800/60 bg-gray-50 dark:bg-gray-900/40"
+                                        >
+                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                                {item.placa}
+                                            </span>
+                                            <span className="text-sm text-gray-500 dark:text-gray-400">
+                                                — {item.quantidade} viagem(ns) concluída(s)
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
-                        ))}
+                        )}
+
+                        {(resumoConcluidas.porPlacaTerceiros ?? []).length > 0 && (
+                            <div>
+                                <p className="text-xs font-medium text-purple-500 mb-1.5 flex items-center gap-1">
+                                    <Users size={12} />
+                                    Terceiros
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                    {(resumoConcluidas.porPlacaTerceiros ?? []).map((item) => (
+                                        <div
+                                            key={item.placa}
+                                            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-500/20 bg-purple-50 dark:bg-purple-500/5"
+                                        >
+                                            <span className="font-semibold text-gray-900 dark:text-white">
+                                                {item.placa}
+                                            </span>
+                                            <span className="text-sm text-gray-500 dark:text-gray-400">
+                                                — {item.quantidade} viagem(ns) concluída(s)
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -769,36 +936,79 @@ export function Dashboard() {
                         </div>
 
                         <div className="space-y-4">
-                            <div>
-                                <label className="text-sm text-gray-500 dark:text-gray-400 block mb-2">
-                                    Caminhão
-                                </label>
-
-                                <div className="flex flex-wrap gap-2">
-                                    {veiculosOpcoes.map((v) => {
-                                        const selecionado = v.veiID === veiIdSelecionado;
-
-                                        return (
-                                            <button
-                                                key={v.veiID}
-                                                onClick={() => setVeiIdSelecionado(v.veiID)}
-                                                className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${selecionado
-                                                    ? 'border-[#E30613] bg-[#E30613]/10 text-[#E30613]'
-                                                    : 'border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60'
-                                                    }`}
-                                            >
-                                                {v.placa ?? `Veículo ${v.veiID}`}
-                                            </button>
-                                        );
-                                    })}
-
-                                    {veiculosOpcoes.length === 0 && (
-                                        <p className="text-sm text-gray-400">
-                                            Carregando caminhões...
-                                        </p>
-                                    )}
-                                </div>
+                            <div className="flex gap-1 p-1 rounded-xl bg-gray-100 dark:bg-gray-900 w-fit">
+                                <button
+                                    onClick={() => setTipoViagemNova('propria')}
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${tipoViagemNova === 'propria'
+                                        ? 'bg-white dark:bg-[#111827] text-gray-900 dark:text-white shadow'
+                                        : 'text-gray-500 dark:text-gray-400'
+                                        }`}
+                                >
+                                    Frota própria
+                                </button>
+                                <button
+                                    onClick={() => setTipoViagemNova('terceiro')}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${tipoViagemNova === 'terceiro'
+                                        ? 'bg-white dark:bg-[#111827] text-gray-900 dark:text-white shadow'
+                                        : 'text-gray-500 dark:text-gray-400'
+                                        }`}
+                                >
+                                    <Users size={14} />
+                                    Terceiros
+                                </button>
                             </div>
+
+                            {tipoViagemNova === 'propria' ? (
+                                <div>
+                                    <label className="text-sm text-gray-500 dark:text-gray-400 block mb-2">
+                                        Caminhão
+                                    </label>
+
+                                    <div className="flex flex-wrap gap-2">
+                                        {veiculosOpcoes.map((v) => {
+                                            const selecionado = v.veiID === veiIdSelecionado;
+
+                                            return (
+                                                <button
+                                                    key={v.veiID}
+                                                    onClick={() => setVeiIdSelecionado(v.veiID)}
+                                                    className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${selecionado
+                                                        ? 'border-[#E30613] bg-[#E30613]/10 text-[#E30613]'
+                                                        : 'border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60'
+                                                        }`}
+                                                >
+                                                    {v.placa ?? `Veículo ${v.veiID}`}
+                                                </button>
+                                            );
+                                        })}
+
+                                        {veiculosOpcoes.length === 0 && (
+                                            <p className="text-sm text-gray-400">
+                                                Carregando caminhões...
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="text-sm text-gray-500 dark:text-gray-400 block mb-1">
+                                        Placa do terceiro
+                                    </label>
+
+                                    <input
+                                        type="text"
+                                        value={placaTerceiroNova}
+                                        onChange={(e) => setPlacaTerceiroNova(e.target.value.toUpperCase())}
+                                        placeholder="Ex.: ABC1D23"
+                                        className="w-full px-3 py-2 rounded-xl text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
+                                    />
+
+                                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                                        Caminhão sem rastreamento GPS — a viagem precisa ser
+                                        concluída manualmente depois (editar → Concluída).
+                                    </p>
+                                </div>
+                            )}
 
                             <div>
                                 <label className="text-sm text-gray-500 dark:text-gray-400 block mb-1">
@@ -835,8 +1045,9 @@ export function Dashboard() {
                             )}
 
                             <p className="text-xs text-gray-400 dark:text-gray-500">
-                                A viagem é concluída sozinha assim que o rastreamento do
-                                caminhão mostrar ele chegando no município de destino.
+                                {tipoViagemNova === 'terceiro'
+                                    ? 'Caminhão de terceiro não tem rastreamento — depois de chegar, edite a viagem e marque como Concluída.'
+                                    : 'A viagem é concluída sozinha assim que o rastreamento do caminhão mostrar ele chegando no município de destino.'}
                             </p>
 
                             <button
@@ -845,6 +1056,113 @@ export function Dashboard() {
                                 className="w-full py-2.5 rounded-xl bg-[#E30613] text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition"
                             >
                                 {salvandoViagem ? 'Salvando...' : 'Salvar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {viagemEditando && (
+                <div
+                    className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+                    onClick={fecharEdicaoViagem}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full max-w-md bg-white dark:bg-[#111827] rounded-2xl shadow-xl border border-gray-200 dark:border-gray-800 p-5"
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="font-semibold text-gray-900 dark:text-white">
+                                Editar Viagem
+                            </h2>
+
+                            <button
+                                onClick={fecharEdicaoViagem}
+                                className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-sm text-gray-500 dark:text-gray-400 block mb-1">
+                                    Placa
+                                </label>
+
+                                <input
+                                    type="text"
+                                    value={placaEdit}
+                                    onChange={(e) => setPlacaEdit(e.target.value.toUpperCase())}
+                                    className="w-full px-3 py-2 rounded-xl text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="text-sm text-gray-500 dark:text-gray-400 block mb-1">
+                                    Origem
+                                </label>
+
+                                <input
+                                    type="text"
+                                    value={origemEdit}
+                                    onChange={(e) => setOrigemEdit(e.target.value)}
+                                    className="w-full px-3 py-2 rounded-xl text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="text-sm text-gray-500 dark:text-gray-400 block mb-1">
+                                    Destino
+                                </label>
+
+                                <input
+                                    type="text"
+                                    value={destinoEdit}
+                                    onChange={(e) => setDestinoEdit(e.target.value)}
+                                    className="w-full px-3 py-2 rounded-xl text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="text-sm text-gray-500 dark:text-gray-400 block mb-2">
+                                    Status
+                                </label>
+
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setStatusEdit('EM_ANDAMENTO')}
+                                        className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${statusEdit === 'EM_ANDAMENTO'
+                                            ? 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                            : 'border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60'
+                                            }`}
+                                    >
+                                        Em andamento
+                                    </button>
+                                    <button
+                                        onClick={() => setStatusEdit('CONCLUIDA')}
+                                        className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${statusEdit === 'CONCLUIDA'
+                                            ? 'border-green-500 bg-green-500/10 text-green-600 dark:text-green-400'
+                                            : 'border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60'
+                                            }`}
+                                    >
+                                        Concluída
+                                    </button>
+                                </div>
+                            </div>
+
+                            {erroEdicao && (
+                                <p className="text-sm text-red-600 dark:text-red-400">
+                                    {erroEdicao}
+                                </p>
+                            )}
+
+                            <button
+                                onClick={salvarEdicaoViagem}
+                                disabled={salvandoEdicao}
+                                className="w-full py-2.5 rounded-xl bg-[#E30613] text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition"
+                            >
+                                {salvandoEdicao ? 'Salvando...' : 'Salvar alterações'}
                             </button>
                         </div>
                     </div>

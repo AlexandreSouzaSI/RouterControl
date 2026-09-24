@@ -7,18 +7,20 @@ import {
     Query,
 } from '@nestjs/common';
 import { PagamentosService } from './pagamentos.service';
+import { EmpresaAtual } from '../../auth/empresa-atual.decorator';
 
 @Controller('pagamentos')
 export class PagamentosController {
     constructor(private service: PagamentosService) { }
 
     @Get('config')
-    getConfig() {
-        return this.service.getConfig();
+    getConfig(@EmpresaAtual() empresaId: string) {
+        return this.service.getConfig(empresaId);
     }
 
     @Patch('config')
     updateConfig(
+        @EmpresaAtual() empresaId: string,
         @Body()
         body: {
             salarioBase?: number;
@@ -30,16 +32,17 @@ export class PagamentosController {
             adiantamento?: number;
         },
     ) {
-        return this.service.updateConfig(body);
+        return this.service.updateConfig(empresaId, body);
     }
 
     @Get('config-caminhoes')
-    getConfigCaminhoes() {
-        return this.service.getConfigCaminhoes();
+    getConfigCaminhoes(@EmpresaAtual() empresaId: string) {
+        return this.service.getConfigCaminhoes(empresaId);
     }
 
     @Patch('config-caminhoes/:caminhaoId')
     updateConfigCaminhao(
+        @EmpresaAtual() empresaId: string,
         @Param('caminhaoId') caminhaoId: string,
         @Body()
         body: {
@@ -50,6 +53,7 @@ export class PagamentosController {
         },
     ) {
         return this.service.updateConfigCaminhao(
+            empresaId,
             caminhaoId,
             body,
         );
@@ -57,6 +61,7 @@ export class PagamentosController {
 
     @Get('calcular')
     calcular(
+        @EmpresaAtual() empresaId: string,
         @Query('placa') placa?: string,
         @Query('mes') mes?: string,
         @Query('dataInicio') dataInicio?: string,
@@ -64,7 +69,7 @@ export class PagamentosController {
         @Query('adiantamento') adiantamento?: string,
         @Query('faturamentoBruto') faturamentoBruto?: string,
     ) {
-        return this.service.calcular({
+        return this.service.calcular(empresaId, {
             placa,
             mes,
             dataInicio,

@@ -5,6 +5,7 @@ import { CreateCategoriaFinanceiraDto } from './dto/create-categoria-financeira.
 import { ClassificarTransacaoDto } from './dto/classificar-transacao.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CreateRegraClassificacaoDto } from './dto/create-regra-classificacao.dto';
+import { EmpresaAtual } from '../auth/empresa-atual.decorator';
 
 @Controller('financeiro')
 export class FinanceiroController {
@@ -12,56 +13,56 @@ export class FinanceiroController {
 
     @Post('importar-extrato')
     @UseInterceptors(FileInterceptor('file'))
-    importarExtrato(@UploadedFile() file: Express.Multer.File) {
-        console.log("aqui ", file)
-        return this.financeiroService.importarExtrato(file);
+    importarExtrato(@EmpresaAtual() empresaId: string, @UploadedFile() file: Express.Multer.File) {
+        return this.financeiroService.importarExtrato(empresaId, file);
     }
 
     @Get('caminhoes')
-    listarCaminhoes() {
-        return this.financeiroService.listarCaminhoes();
+    listarCaminhoes(@EmpresaAtual() empresaId: string) {
+        return this.financeiroService.listarCaminhoes(empresaId);
     }
 
     @Get('regras')
-    listarRegras() {
-        return this.financeiroService.listarRegras();
+    listarRegras(@EmpresaAtual() empresaId: string) {
+        return this.financeiroService.listarRegras(empresaId);
     }
 
     @Post('regras')
-    criarRegra(@Body() dto: CreateRegraClassificacaoDto) {
-        return this.financeiroService.criarRegra(dto);
+    criarRegra(@EmpresaAtual() empresaId: string, @Body() dto: CreateRegraClassificacaoDto) {
+        return this.financeiroService.criarRegra(empresaId, dto);
     }
 
     @Post('reprocessar-classificacao')
-    reprocessarClassificacao() {
-        return this.financeiroService.reprocessarClassificacao();
+    reprocessarClassificacao(@EmpresaAtual() empresaId: string) {
+        return this.financeiroService.reprocessarClassificacao(empresaId);
     }
 
     @Get('transacoes')
-    listarTransacoes(@Query() filtros: FinanceiroFiltrosDto) {
-        return this.financeiroService.listarTransacoes(filtros);
+    listarTransacoes(@EmpresaAtual() empresaId: string, @Query() filtros: FinanceiroFiltrosDto) {
+        return this.financeiroService.listarTransacoes(empresaId, filtros);
     }
 
     @Get('resumo')
-    resumo(@Query() filtros: FinanceiroFiltrosDto) {
-        return this.financeiroService.resumo(filtros);
+    resumo(@EmpresaAtual() empresaId: string, @Query() filtros: FinanceiroFiltrosDto) {
+        return this.financeiroService.resumo(empresaId, filtros);
     }
 
     @Get('categorias')
-    listarCategorias() {
-        return this.financeiroService.listarCategorias();
+    listarCategorias(@EmpresaAtual() empresaId: string) {
+        return this.financeiroService.listarCategorias(empresaId);
     }
 
     @Post('categorias')
-    criarCategoria(@Body() dto: CreateCategoriaFinanceiraDto) {
-        return this.financeiroService.criarCategoria(dto);
+    criarCategoria(@EmpresaAtual() empresaId: string, @Body() dto: CreateCategoriaFinanceiraDto) {
+        return this.financeiroService.criarCategoria(empresaId, dto);
     }
 
     @Patch('transacoes/:id/classificar')
     classificarTransacao(
+        @EmpresaAtual() empresaId: string,
         @Param('id') id: string,
         @Body() dto: ClassificarTransacaoDto,
     ) {
-        return this.financeiroService.classificarTransacao(id, dto);
+        return this.financeiroService.classificarTransacao(empresaId, id, dto);
     }
 }

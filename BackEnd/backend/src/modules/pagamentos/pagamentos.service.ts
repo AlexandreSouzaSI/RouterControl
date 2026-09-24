@@ -1,18 +1,21 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class PagamentosService {
     constructor(private prisma: PrismaService) { }
 
-    async getConfig() {
+    async getConfig(empresaId: string) {
         const config =
-            await this.prisma.configuracaoPagamentoMotorista.findFirst();
+            await this.prisma.configuracaoPagamentoMotorista.findUnique({
+                where: { empresaId },
+            });
 
         if (config) return config;
 
         return this.prisma.configuracaoPagamentoMotorista.create({
             data: {
+                empresaId,
                 salarioBase: 3352,
                 valorDiaria: 200,
                 valorPorViagem: 150,
@@ -24,16 +27,19 @@ export class PagamentosService {
         });
     }
 
-    async updateConfig(data: {
-        salarioBase?: number;
-        valorDiaria?: number;
-        valorPorViagem?: number;
-        bonusMetaViagens?: number;
-        metaViagens?: number;
-        diasBaseSalario?: number;
-        adiantamento?: number;
-    }) {
-        const config = await this.getConfig();
+    async updateConfig(
+        empresaId: string,
+        data: {
+            salarioBase?: number;
+            valorDiaria?: number;
+            valorPorViagem?: number;
+            bonusMetaViagens?: number;
+            metaViagens?: number;
+            diasBaseSalario?: number;
+            adiantamento?: number;
+        },
+    ) {
+        const config = await this.getConfig(empresaId);
 
         return this.prisma.configuracaoPagamentoMotorista.update({
             where: {
@@ -51,9 +57,10 @@ export class PagamentosService {
         });
     }
 
-    async getConfigCaminhoes() {
+    async getConfigCaminhoes(empresaId: string) {
         const caminhoes =
             await this.prisma.caminhao.findMany({
+                where: { empresaId },
                 include: {
                     configPagamento: true,
                 },
@@ -77,7 +84,24 @@ export class PagamentosService {
         }));
     }
 
+    // Confere que o caminhão realmente pertence à empresa de quem está
+    // chamando antes de deixar ler/mexer na config dele — sem isso, dava
+    // pra alterar a config de pagamento do caminhão de outra empresa só
+    // sabendo o id.
+    private async validarCaminhaoDaEmpresa(caminhaoId: string, empresaId: string) {
+        const caminhao = await this.prisma.caminhao.findFirst({
+            where: { id: caminhaoId, empresaId },
+        });
+
+        if (!caminhao) {
+            throw new ForbiddenException('Caminhão não encontrado nessa empresa.');
+        }
+
+        return caminhao;
+    }
+
     async updateConfigCaminhao(
+        empresaId: string,
         caminhaoId: string,
         data: {
             tipoCalculo?:
@@ -91,6 +115,8 @@ export class PagamentosService {
             ativo?: boolean;
         },
     ) {
+        await this.validarCaminhaoDaEmpresa(caminhaoId, empresaId);
+
         const existente =
             await this.prisma.configuracaoPagamentoCaminhao.findUnique(
                 {
@@ -134,7 +160,7 @@ export class PagamentosService {
         );
     }
 
-    async calcular(params: {
+    async calcular(empresaId: string, params: {
         placa?: string;
         mes?: string;
         dataInicio?: string;
@@ -142,18 +168,21 @@ export class PagamentosService {
         adiantamento?: number;
         faturamentoBruto?: number;
     }) {
-        const config = await this.getConfig();
+        const config = await this.getConfig(empresaId);
 
         const periodo = this.definirPeriodo(params);
 
         const caminhoes = await this.prisma.caminhao.findMany({
-            where: params.placa
-                ? {
-                    placa: {
-                        contains: params.placa.toUpperCase(),
-                    },
-                }
-                : {},
+            where: {
+                empresaId,
+                ...(params.placa
+                    ? {
+                        placa: {
+                            contains: params.placa.toUpperCase(),
+                        },
+                    }
+                    : {}),
+            },
             orderBy: {
                 placa: 'asc',
             },

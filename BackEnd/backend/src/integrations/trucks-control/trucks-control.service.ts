@@ -1,32 +1,247 @@
-import { Injectable, InternalServerErrorException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import axios from 'axios';
 import { XMLParser } from 'fast-xml-parser';
 import AdmZip from 'adm-zip';
 import * as zlib from 'zlib';
 import { PrismaService } from '../../prisma/prisma.service';
+import { cifrar, decifrar } from '../../common/crypto.util';
+
+// Estado em memória (cache de veículos/mensagens, cursores de mId) — um
+// registro por empresa, porque cada empresa tem seu próprio login na
+// Trucks Control e sua própria fila de mensagens. Antes do retrofit
+// multi-empresa isso era um punhado de campos escalares na classe
+// (fazia sentido quando só existia um login pro sistema inteiro).
+interface EstadoEmpresaTrucks {
+    veiculosCache: any[];
+    ultimaBuscaVeiculosEm: number;
+
+    mensagensCache: any[];
+    ultimaBuscaMensagensEm: number;
+
+    lastMid: number;
+
+    // Cursor separado do cron de persistência — não pode ser o mesmo
+    // `lastMid` usado pela tela ao vivo (ver comentário em
+    // requisitarMensagens).
+    lastMidPersistido: number;
+}
 
 @Injectable()
 export class TrucksControlService implements OnModuleInit {
     constructor(private readonly prisma: PrismaService) { }
 
-    // Roda uma vez assim que o backend sobe, em vez de esperar o próximo
-    // horário "redondo" do cron — sem isso, depois de um restart a tela
-    // podia ficar minutos sem nada. Primeiro recarrega a lista de
-    // veículos salva no banco (pro cache em memória não começar vazio),
-    // depois dispara os dois crons uma vez cada.
-    async onModuleInit() {
-        await this.carregarVeiculosDoBanco();
-        this.atualizarListaVeiculos();
-        this.persistirPosicoes();
+    private readonly url = process.env.TRUCKS_URL!;
+
+    private parser = new XMLParser({
+        ignoreAttributes: false,
+        attributeNamePrefix: '',
+    });
+
+    private readonly estados = new Map<string, EstadoEmpresaTrucks>();
+
+    // ---- Rodízio entre ambientes (produção Hostinger x dev local) ----
+    //
+    // A Trucks Control limita o intervalo mínimo de chamada POR LOGIN, do
+    // lado do servidor deles — sem noção nenhuma de "isso aqui é o
+    // ambiente de produção" ou "isso aqui é o dev local". Se produção e
+    // local rodam ao mesmo tempo com a mesma credencial, cada um controla
+    // seu próprio cooldown (bancos separados) sem saber da existência do
+    // outro: um chama achando que está liberado, e minutos depois o outro
+    // chama também achando a mesma coisa — daí "código 7" o tempo todo,
+    // porque na prática a cadência combinada dos dois é o dobro do que
+    // cada lado imagina que está respeitando.
+    //
+    // Sem infraestrutura compartilhada entre os dois backends (bancos
+    // diferentes, hosts diferentes), a saída é dividir o tempo em blocos
+    // fixos e cada ambiente só chamar a API no bloco que é "a vez dele" —
+    // baseado só no relógio (que os dois têm sincronizado via NTP), sem
+    // precisar se falar. Configurado via env:
+    //   TRUCKS_SLOT_INDEX   = 0, 1, 2... (qual é esse ambiente; padrão 0)
+    //   TRUCKS_SLOT_TOTAL   = quantos ambientes estão se revezando agora
+    //                         (padrão 1 = sozinho, sempre pode chamar)
+    //   TRUCKS_SLOT_MINUTOS = duração de cada bloco em minutos (padrão 15)
+    // Ex.: produção com INDEX=0/TOTAL=2 e local com INDEX=1/TOTAL=2 faz os
+    // dois se revezarem automaticamente, nunca chamando no mesmo bloco.
+    // Quando só um dos dois estiver ativo, volte TOTAL=1 nele pra
+    // recuperar a frequência cheia.
+    private readonly meuSlotIndex = Math.max(0, Number(process.env.TRUCKS_SLOT_INDEX ?? 0));
+    private readonly totalSlots = Math.max(1, Number(process.env.TRUCKS_SLOT_TOTAL ?? 1));
+    private readonly duracaoSlotMs =
+        Math.max(1, Number(process.env.TRUCKS_SLOT_MINUTOS ?? 15)) * 60 * 1000;
+
+    private estaNoMeuSlot(): boolean {
+        if (this.totalSlots <= 1) return true;
+        const bloco = Math.floor(Date.now() / this.duracaoSlotMs);
+        return bloco % this.totalSlots === this.meuSlotIndex;
     }
 
-    private async carregarVeiculosDoBanco() {
+    private estado(empresaId: string): EstadoEmpresaTrucks {
+        let e = this.estados.get(empresaId);
+
+        if (!e) {
+            e = {
+                veiculosCache: [],
+                ultimaBuscaVeiculosEm: 0,
+                mensagensCache: [],
+                ultimaBuscaMensagensEm: 0,
+                lastMid: 0,
+                lastMidPersistido: 0,
+            };
+            this.estados.set(empresaId, e);
+        }
+
+        return e;
+    }
+
+    // Só recarrega do banco o que já tinha sido salvo (cache em memória
+    // não começa vazio) — NÃO dispara nenhuma chamada de verdade pra
+    // Trucks Control aqui. Isso é de propósito: em desenvolvimento o
+    // `start:dev` reinicia o processo a cada arquivo salvo, e se cada
+    // reinício tentasse uma chamada real na hora, uma sessão de edição
+    // de algumas horas dispararia dezenas de tentativas — e se cada
+    // "não atingiu o tempo mínimo" (código 7) empurra o cooldown do lado
+    // da Trucks Control pra frente, isso pode manter a conta bloqueada
+    // indefinidamente, mesmo respeitando o intervalo mínimo daqui. As
+    // chamadas de verdade ficam só por conta dos crons abaixo, que
+    // disparam em horário fixo (não a cada restart).
+    async onModuleInit() {
         try {
-            const salvos = await this.prisma.veiculoTrucksControl.findMany();
+            const credenciais = await this.prisma.trucksControlCredencial.findMany({
+                where: { ativo: true },
+            });
+
+            for (const credencial of credenciais) {
+                await this.carregarVeiculosDoBanco(credencial.empresaId);
+            }
+        } catch (error: any) {
+            console.error(
+                'Erro ao carregar credenciais da Trucks Control no boot:',
+                error.message ?? error,
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Credencial por empresa (login/senha cifrados)
+    // -----------------------------------------------------------------
+
+    // Devolve login + senha em texto puro (só pra montar o XML da
+    // requisição na hora) — nunca expor isso em resposta HTTP.
+    private async obterCredencialAtiva(
+        empresaId: string,
+    ): Promise<{ login: string; senha: string } | null> {
+        try {
+            const registro = await this.prisma.trucksControlCredencial.findUnique({
+                where: { empresaId },
+            });
+
+            if (!registro || !registro.ativo) return null;
+
+            const senha = decifrar({
+                cifrado: registro.senhaCifrada,
+                iv: registro.senhaIv,
+                authTag: registro.senhaAuthTag,
+            });
+
+            return { login: registro.login, senha };
+        } catch (error: any) {
+            console.error(
+                `Erro ao decifrar credencial da Trucks Control (empresa=${empresaId}):`,
+                error.message ?? error,
+            );
+            return null;
+        }
+    }
+
+    // Pra tela de Cadastros — nunca devolve a senha, só se já tem uma
+    // credencial configurada e o login (pra reconhecer visualmente qual
+    // conta está em uso).
+    async obterCredencial(empresaId: string) {
+        const registro = await this.prisma.trucksControlCredencial.findUnique({
+            where: { empresaId },
+        });
+
+        if (!registro) {
+            return { configurado: false, login: null, ativo: false };
+        }
+
+        return { configurado: true, login: registro.login, ativo: registro.ativo };
+    }
+
+    async salvarCredencial(empresaId: string, body: { login: string; senha: string }) {
+        const login = body.login?.trim();
+        const senha = body.senha?.trim();
+
+        if (!login || !senha) {
+            throw new BadRequestException('Informe o login e a senha da conta na Trucks Control.');
+        }
+
+        const { cifrado, iv, authTag } = cifrar(senha);
+
+        await this.prisma.trucksControlCredencial.upsert({
+            where: { empresaId },
+            update: {
+                login,
+                senhaCifrada: cifrado,
+                senhaIv: iv,
+                senhaAuthTag: authTag,
+                ativo: true,
+            },
+            create: {
+                empresaId,
+                login,
+                senhaCifrada: cifrado,
+                senhaIv: iv,
+                senhaAuthTag: authTag,
+            },
+        });
+
+        // Limpa o cache em memória dessa empresa pra próxima chamada já
+        // usar a credencial nova (evita ficar batendo com a senha antiga
+        // até o cache expirar sozinho).
+        this.estados.delete(empresaId);
+
+        return { ok: true };
+    }
+
+    async alternarCredencialAtiva(empresaId: string, ativo: boolean) {
+        const registro = await this.prisma.trucksControlCredencial.findUnique({
+            where: { empresaId },
+        });
+
+        if (!registro) {
+            throw new NotFoundException('Nenhuma credencial da Trucks Control cadastrada pra essa empresa.');
+        }
+
+        await this.prisma.trucksControlCredencial.update({
+            where: { empresaId },
+            data: { ativo },
+        });
+
+        this.estados.delete(empresaId);
+
+        return { ok: true };
+    }
+
+    async removerCredencial(empresaId: string) {
+        await this.prisma.trucksControlCredencial.deleteMany({ where: { empresaId } });
+        this.estados.delete(empresaId);
+        return { ok: true };
+    }
+
+    // -----------------------------------------------------------------
+    // Lista de veículos (RequestVeiculo)
+    // -----------------------------------------------------------------
+
+    private async carregarVeiculosDoBanco(empresaId: string) {
+        try {
+            const salvos = await this.prisma.veiculoTrucksControl.findMany({
+                where: { empresaId },
+            });
 
             if (salvos.length > 0) {
-                this.veiculosCache = salvos.map((v) => ({
+                this.estado(empresaId).veiculosCache = salvos.map((v) => ({
                     veiID: v.veiId,
                     placa: v.placa,
                     equipamento: v.equipamento,
@@ -38,19 +253,19 @@ export class TrucksControlService implements OnModuleInit {
             }
         } catch (error: any) {
             console.error(
-                'Erro ao carregar veículos salvos do banco:',
+                `Erro ao carregar veículos salvos do banco (empresa=${empresaId}):`,
                 error.message ?? error,
             );
         }
     }
 
-    private async salvarVeiculosNoBanco(veiculos: any[]) {
+    private async salvarVeiculosNoBanco(empresaId: string, veiculos: any[]) {
         try {
             for (const v of veiculos) {
                 if (!v.veiID) continue;
 
                 await this.prisma.veiculoTrucksControl.upsert({
-                    where: { veiId: v.veiID },
+                    where: { empresaId_veiId: { empresaId, veiId: v.veiID } },
                     update: {
                         placa: v.placa,
                         equipamento: v.equipamento,
@@ -60,6 +275,7 @@ export class TrucksControlService implements OnModuleInit {
                         chassi: v.chassi,
                     },
                     create: {
+                        empresaId,
                         veiId: v.veiID,
                         placa: v.placa,
                         equipamento: v.equipamento,
@@ -69,45 +285,66 @@ export class TrucksControlService implements OnModuleInit {
                         chassi: v.chassi,
                     },
                 });
+
+                await this.garantirCaminhao(empresaId, v.placa);
             }
         } catch (error: any) {
             console.error(
-                'Erro ao salvar veículos no banco:',
+                `Erro ao salvar veículos no banco (empresa=${empresaId}):`,
                 error.message ?? error,
             );
         }
     }
 
-    private readonly url = process.env.TRUCKS_URL!;
-    private readonly login = process.env.TRUCKS_LOGIN!;
-    private readonly senha = process.env.TRUCKS_SENHA!;
+    // Auto-provisiona o Caminhao (cadastro usado pelo resto do sistema —
+    // Financeiro, Fiscal, Relatórios) a partir de toda placa que aparecer
+    // na conta da Trucks Control da empresa. Não precisa mais passar pelo
+    // cadastro manual: a placa nova já chega pronta, vinculada à empresa
+    // certa. Se a placa já pertencer a outra empresa (não deveria
+    // acontecer numa placa real, mas por segurança), não reatribui —
+    // só avisa no log.
+    private async garantirCaminhao(empresaId: string, placaBruta: string | null | undefined) {
+        const placa = placaBruta?.trim().toUpperCase();
+        if (!placa) return;
 
-    private parser = new XMLParser({
-        ignoreAttributes: false,
-        attributeNamePrefix: '',
-    });
+        try {
+            const existente = await this.prisma.caminhao.findUnique({ where: { placa } });
 
-    private veiculosCache: any[] = [];
-    private ultimaBuscaVeiculosEm = 0;
+            if (!existente) {
+                await this.prisma.caminhao.create({ data: { placa, empresaId } });
+                return;
+            }
 
-    private mensagensCache: any[] = [];
-    private ultimaBuscaMensagensEm = 0;
+            if (!existente.empresaId) {
+                await this.prisma.caminhao.update({
+                    where: { id: existente.id },
+                    data: { empresaId },
+                });
+                return;
+            }
 
-    private lastMid = 0;
+            if (existente.empresaId !== empresaId) {
+                console.warn(
+                    `[TrucksControl] Placa ${placa} já pertence à empresa ${existente.empresaId} — ignorando vínculo com ${empresaId}.`,
+                );
+            }
+        } catch (error: any) {
+            console.error(
+                `Erro ao provisionar caminhão automaticamente (placa=${placa}, empresa=${empresaId}):`,
+                error.message ?? error,
+            );
+        }
+    }
 
-    // Cursor separado do cron de persistência — não pode ser o mesmo
-    // `lastMid` usado pela tela ao vivo (ver comentário em
-    // requisitarMensagens).
-    private lastMidPersistido = 0;
-
-    async listarVeiculosComCache(forcarApi = true) {
+    async listarVeiculosComCache(empresaId: string, forcarApi = true) {
+        const estado = this.estado(empresaId);
         const agora = Date.now();
-        const passou5Minutos = agora - this.ultimaBuscaVeiculosEm >= 5 * 60 * 1000;
+        const passou5Minutos = agora - estado.ultimaBuscaVeiculosEm >= 5 * 60 * 1000;
 
-        if (this.veiculosCache.length > 0 && !passou5Minutos) {
+        if (estado.veiculosCache.length > 0 && !passou5Minutos) {
             return {
                 origem: 'cache',
-                veiculos: this.veiculosCache,
+                veiculos: estado.veiculosCache,
             };
         }
 
@@ -120,15 +357,54 @@ export class TrucksControlService implements OnModuleInit {
         if (!forcarApi) {
             return {
                 origem:
-                    this.veiculosCache.length > 0 ? 'cache-desatualizado' : 'sem-cache',
-                veiculos: this.veiculosCache,
+                    estado.veiculosCache.length > 0 ? 'cache-desatualizado' : 'sem-cache',
+                veiculos: estado.veiculosCache,
             };
         }
 
-        const veiculos = await this.listarVeiculos();
+        // Guarda persistida no banco (sobrevive a reinício do backend) —
+        // ver comentário grande em podeChamarApi(). 30 minutos é bem mais
+        // do que o mínimo que a Trucks Control diz exigir, de propósito:
+        // depois de um episódio de bloqueio ("código 7" repetido), é
+        // melhor pecar por cautela — a lista de placas muda raramente,
+        // não há necessidade nenhuma de tentar de novo cedo. O segundo
+        // check (tipo 'Veiculo_erro') é um cooldown mais longo ainda,
+        // que só é armado quando a própria Trucks Control já rejeitou
+        // por "muito cedo" — evita bater de novo enquanto o bloqueio do
+        // lado deles ainda não zerou.
+        const dentroDoMeuSlot = this.estaNoMeuSlot();
+        const podeChamar =
+            dentroDoMeuSlot && (await this.podeChamarApi(empresaId, 'Veiculo', 30 * 60 * 1000));
+        const podeChamarAposErro = await this.podeChamarApi(empresaId, 'Veiculo_erro', 60 * 60 * 1000);
 
-        this.veiculosCache = veiculos;
-        this.ultimaBuscaVeiculosEm = agora;
+        if (!podeChamar || !podeChamarAposErro) {
+            const motivo = !dentroDoMeuSlot
+                ? ` (fora do rodízio deste ambiente — slot ${this.meuSlotIndex + 1}/${this.totalSlots})`
+                : !podeChamarAposErro
+                    ? ' (em cooldown estendido por erro anterior)'
+                    : '';
+
+            console.log(
+                `[TrucksControl] ${new Date().toISOString()} empresa=${empresaId} — Pulando RequestVeiculo, ainda dentro do intervalo mínimo${motivo}.`,
+            );
+
+            if (estado.veiculosCache.length === 0) {
+                await this.carregarVeiculosDoBanco(empresaId);
+            }
+
+            return {
+                origem:
+                    estado.veiculosCache.length > 0
+                        ? 'cache-aguardando-intervalo-minimo'
+                        : 'sem-cache',
+                veiculos: estado.veiculosCache,
+            };
+        }
+
+        const veiculos = await this.listarVeiculos(empresaId);
+
+        estado.veiculosCache = veiculos;
+        estado.ultimaBuscaVeiculosEm = agora;
 
         return {
             origem: 'api',
@@ -137,44 +413,137 @@ export class TrucksControlService implements OnModuleInit {
     }
 
     /**
-     * Atualização automática da lista de placas/veículos — roda a cada 10
-     * minutos (bem acima do mínimo de 5min que a API exige pra
-     * RequestVeiculo).
+     * Confere no banco (não só na memória) se já pode chamar de novo esse
+     * tipo de requisição da Trucks Control, PARA ESSA EMPRESA. A API
+     * impõe um intervalo mínimo entre chamadas do mesmo login — e ela
+     * conta esse tempo do lado dela, não do nosso processo. Guardar só em
+     * memória funciona enquanto o backend fica no ar, mas em
+     * desenvolvimento o `start:dev` reinicia a cada salvamento de
+     * arquivo — cada reinício zerava o controle em memória e tentava
+     * chamar de novo na hora, mesmo que a chamada anterior (de antes do
+     * restart) tivesse sido há poucos segundos, e a API rejeitava com
+     * "código 7". Persistindo no banco, o controle sobrevive ao restart.
      */
-    @Cron('*/10 * * * *')
-    async atualizarListaVeiculos() {
+    private async podeChamarApi(
+        empresaId: string,
+        tipoRequisicao: string,
+        intervaloMinimoMs: number,
+    ): Promise<boolean> {
         try {
-            await this.listarVeiculosComCache(true);
+            const registro = await this.prisma.trucksControlRateLimit.findUnique({
+                where: { empresaId_tipoRequisicao: { empresaId, tipoRequisicao } },
+            });
+
+            if (!registro) return true;
+
+            const passou = Date.now() - registro.ultimaChamadaEm.getTime();
+
+            return passou >= intervaloMinimoMs;
+        } catch (error: any) {
+            // Se o banco falhar por algum motivo, não trava a integração —
+            // deixa tentar chamar a API normalmente (na pior hipótese ela
+            // mesma rejeita com código 7, que já é tratado graciosamente).
+            console.error(
+                'Erro ao consultar rate limit da Trucks Control:',
+                error.message ?? error,
+            );
+            return true;
+        }
+    }
+
+    // Registra "chamei agora" pra esse tipo de requisição dessa empresa —
+    // sempre, tenha a API aceitado ou rejeitado (o que importa é que uma
+    // requisição saiu pro servidor deles, então o relógio deles começou a
+    // contar).
+    private async registrarChamadaApi(empresaId: string, tipoRequisicao: string): Promise<void> {
+        try {
+            await this.prisma.trucksControlRateLimit.upsert({
+                where: { empresaId_tipoRequisicao: { empresaId, tipoRequisicao } },
+                update: { ultimaChamadaEm: new Date() },
+                create: { empresaId, tipoRequisicao, ultimaChamadaEm: new Date() },
+            });
         } catch (error: any) {
             console.error(
-                'Erro ao atualizar lista de veículos:',
+                'Erro ao registrar rate limit da Trucks Control:',
                 error.message ?? error,
             );
         }
     }
 
-    async listarVeiculos() {
+    /**
+     * Atualização automática da lista de placas/veículos — roda a cada 10
+     * minutos (o cooldown de verdade é imposto pelo gate persistido em
+     * podeChamarApi, de 30 min normalmente e 1h depois de um "código 7"
+     * — ver listarVeiculosComCache), uma vez pra cada empresa com
+     * credencial ativa. Rodar o cron a cada 10 min só garante que, assim
+     * que o cooldown liberar, a próxima checagem não demora muito.
+     */
+    @Cron('*/10 * * * *')
+    async atualizarListaVeiculos() {
+        const credenciais = await this.prisma.trucksControlCredencial.findMany({
+            where: { ativo: true },
+        });
+
+        for (const credencial of credenciais) {
+            try {
+                await this.listarVeiculosComCache(credencial.empresaId, true);
+            } catch (error: any) {
+                console.error(
+                    `Erro ao atualizar lista de veículos (empresa=${credencial.empresaId}):`,
+                    error.message ?? error,
+                );
+            }
+        }
+    }
+
+    async listarVeiculos(empresaId: string) {
+        const credencial = await this.obterCredencialAtiva(empresaId);
+
+        if (!credencial) {
+            console.warn(
+                `[TrucksControl] empresa=${empresaId} sem credencial ativa — pulando RequestVeiculo.`,
+            );
+            return this.estado(empresaId).veiculosCache;
+        }
+
         const xml = `
 <RequestVeiculo>
-  <login>${this.login}</login>
-  <senha>${this.senha}</senha>
+  <login>${credencial.login}</login>
+  <senha>${credencial.senha}</senha>
 </RequestVeiculo>`;
 
         const data = await this.postXml(xml);
 
-        if (data?.ErrorRequest) {
-            console.warn('Erro Trucks RequestVeiculo:', data.ErrorRequest);
+        await this.registrarChamadaApi(empresaId, 'Veiculo');
 
-            if (this.veiculosCache.length > 0) {
-                return this.veiculosCache;
+        if (data?.ErrorRequest) {
+            console.warn(
+                `[TrucksControl] ${new Date().toISOString()} empresa=${empresaId} Erro RequestVeiculo:`,
+                data.ErrorRequest,
+            );
+
+            // Código 7 = "não atingiu o tempo mínimo pra reenvio" — a
+            // Trucks Control está dizendo que ainda estamos dentro do
+            // cooldown DELA, que aparentemente é bem maior do que os 30
+            // minutos que a gente assume acima. Arma o cooldown extra de
+            // 1h pra não insistir e evitar empurrar esse bloqueio pra
+            // frente de novo.
+            if (Number(data.ErrorRequest?.codigo) === 7) {
+                await this.registrarChamadaApi(empresaId, 'Veiculo_erro');
+            }
+
+            const estado = this.estado(empresaId);
+
+            if (estado.veiculosCache.length > 0) {
+                return estado.veiculosCache;
             }
 
             // Cache em memória vazio (ex: acabou de reiniciar e ainda não
             // deu tempo do onModuleInit carregar) — tenta o banco antes de
             // desistir e devolver lista vazia pra tela.
-            await this.carregarVeiculosDoBanco();
+            await this.carregarVeiculosDoBanco(empresaId);
 
-            return this.veiculosCache;
+            return estado.veiculosCache;
         }
 
         const veiculos = this.toArray(data?.ResponseVeiculo?.Veiculo).map(
@@ -192,29 +561,54 @@ export class TrucksControlService implements OnModuleInit {
             }),
         );
 
-        await this.salvarVeiculosNoBanco(veiculos);
+        await this.salvarVeiculosNoBanco(empresaId, veiculos);
 
         return veiculos;
     }
 
+    // -----------------------------------------------------------------
+    // Mensagens / posições (RequestMensagemCB)
+    // -----------------------------------------------------------------
+
     /**
      * Chamada crua da API (sem tocar em nenhum cursor de instância) —
      * usada tanto pelo fluxo ao vivo (buscarMensagens, que usa e avança
-     * this.lastMid) quanto pelo cron de persistência (que tem o próprio
-     * cursor independente, this.lastMidPersistido). Os dois NÃO podem
+     * estado.lastMid) quanto pelo cron de persistência (que tem o próprio
+     * cursor independente, estado.lastMidPersistido). Os dois NÃO podem
      * compartilhar o mesmo cursor: se compartilhassem, o cron "consumiria"
      * mensagens antes do cache ao vivo vê-las, e a tela ficaria sem
      * atualizar.
      */
-    private async requisitarMensagens(mid: number) {
+    private async requisitarMensagens(empresaId: string, mid: number) {
+        // Guarda persistida no banco (sobrevive a reinício do backend) —
+        // ver comentário grande em podeChamarApi(). RequestMensagemCB tem
+        // intervalo mínimo de 30s entre chamadas do mesmo login.
+        const podeChamar = await this.podeChamarApi(empresaId, 'MensagemCB', 30 * 1000);
+
+        if (!podeChamar) {
+            console.log(
+                `[TrucksControl] empresa=${empresaId} — Pulando RequestMensagemCB, ainda dentro do intervalo mínimo desde a última chamada.`,
+            );
+
+            return [];
+        }
+
+        const credencial = await this.obterCredencialAtiva(empresaId);
+
+        if (!credencial) {
+            return [];
+        }
+
         const xml = `
 <RequestMensagemCB>
-  <login>${this.login}</login>
-  <senha>${this.senha}</senha>
+  <login>${credencial.login}</login>
+  <senha>${credencial.senha}</senha>
   <mId>${mid}</mId>
 </RequestMensagemCB>`;
 
         const data = await this.postXml(xml);
+
+        await this.registrarChamadaApi(empresaId, 'MensagemCB');
 
         if (data?.ErrorRequest) {
             console.warn('Erro Trucks RequestMensagemCB:', data.ErrorRequest);
@@ -230,13 +624,13 @@ export class TrucksControlService implements OnModuleInit {
             dataHora: m.dt,
             latitude: this.parseNumber(m.lat),
             longitude: this.parseNumber(m.lon),
-            municipio: m.mun ?? null,
-            uf: m.uf ?? null,
-            rodovia: m.rod ?? null,
-            rua: m.rua ?? null,
+            municipio: this.parseString(m.mun),
+            uf: this.parseString(m.uf),
+            rodovia: this.parseString(m.rod),
+            rua: this.parseString(m.rua),
             velocidade: this.parseNumber(m.vel),
-            motorista: m.mot ?? null,
-            placaCarreta: m.carreta ?? null,
+            motorista: this.parseString(m.mot),
+            placaCarreta: this.parseString(m.carreta),
             // Campos opcionais — só vêm preenchidos se o equipamento do
             // veículo tiver o sensor correspondente (ex.: nem todo
             // rastreador manda nível de combustível).
@@ -246,43 +640,45 @@ export class TrucksControlService implements OnModuleInit {
         }));
     }
 
-    async buscarMensagens(lastMid?: number) {
-        const mid = lastMid ?? this.lastMid ?? 0;
+    async buscarMensagens(empresaId: string, lastMid?: number) {
+        const estado = this.estado(empresaId);
+        const mid = lastMid ?? estado.lastMid ?? 0;
 
-        const normalizadas = await this.requisitarMensagens(mid);
+        const normalizadas = await this.requisitarMensagens(empresaId, mid);
 
         const maiorMid = Math.max(0, ...normalizadas.map((m) => m.mId));
 
-        if (maiorMid > this.lastMid) {
-            this.lastMid = maiorMid;
+        if (maiorMid > estado.lastMid) {
+            estado.lastMid = maiorMid;
         }
 
         return {
             lastMidAnterior: mid,
-            lastMidAtual: this.lastMid,
+            lastMidAtual: estado.lastMid,
             total: normalizadas.length,
             mensagens: normalizadas,
         };
     }
 
-    async buscarMensagensComCache() {
+    async buscarMensagensComCache(empresaId: string) {
+        const estado = this.estado(empresaId);
         const agora = Date.now();
-        const passou30Segundos = agora - this.ultimaBuscaMensagensEm >= 30_000;
+        const passou30Segundos = agora - estado.ultimaBuscaMensagensEm >= 30_000;
 
-        if (!passou30Segundos && this.mensagensCache.length > 0) {
+        if (!passou30Segundos && estado.mensagensCache.length > 0) {
             return {
                 origem: 'cache',
-                lastMidAtual: this.lastMid,
-                total: this.mensagensCache.length,
-                mensagens: this.mensagensCache,
+                lastMidAtual: estado.lastMid,
+                total: estado.mensagensCache.length,
+                mensagens: estado.mensagensCache,
             };
         }
 
-        const result = await this.buscarMensagens();
+        const result = await this.buscarMensagens(empresaId);
 
         const mensagensMap = new Map<number, any>();
 
-        for (const msg of this.mensagensCache) {
+        for (const msg of estado.mensagensCache) {
             mensagensMap.set(Number(msg.mId), msg);
         }
 
@@ -290,23 +686,23 @@ export class TrucksControlService implements OnModuleInit {
             mensagensMap.set(Number(msg.mId), msg);
         }
 
-        this.mensagensCache = Array.from(mensagensMap.values())
+        estado.mensagensCache = Array.from(mensagensMap.values())
             .sort((a, b) => b.mId - a.mId)
             .slice(0, 500);
 
-        this.ultimaBuscaMensagensEm = agora;
+        estado.ultimaBuscaMensagensEm = agora;
 
         return {
             origem: 'api',
             lastMidAnterior: result.lastMidAnterior,
             lastMidAtual: result.lastMidAtual,
-            total: this.mensagensCache.length,
-            mensagens: this.mensagensCache,
+            total: estado.mensagensCache.length,
+            mensagens: estado.mensagensCache,
         };
     }
 
-    async buscarUltimasPosicoes() {
-        const result = await this.buscarMensagensComCache();
+    async buscarUltimasPosicoes(empresaId: string) {
+        const result = await this.buscarMensagensComCache(empresaId);
 
         const porVeiculo = new Map<number, any>();
 
@@ -326,25 +722,25 @@ export class TrucksControlService implements OnModuleInit {
      * persistência mantém atualizado) em vez de chamar a API de novo
      * aqui — essa API usa uma caixa de mensagens única por login, não um
      * cursor por chamador: se dois lugares do backend chamassem
-     * RequestMensagemCB (um pro cron, outro pra essa tela), o primeiro
-     * que chamasse esvaziava a caixa e o outro não recebia nada, mesmo
-     * usando um mId diferente. Por isso só existe UM consumidor real da
-     * API (persistirPosicoes) — passe forcar:true pra rodar ele antes de
-     * ler, quando quiser um refresh na hora (botão "Buscar nova
-     * localização").
+     * RequestMensagemCB (um pro cron, outro pra essa tela) com o MESMO
+     * login, o primeiro que chamasse esvaziava a caixa e o outro não
+     * recebia nada. Por isso só existe UM consumidor real da API por
+     * empresa (persistirPosicoesEmpresa) — passe forcar:true pra rodar
+     * ele antes de ler, quando quiser um refresh na hora (botão "Buscar
+     * nova localização").
      */
-    async buscarCaminhoesComLocalizacao(opts?: { forcar?: boolean }) {
+    async buscarCaminhoesComLocalizacao(empresaId: string, opts?: { forcar?: boolean }) {
         if (opts?.forcar) {
-            await this.persistirPosicoes();
+            await this.persistirPosicoesEmpresa(empresaId);
         }
 
-        const veiculosResult = await this.listarVeiculosComCache(false);
+        const veiculosResult = await this.listarVeiculosComCache(empresaId, false);
         const veiculos = veiculosResult.veiculos;
 
         const veiIds = veiculos.map((v) => Number(v.veiID));
 
         const ultimasPosicoes = await this.prisma.posicaoCaminhao.findMany({
-            where: { veiId: { in: veiIds } },
+            where: { empresaId, veiId: { in: veiIds } },
             orderBy: { dataHora: 'desc' },
             distinct: ['veiId'],
         });
@@ -389,18 +785,29 @@ export class TrucksControlService implements OnModuleInit {
     }
 
     /**
-     * Roda em segundo plano a cada 30 minutos, independente de alguém
-     * estar com a tela de Rotas aberta, e salva no banco os pings novos
-     * dos caminhões monitorados. Isso é necessário porque a API externa
-     * só mantém as mensagens não lidas por poucas horas — sem isso, o
-     * histórico se perde a cada reinício do backend ou quando ninguém
-     * consulta por um tempo. Roda a cada 5 minutos — bem acima do mínimo
-     * de 30 segundos que a API exige pra RequestMensagemCB.
+     * Roda em segundo plano a cada 5 minutos, uma vez pra cada empresa com
+     * credencial ativa, independente de alguém estar com a tela de Rotas
+     * aberta, e salva no banco os pings novos dos caminhões monitorados.
+     * Isso é necessário porque a API externa só mantém as mensagens não
+     * lidas por poucas horas — sem isso, o histórico se perde a cada
+     * reinício do backend ou quando ninguém consulta por um tempo. Roda
+     * bem acima do mínimo de 30 segundos que a API exige pra
+     * RequestMensagemCB.
      */
     @Cron('*/5 * * * *')
     async persistirPosicoes() {
+        const credenciais = await this.prisma.trucksControlCredencial.findMany({
+            where: { ativo: true },
+        });
+
+        for (const credencial of credenciais) {
+            await this.persistirPosicoesEmpresa(credencial.empresaId);
+        }
+    }
+
+    private async persistirPosicoesEmpresa(empresaId: string) {
         try {
-            const veiculosResult = await this.listarVeiculosComCache(false);
+            const veiculosResult = await this.listarVeiculosComCache(empresaId, false);
             const veiculos = veiculosResult.veiculos;
 
             if (veiculos.length === 0) return;
@@ -409,16 +816,19 @@ export class TrucksControlService implements OnModuleInit {
                 veiculos.map((v) => [Number(v.veiID), v]),
             );
 
+            const estado = this.estado(empresaId);
+
             const mensagens = await this.requisitarMensagens(
-                this.lastMidPersistido,
+                empresaId,
+                estado.lastMidPersistido,
             );
 
             console.log(
-                `[TrucksControl] cursor=${this.lastMidPersistido} veiculos=${veiculos.length} mensagensRecebidas=${mensagens.length}`,
+                `[TrucksControl] empresa=${empresaId} cursor=${estado.lastMidPersistido} veiculos=${veiculos.length} mensagensRecebidas=${mensagens.length}`,
             );
 
             const maiorMid = Math.max(
-                this.lastMidPersistido,
+                estado.lastMidPersistido,
                 ...mensagens.map((m) => m.mId),
             );
 
@@ -430,7 +840,7 @@ export class TrucksControlService implements OnModuleInit {
             );
 
             console.log(
-                `[TrucksControl] mensagensRelevantes=${mensagensRelevantes.length}`,
+                `[TrucksControl] empresa=${empresaId} mensagensRelevantes=${mensagensRelevantes.length}`,
             );
 
             // Log só pra conferência manual — mostra quantas mensagens
@@ -447,7 +857,7 @@ export class TrucksControlService implements OnModuleInit {
             const comRpm = mensagensRelevantes.filter((m) => m.rpm !== null);
 
             console.log(
-                `[TrucksControl] combustivel=${comCombustivel.length}/${mensagensRelevantes.length} ` +
+                `[TrucksControl] empresa=${empresaId} combustivel=${comCombustivel.length}/${mensagensRelevantes.length} ` +
                 `odometro=${comOdometro.length}/${mensagensRelevantes.length} ` +
                 `rpm=${comRpm.length}/${mensagensRelevantes.length}` +
                 (comCombustivel.length > 0
@@ -468,6 +878,7 @@ export class TrucksControlService implements OnModuleInit {
                     update: {},
                     create: {
                         mId: BigInt(msg.mId),
+                        empresaId,
                         veiId: msg.veiID,
                         placa: veiculo?.placa ?? null,
                         dataHora,
@@ -490,7 +901,7 @@ export class TrucksControlService implements OnModuleInit {
             // Betim ou Pouso Alegre) a partir das posições recém-salvas —
             // roda depois do upsert acima, pra já poder comparar com o que
             // ficou gravado.
-            await this.processarEventosViagem(mensagensRelevantes, veiculosPorId);
+            await this.processarEventosViagem(empresaId, mensagensRelevantes, veiculosPorId);
 
             // Só avança o cursor depois que TODAS as mensagens desse lote
             // foram gravadas com sucesso — se algo falhar no meio do loop
@@ -498,10 +909,10 @@ export class TrucksControlService implements OnModuleInit {
             // próxima tentativa reprocessa o lote inteiro. upsert é
             // idempotente (mId é @unique), então reprocessar mensagens já
             // salvas não causa duplicata.
-            this.lastMidPersistido = maiorMid;
+            estado.lastMidPersistido = maiorMid;
         } catch (error: any) {
             console.error(
-                'Erro ao persistir posições dos caminhões:',
+                `Erro ao persistir posições dos caminhões (empresa=${empresaId}):`,
                 error.message ?? error,
             );
         }
@@ -512,13 +923,13 @@ export class TrucksControlService implements OnModuleInit {
      * memória nem da retenção curta da API externa) — pode ser
      * consultado a qualquer momento, filtrando por placa e/ou período.
      */
-    async buscarHistorico(params: {
+    async buscarHistorico(empresaId: string, params: {
         placa?: string;
         veiId?: number;
         dataInicio?: string;
         dataFim?: string;
     }) {
-        const where: any = {};
+        const where: any = { empresaId };
 
         if (params.placa) {
             where.placa = params.placa.toUpperCase();
@@ -573,12 +984,12 @@ export class TrucksControlService implements OnModuleInit {
      * de combustível — por isso devolve `dadosSuficientes` pra tela avisar
      * quando não tem base pra calcular ainda.
      */
-    async calcularConsumo(params: {
+    async calcularConsumo(empresaId: string, params: {
         veiId: number;
         dataInicio?: string;
         dataFim?: string;
     }) {
-        const where: any = { veiId: params.veiId };
+        const where: any = { empresaId, veiId: params.veiId };
 
         if (params.dataInicio || params.dataFim) {
             where.dataHora = {};
@@ -740,6 +1151,7 @@ export class TrucksControlService implements OnModuleInit {
      * porque sempre busca no banco a última posição anterior ao lote atual.
      */
     private async processarEventosViagem(
+        empresaId: string,
         mensagensRelevantes: any[],
         veiculosPorId: Map<number, any>,
     ) {
@@ -790,6 +1202,7 @@ export class TrucksControlService implements OnModuleInit {
                     ) {
                         viagemAberta = await this.prisma.viagemGps.create({
                             data: {
+                                empresaId,
                                 veiId,
                                 placa,
                                 origemMunicipio: municipioAnterior!,
@@ -852,12 +1265,12 @@ export class TrucksControlService implements OnModuleInit {
      * geocodificados com sucesso na criação — as demais vêm com
      * progresso: null (a tela mostra só um status sem barra nesse caso).
      */
-    async listarViagensGps(params?: {
+    async listarViagensGps(empresaId: string, params?: {
         status?: 'EM_ANDAMENTO' | 'CONCLUIDA';
         placa?: string;
         limit?: number;
     }) {
-        const where: any = {};
+        const where: any = { empresaId };
 
         if (params?.status) where.status = params.status;
         if (params?.placa) where.placa = params.placa.toUpperCase();
@@ -872,6 +1285,8 @@ export class TrucksControlService implements OnModuleInit {
             viagens.map(async (v) => {
                 if (
                     !v.criadaManualmente ||
+                    v.terceiro ||
+                    v.veiId == null ||
                     v.status !== 'EM_ANDAMENTO' ||
                     v.origemLatitude == null ||
                     v.origemLongitude == null ||
@@ -930,11 +1345,11 @@ export class TrucksControlService implements OnModuleInit {
      * Cria uma viagem manualmente (botão "Nova Viagem" — alguém do
      * administrativo escolhe o caminhão e digita origem/destino), em vez
      * de esperar o GPS detectar sozinho a saída de Santos. A conclusão
-     * continua automática: o cron de posições (persistirPosicoes ->
+     * continua automática: o cron de posições (persistirPosicoesEmpresa ->
      * processarEventosViagem) fecha essa viagem sozinho assim que o
      * caminhão for visto no município de destino.
      */
-    async criarViagemManual(params: {
+    async criarViagemManual(empresaId: string, params: {
         veiId: number;
         origemMunicipio: string;
         destinoMunicipio: string;
@@ -948,7 +1363,7 @@ export class TrucksControlService implements OnModuleInit {
             );
         }
 
-        const veiculosResult = await this.listarVeiculosComCache(false);
+        const veiculosResult = await this.listarVeiculosComCache(empresaId, false);
         const veiculo = veiculosResult.veiculos.find(
             (v) => Number(v.veiID) === Number(params.veiId),
         );
@@ -978,6 +1393,7 @@ export class TrucksControlService implements OnModuleInit {
 
         return this.prisma.viagemGps.create({
             data: {
+                empresaId,
                 veiId: params.veiId,
                 placa: veiculo.placa,
                 origemMunicipio,
@@ -993,6 +1409,128 @@ export class TrucksControlService implements OnModuleInit {
                 destinoLongitude: coordDestino?.lon ?? null,
             },
         });
+    }
+
+    /**
+     * Cria uma viagem de caminhão de terceiro/agregado (botão "Nova Viagem"
+     * → aba "Terceiros") — não existe cadastro desse caminhão na Trucks
+     * Control, então não tem veiId nem rastreamento GPS. A pessoa digita a
+     * placa na hora; a conclusão dessa viagem precisa ser manual (editar o
+     * status pra "Concluída"), já que não tem GPS pra detectar chegada.
+     */
+    async criarViagemTerceiro(empresaId: string, params: {
+        placa: string;
+        origemMunicipio: string;
+        destinoMunicipio: string;
+    }) {
+        const placa = params.placa.trim().toUpperCase();
+        const origemMunicipio = params.origemMunicipio.trim();
+        const destinoMunicipio = params.destinoMunicipio.trim();
+
+        if (!placa || !origemMunicipio || !destinoMunicipio) {
+            throw new InternalServerErrorException(
+                'Informe a placa, origem e destino do terceiro.',
+            );
+        }
+
+        const [coordOrigem, coordDestino] = await Promise.all([
+            this.geocodificarCidade(origemMunicipio),
+            this.geocodificarCidade(destinoMunicipio),
+        ]);
+
+        return this.prisma.viagemGps.create({
+            data: {
+                empresaId,
+                veiId: null,
+                placa,
+                terceiro: true,
+                origemMunicipio,
+                origemUf: null,
+                dataHoraInicio: new Date(),
+                destinoMunicipio,
+                destinoUf: null,
+                status: 'EM_ANDAMENTO',
+                criadaManualmente: true,
+                origemLatitude: coordOrigem?.lat ?? null,
+                origemLongitude: coordOrigem?.lon ?? null,
+                destinoLatitude: coordDestino?.lat ?? null,
+                destinoLongitude: coordDestino?.lon ?? null,
+            },
+        });
+    }
+
+    /**
+     * Edita uma viagem manual (própria ou de terceiro) já criada — botão
+     * "Editar" nas telas de Viagens. Também é usado pra "concluir na mão"
+     * uma viagem de terceiro (status: CONCLUIDA), já que essas não têm GPS
+     * pra fechar sozinhas.
+     */
+    async atualizarViagemGps(empresaId: string, id: string, params: {
+        placa?: string;
+        origemMunicipio?: string;
+        destinoMunicipio?: string;
+        status?: 'EM_ANDAMENTO' | 'CONCLUIDA';
+    }) {
+        const viagem = await this.prisma.viagemGps.findFirst({
+            where: { id, empresaId },
+        });
+
+        if (!viagem) {
+            throw new InternalServerErrorException('Viagem não encontrada.');
+        }
+
+        const data: any = {};
+
+        if (params.placa !== undefined) {
+            const placa = params.placa.trim().toUpperCase();
+            if (!placa) {
+                throw new InternalServerErrorException('Informe a placa.');
+            }
+            data.placa = placa;
+        }
+
+        if (params.origemMunicipio !== undefined) {
+            const origem = params.origemMunicipio.trim();
+            if (!origem) {
+                throw new InternalServerErrorException('Informe a origem.');
+            }
+            data.origemMunicipio = origem;
+        }
+
+        if (params.destinoMunicipio !== undefined) {
+            data.destinoMunicipio = params.destinoMunicipio.trim() || null;
+        }
+
+        if (params.status !== undefined) {
+            data.status = params.status;
+
+            if (params.status === 'CONCLUIDA' && !viagem.dataHoraFim) {
+                data.dataHoraFim = new Date();
+            }
+
+            if (params.status === 'EM_ANDAMENTO') {
+                data.dataHoraFim = null;
+            }
+        }
+
+        return this.prisma.viagemGps.update({ where: { id }, data });
+    }
+
+    // Exclui uma viagem manual (própria ou de terceiro) — botão "Excluir"
+    // nas telas de Viagens. Quem criou uma viagem manualmente pode apagar
+    // ela se foi engano ou duplicada.
+    async excluirViagemGps(empresaId: string, id: string) {
+        const viagem = await this.prisma.viagemGps.findFirst({
+            where: { id, empresaId },
+        });
+
+        if (!viagem) {
+            throw new InternalServerErrorException('Viagem não encontrada.');
+        }
+
+        await this.prisma.viagemGps.delete({ where: { id } });
+
+        return { ok: true };
     }
 
     // Nominatim (OpenStreetMap) — gratuito, sem chave de API. Exige um
@@ -1067,18 +1605,26 @@ export class TrucksControlService implements OnModuleInit {
      * por placa (ex: "QPM - 4 viagens concluídas"). `desde` opcional filtra
      * por dataHoraFim (ex: só as concluídas hoje/no mês).
      */
-    async resumoViagensConcluidas(params?: { desde?: Date }) {
-        const where: any = { status: 'CONCLUIDA' };
+    async resumoViagensConcluidas(empresaId: string, params?: { desde?: Date }) {
+        const where: any = { empresaId, status: 'CONCLUIDA' };
 
         if (params?.desde) {
             where.dataHoraFim = { gte: params.desde };
         }
 
-        const [total, porPlacaRaw] = await Promise.all([
+        const wherePropria = { ...where, terceiro: false };
+        const whereTerceiro = { ...where, terceiro: true };
+
+        const [total, porPlacaRaw, porPlacaTerceirosRaw] = await Promise.all([
             this.prisma.viagemGps.count({ where }),
             this.prisma.viagemGps.groupBy({
                 by: ['placa'],
-                where,
+                where: wherePropria,
+                _count: { _all: true },
+            }),
+            this.prisma.viagemGps.groupBy({
+                by: ['placa'],
+                where: whereTerceiro,
                 _count: { _all: true },
             }),
         ]);
@@ -1087,14 +1633,24 @@ export class TrucksControlService implements OnModuleInit {
         // ordenar por campos de agregado que estejam selecionados em
         // _count, e aqui só selecionamos "_all" (contagem total da linha),
         // não um campo específico como "placa".
-        const porPlaca = porPlacaRaw
-            .map((item) => ({
-                placa: item.placa || 'Sem placa',
-                quantidade: item._count._all,
-            }))
-            .sort((a, b) => b.quantidade - a.quantidade);
+        const ordenar = (lista: { placa: string | null; _count: { _all: number } }[]) =>
+            lista
+                .map((item) => ({
+                    placa: item.placa || 'Sem placa',
+                    quantidade: item._count._all,
+                }))
+                .sort((a, b) => b.quantidade - a.quantidade);
 
-        return { total, porPlaca };
+        const porPlaca = ordenar(porPlacaRaw);
+        const porPlacaTerceiros = ordenar(porPlacaTerceirosRaw);
+
+        return {
+            total,
+            porPlaca,
+            porPlacaTerceiros,
+            totalProprio: porPlaca.reduce((soma, item) => soma + item.quantidade, 0),
+            totalTerceiro: porPlacaTerceiros.reduce((soma, item) => soma + item.quantidade, 0),
+        };
     }
 
     // Igual a estaNaOrigemViagem/estaNoDestinoViagem, mas especificamente
@@ -1220,7 +1776,7 @@ export class TrucksControlService implements OnModuleInit {
      * primeiro) — por isso o total sobe sozinho dia a dia, sem precisar
      * de upload nenhum.
      */
-    async resumoDiasParados(params?: { mes?: string }) {
+    async resumoDiasParados(empresaId: string, params?: { mes?: string }) {
         const agora = new Date();
         const mes =
             params?.mes ??
@@ -1238,7 +1794,7 @@ export class TrucksControlService implements OnModuleInit {
 
         const limiteAberto = fimMes < agora ? fimMes : agora;
 
-        const veiculosResult = await this.listarVeiculosComCache(false);
+        const veiculosResult = await this.listarVeiculosComCache(empresaId, false);
         const veiculos = veiculosResult.veiculos;
 
         const porVeiculo: { placa: string; diasParados: number }[] = [];
@@ -1250,6 +1806,7 @@ export class TrucksControlService implements OnModuleInit {
 
             const posicoes = await this.prisma.posicaoCaminhao.findMany({
                 where: {
+                    empresaId,
                     veiId,
                     dataHora: { gte: inicioBusca, lt: fimMes },
                 },
@@ -1359,6 +1916,17 @@ export class TrucksControlService implements OnModuleInit {
         const parsed = Number(String(value).replace(',', '.'));
 
         return Number.isNaN(parsed) ? null : parsed;
+    }
+
+    // O parser de XML converte automaticamente qualquer texto com "cara de
+    // número" pra number (ex.: nome de rua que é só um número da via, tipo
+    // "40") — e os campos de texto no Prisma são String?, então precisa
+    // forçar de volta pra string, senão o upsert quebra com "Argument
+    // `rua`: Invalid value provided. Expected String or Null, provided Int."
+    private parseString(value: any): string | null {
+        if (value === undefined || value === null || value === '') return null;
+
+        return String(value);
     }
 
     // O campo "prop" (proprietário) da API vem inconsistente — já vimos

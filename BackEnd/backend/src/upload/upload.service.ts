@@ -13,7 +13,7 @@ type Evento = {
 export class UploadService {
     constructor(private prisma: PrismaService) { }
 
-    async processarUpload(file: Express.Multer.File) {
+    async processarUpload(empresaId: string, file: Express.Multer.File) {
         if (!file) {
             throw new BadRequestException('Arquivo inválido');
         }
@@ -59,20 +59,37 @@ export class UploadService {
         // prefixo de 3 letras dois caminhões diferentes da frota podem
         // colidir (ex: QPM7278 e QPM1234) e o upload de um acaba caindo
         // em cima dos dados do outro.
-        const todosCaminhoes = await this.prisma.caminhao.findMany();
+        // Só compara contra os caminhões da própria empresa — sem isso, um
+        // upload podia "casar" com um caminhão de outra empresa só porque
+        // a placa lida do arquivo coincidia, sobrescrevendo o histórico de
+        // viagens/paradas de quem nem é dono daquele caminhão.
+        const caminhoesDaEmpresa = await this.prisma.caminhao.findMany({
+            where: { empresaId },
+        });
 
-        let caminhao = todosCaminhoes.find(
+        let caminhao = caminhoesDaEmpresa.find(
             (c) =>
                 c.placa.toUpperCase().replace(/[^A-Z0-9]/g, '') ===
                 placaNormalizada,
         );
 
-        // Caminhão não cadastrado ainda? Cadastra sozinho com a placa lida
-        // do arquivo — não precisa mais criar manualmente antes de subir.
+        // Caminhão não cadastrado ainda (nessa empresa)? Cadastra sozinho
+        // com a placa lida do arquivo, já vinculado à empresa de quem fez
+        // o upload — não precisa mais criar manualmente antes de subir.
         if (!caminhao) {
-            caminhao = await this.prisma.caminhao.create({
-                data: { placa: placaExtraida },
-            });
+            try {
+                caminhao = await this.prisma.caminhao.create({
+                    data: { placa: placaExtraida, empresaId },
+                });
+            } catch {
+                // Placa já existe cadastrada em outra empresa — placa de
+                // caminhão é única no sistema todo (é a placa real, do
+                // DETRAN), então isso normalmente é upload do arquivo
+                // errado, não um caminhão novo de verdade.
+                throw new BadRequestException(
+                    `A placa ${placaExtraida} já está cadastrada em outra empresa. Confira se o arquivo é da empresa certa.`,
+                );
+            }
         }
 
         const placa = caminhao.placa;

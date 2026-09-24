@@ -8,9 +8,16 @@ import {
 } from 'react';
 import { api, getToken, limparToken, setToken as salvarToken } from '../services/api';
 
+type EmpresaModulo = 'RASTREADOR' | 'FISCAL' | 'FINANCEIRO_NF';
+
 type Usuario = {
     id: string;
+    nome?: string | null;
     email: string;
+    isAdminMaster?: boolean;
+    perfil?: 'ADMIN' | 'PROPRIETARIO' | 'FUNCIONARIO';
+    modulosHabilitados?: EmpresaModulo[];
+    empresaNome?: string | null;
 };
 
 type AuthContextValue = {

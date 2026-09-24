@@ -11,9 +11,13 @@ import { PagamentosModule } from './modules/pagamentos/pagamentos.module';
 import { FinanceiroModule } from './financeiro/financeiro.module';
 import { TrucksControlModule } from './integrations/trucks-control/trucks-control.module';
 import { AuthModule } from './auth/auth.module';
+import { FiscalModule } from './fiscal/fiscal.module';
+import { FinanceiroNfModule } from './financeiro-nf/financeiro-nf.module';
+import { AdminModule } from './admin/admin.module';
+import { UsuariosModule } from './usuarios/usuarios.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), AuthModule, UploadModule, PrismaModule, RelatorioModule, RegraCaminhaoModule, CaminhaoModule, PagamentosModule, FinanceiroModule, TrucksControlModule],
+  imports: [ScheduleModule.forRoot(), AuthModule, UploadModule, PrismaModule, RelatorioModule, RegraCaminhaoModule, CaminhaoModule, PagamentosModule, FinanceiroModule, TrucksControlModule, FiscalModule, FinanceiroNfModule, AdminModule, UsuariosModule],
   controllers: [AppController],
   providers: [AppService],
 })

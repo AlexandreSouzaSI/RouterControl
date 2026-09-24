@@ -1,11 +1,20 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class CaminhaoService {
     constructor(private prisma: PrismaService) { }
 
-    async create(data: { placa: string }) {
+    // Filtro usado em toda leitura: mostra os caminhões da empresa logada
+    // e, transitoriamente, os que ainda não têm empresa definida (registros
+    // de antes do retrofit multi-empresa). Isso evita que a lista suma pra
+    // quem ainda não rodou o backfill de empresaId — depois que todo
+    // caminhão tiver empresa, a segunda condição nunca mais bate.
+    private filtroEmpresa(empresaId: string) {
+        return { OR: [{ empresaId }, { empresaId: null }] };
+    }
+
+    async create(data: { placa: string }, empresaId: string) {
         const placa = data.placa.toUpperCase();
 
         const existe = await this.prisma.caminhao.findUnique({
@@ -17,20 +26,40 @@ export class CaminhaoService {
         }
 
         return this.prisma.caminhao.create({
-            data: { placa },
+            data: { placa, empresaId },
         });
     }
 
-    findAll() {
+    findAll(empresaId: string) {
         return this.prisma.caminhao.findMany({
+            where: this.filtroEmpresa(empresaId),
             orderBy: { placa: 'asc' },
         });
     }
 
-    findOne(id: string) {
-        return this.prisma.caminhao.findUnique({
-            where: { id },
+    private async encontrarOuFalhar(id: string, empresaId: string) {
+        const caminhao = await this.prisma.caminhao.findFirst({
+            where: { id, ...this.filtroEmpresa(empresaId) },
         });
+
+        if (!caminhao) {
+            throw new NotFoundException('Caminhão não encontrado');
+        }
+
+        // Grandfathering: se o caminhão ainda não tem empresa, a primeira
+        // empresa que mexer nele "adota" (evita ficar solto pra sempre).
+        if (!caminhao.empresaId) {
+            return this.prisma.caminhao.update({
+                where: { id },
+                data: { empresaId },
+            });
+        }
+
+        return caminhao;
+    }
+
+    async findOne(id: string, empresaId: string) {
+        return this.encontrarOuFalhar(id, empresaId);
     }
 
     async update(
@@ -39,7 +68,10 @@ export class CaminhaoService {
             placa?: string;
             ativo?: boolean;
         },
+        empresaId: string,
     ) {
+        await this.encontrarOuFalhar(id, empresaId);
+
         return this.prisma.caminhao.update({
             where: { id },
             data: {
@@ -51,7 +83,9 @@ export class CaminhaoService {
         });
     }
 
-    async removePeriodo(caminhaoId: string, mes: string) {
+    async removePeriodo(caminhaoId: string, mes: string, empresaId: string) {
+        await this.encontrarOuFalhar(caminhaoId, empresaId);
+
         const periodo = await this.prisma.uploadPeriod.findFirst({
             where: { caminhaoId, periodo: mes },
         });
@@ -71,7 +105,9 @@ export class CaminhaoService {
         return { ok: true };
     }
 
-    async remove(id: string) {
+    async remove(id: string, empresaId: string) {
+        await this.encontrarOuFalhar(id, empresaId);
+
         await this.prisma.tripRecord.deleteMany({
             where: { caminhaoId: id },
         });
@@ -109,7 +145,9 @@ export class CaminhaoService {
         });
     }
 
-    async getTimeline(id: string) {
+    async getTimeline(id: string, empresaId: string) {
+        await this.encontrarOuFalhar(id, empresaId);
+
         const caminhao = await this.prisma.caminhao.findUnique({
             where: { id },
             include: {

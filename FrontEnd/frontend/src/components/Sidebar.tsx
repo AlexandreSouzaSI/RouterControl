@@ -5,6 +5,12 @@ import {
     Route,
     Database,
     LogOut,
+    FileText,
+    FileCheck,
+    Wallet,
+    LayoutGrid,
+    Settings2,
+    ShieldAlert,
     type LucideIcon,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
@@ -22,14 +28,20 @@ type MenuItem = {
     path: string;
 };
 
+type EmpresaModulo = 'RASTREADOR' | 'FISCAL' | 'FINANCEIRO_NF';
+
 type MenuGroup = {
     titulo: string;
     itens: MenuItem[];
+    // Se definido, o grupo só aparece quando esse módulo estiver
+    // habilitado pra empresa do usuário logado (isAdminMaster sempre vê tudo).
+    modulo?: EmpresaModulo;
 };
 
 const grupos: MenuGroup[] = [
     {
         titulo: 'Operação',
+        modulo: 'RASTREADOR',
         itens: [
             { name: 'Dashboard', icon: LayoutDashboard, path: '/' },
             { name: 'Viagens', icon: Truck, path: '/viagens' },
@@ -37,17 +49,49 @@ const grupos: MenuGroup[] = [
             { name: 'Dados Capturados', icon: Database, path: '/dados-capturados' },
         ],
     },
+    {
+        titulo: 'Fiscal',
+        modulo: 'FISCAL',
+        itens: [
+            { name: 'Fiscal', icon: FileText, path: '/fiscal' },
+        ],
+    },
+    {
+        titulo: 'Financeiro',
+        modulo: 'FINANCEIRO_NF',
+        itens: [
+            { name: 'Dashboard', icon: LayoutGrid, path: '/financeiro-nf/dashboard' },
+            { name: 'NF de Entrada', icon: FileText, path: '/financeiro-nf/entrada' },
+            { name: 'NF de Serviço', icon: FileCheck, path: '/financeiro-nf/servico' },
+            { name: 'Contas a Pagar', icon: Wallet, path: '/financeiro-nf/contas-pagar' },
+        ],
+    },
+    {
+        titulo: 'Cadastros',
+        itens: [
+            { name: 'Cadastros', icon: Settings2, path: '/cadastros' },
+        ],
+    },
 ];
 
+const grupoAdmin: MenuGroup = {
+    titulo: 'Administração',
+    itens: [
+        { name: 'Empresas', icon: ShieldAlert, path: '/admin' },
+    ],
+};
+
 function Marca() {
+    const { usuario } = useAuth();
+
     return (
         <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-lg shadow-lg shadow-blue-500/20">
-                🚛
+            <div className="w-9 h-9 rounded-xl bg-white dark:bg-white/5 flex items-center justify-center shadow-lg shadow-blue-500/10 overflow-hidden shrink-0">
+                <img src="/logo-via-minas.png" alt="Logo" className="w-full h-full object-contain p-0.5" />
             </div>
-            <div className="leading-tight">
-                <h1 className="font-bold text-base text-gray-900 dark:text-white">
-                    RotaApp
+            <div className="leading-tight min-w-0">
+                <h1 className="font-bold text-base text-gray-900 dark:text-white truncate">
+                    {usuario?.empresaNome || 'RotaApp'}
                 </h1>
                 <p className="text-[11px] text-gray-400 dark:text-gray-500">
                     Controle de viagens
@@ -58,9 +102,17 @@ function Marca() {
 }
 
 function Navegacao({ onNavigate }: { onNavigate?: () => void }) {
+    const { usuario } = useAuth();
+
+    const gruposComModulo = usuario?.isAdminMaster
+        ? grupos
+        : grupos.filter((g) => !g.modulo || usuario?.modulosHabilitados?.includes(g.modulo));
+
+    const gruposVisiveis = usuario?.isAdminMaster ? [...gruposComModulo, grupoAdmin] : gruposComModulo;
+
     return (
         <nav className="flex flex-col gap-5">
-            {grupos.map((grupo) => (
+            {gruposVisiveis.map((grupo) => (
                 <div key={grupo.titulo}>
                     <p className="px-3 mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                         {grupo.titulo}

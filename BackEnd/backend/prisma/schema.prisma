@@ -39,6 +39,14 @@ model Caminhao {
   ativo Boolean @default(true)
   placa String  @unique
 
+  // Dono do caminhão pro módulo Financeiro/NF (Fornecedor, Conta a Pagar,
+  // NF de Entrada/Serviço) e demais módulos que passarem a filtrar por
+  // empresa. Fica opcional por enquanto (retrofit): caminhões cadastrados
+  // antes dessa migração ficam sem empresa até alguém preencher — ver
+  // instruções de backfill no fim do schema.
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id])
+
   uploadPeriods       UploadPeriod[]
   tripRecords         TripRecord[]
   stopRecords         StopRecord[]
@@ -52,6 +60,15 @@ model Caminhao {
 
   truckStatus     TruckStatus?
   configPagamento ConfiguracaoPagamentoCaminhao?
+
+  rpaRecibos    RpaRecibo[]
+  ciotRegistros CiotRegistro[]
+
+  nfEntradas  NfEntrada[]
+  nfServicos  NfServico[]
+  contasPagar ContaPagar[]
+
+  @@index([empresaId])
 }
 
 model ResumoOperacao {
@@ -75,21 +92,104 @@ model Motorista {
   ativo Boolean @default(true)
 }
 
+// Módulos que uma empresa pode ou não ter habilitados — controlado só
+// pelo Admin Master (Quadro do Administrador), não pela própria empresa.
+// RASTREADOR cobre Dashboard/Viagens/Rotas/Dados Capturados (tudo que
+// depende da credencial da Trucks Control); FISCAL cobre RPA/CIOT;
+// FINANCEIRO_NF cobre NF de Entrada/Serviço + Contas a Pagar.
+enum EmpresaModulo {
+  RASTREADOR
+  FISCAL
+  FINANCEIRO_NF
+}
+
 model Empresa {
   id        String   @id @default(uuid())
   nome      String
   email     String   @unique
   createdAt DateTime @default(now())
 
+  // CNPJ da empresa — usado pra identificar o destinatário nas consultas
+  // de distribuição da Sefaz/ADN (NF-e de compra e NFS-e de serviço) e
+  // pra futuras validações no módulo Financeiro/NF.
+  cnpj String?
+
+  // Controle do Admin Master (Quadro do Administrador) — nada disso é
+  // editável pela própria empresa. "ativo = false" bloqueia login (checado
+  // no login e em toda requisição via JwtStrategy). "pagamentoEmDia" é só
+  // informativo por enquanto — não bloqueia sozinho, é o admin quem decide
+  // marcar a empresa como inativa se quiser cortar o acesso por atraso.
+  ativo              Boolean         @default(true)
+  pagamentoEmDia     Boolean         @default(true)
+  observacoesAdmin   String?
+  modulosHabilitados EmpresaModulo[] @default([RASTREADOR, FISCAL, FINANCEIRO_NF])
+
   usuarios               Usuario[]
   viagens                Viagem[]
   configuracaoPagamentos ConfiguracaoPagamento[]
+
+  caminhoes Caminhao[]
+
+  fornecedores         Fornecedor[]
+  categoriasContaPagar CategoriaContaPagar[]
+  contasPagar          ContaPagar[]
+  nfEntradas           NfEntrada[]
+  nfServicos           NfServico[]
+
+  certificadoDigital     CertificadoDigitalEmpresa?
+  sefazSincronizacaoLogs SefazSincronizacaoLog[]
+
+  rpaRecibos    RpaRecibo[]
+  ciotRegistros CiotRegistro[]
+
+  trucksControlCredencial TrucksControlCredencial?
+  veiculosTrucksControl   VeiculoTrucksControl[]
+  trucksControlRateLimits TrucksControlRateLimit[]
+  posicoesCaminhao        PosicaoCaminhao[]
+  viagensGps              ViagemGps[]
+
+  // Retrofit de isolamento por empresa do módulo Financeiro (extrato
+  // bancário), Pagamentos e Relatórios/Upload — ver comentário em cada
+  // campo empresaId abaixo pra entender por que ficam opcionais.
+  importacoesExtrato             ImportacaoExtrato[]
+  transacoesFinanceiras          TransacaoFinanceira[]
+  categoriasFinanceiras          CategoriaFinanceira[]
+  regrasClassificacaoFinanceira  RegraClassificacaoFinanceira[]
+  configuracaoPagamentoMotorista ConfiguracaoPagamentoMotorista?
+}
+
+// Perfil dentro da própria empresa (não confundir com isAdminMaster, que é
+// o dono do sistema todo, acima de qualquer empresa). ADMIN gerencia os
+// colaboradores da empresa (aba Colaboradores em Cadastros); PROPRIETARIO
+// e FUNCIONARIO por enquanto têm o mesmo acesso operacional de ADMIN a
+// tudo mais no sistema — só a gestão de colaboradores é restrita a ADMIN.
+enum PerfilUsuario {
+  ADMIN
+  PROPRIETARIO
+  FUNCIONARIO
 }
 
 model Usuario {
-  id        String  @id @default(uuid())
-  email     String  @unique
-  senha     String
+  id    String  @id @default(uuid())
+  nome  String?
+  email String  @unique
+  senha String
+
+  // Perfil dentro da empresa — controla quem pode mexer na aba
+  // Colaboradores (só ADMIN, ou o isAdminMaster). Default ADMIN pra não
+  // tirar acesso de contas que já existiam antes desse campo existir.
+  perfil PerfilUsuario @default(ADMIN)
+
+  // Dono do sistema (você) — vê o Quadro do Administrador e todas as
+  // empresas. Não é um perfil por empresa, é uma flag separada; só quem
+  // já é isAdminMaster consegue marcar outro usuário como tal (não dá pra
+  // promover a si mesmo pelo Quadro).
+  isAdminMaster Boolean @default(false)
+
+  // Login desativado individualmente (sem precisar inativar a empresa
+  // inteira) — checado igual ao "ativo" da Empresa.
+  ativo Boolean @default(true)
+
   empresaId String
   empresa   Empresa @relation(fields: [empresaId], references: [id])
 }
@@ -138,6 +238,14 @@ model ConfiguracaoPagamentoCaminhao {
 
 model ConfiguracaoPagamentoMotorista {
   id String @id @default(uuid())
+
+  // Adicionado no retrofit de isolamento por empresa — antes desse campo
+  // existia só UMA config no sistema inteiro, compartilhada por todas as
+  // empresas (bug, não era intencional). Fica opcional só pra não quebrar
+  // a linha antiga (órfã) que já existe; toda empresa nova recebe sua
+  // própria linha na primeira vez que mexe na tela.
+  empresaId String?  @unique
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 
   salarioBase      Float @default(3352)
   valorDiaria      Float @default(200)
@@ -259,14 +367,25 @@ enum StatusTransacaoFinanceira {
 }
 
 model CategoriaFinanceira {
-  id        String   @id @default(uuid())
-  nome      String   @unique
-  ativo     Boolean  @default(true)
+  id    String  @id @default(uuid())
+  nome  String
+  ativo Boolean @default(true)
+
+  // Retrofit de isolamento por empresa — antes "nome" era único no sistema
+  // inteiro, então duas empresas não conseguiam ter as duas uma categoria
+  // "Combustível", por exemplo. Fica opcional só pra não quebrar linhas
+  // antigas (órfãs); categorias novas sempre vêm com empresaId.
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   transacoes TransacaoFinanceira[]
   regras     RegraClassificacaoFinanceira[]
+
+  @@unique([empresaId, nome])
+  @@index([empresaId])
 }
 
 model ImportacaoExtrato {
@@ -277,7 +396,14 @@ model ImportacaoExtrato {
   linhasIgnoradas  Int      @default(0)
   createdAt        DateTime @default(now())
 
+  // Opcional por retrofit (ver Caminhao.empresaId) — toda importação nova
+  // sempre grava a empresa de quem importou.
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
   transacoes TransacaoFinanceira[]
+
+  @@index([empresaId])
 }
 
 model TransacaoFinanceira {
@@ -302,6 +428,11 @@ model TransacaoFinanceira {
   importacaoId String?
   importacao   ImportacaoExtrato? @relation(fields: [importacaoId], references: [id], onDelete: SetNull)
 
+  // Opcional por retrofit (ver Caminhao.empresaId) — toda transação nova
+  // (vinda de um import) sempre grava a empresa de quem importou.
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
   observacao String?
 
   createdAt DateTime @default(now())
@@ -311,6 +442,7 @@ model TransacaoFinanceira {
   @@index([direcao])
   @@index([caminhaoId])
   @@index([categoriaId])
+  @@index([empresaId])
 }
 
 // Lista de veículos vinda da API de rastreamento (trucks-control) —
@@ -318,10 +450,42 @@ model TransacaoFinanceira {
 // gente guardava a lista só em memória, então todo restart do backend
 // zerava tudo e ficava "Nenhum caminhão encontrado" até passar os 5
 // minutos. Agora fica salva aqui, e o cache em memória é só otimização.
+// Credencial da conta que a empresa tem na Trucks Control — cada empresa
+// tem seu próprio login/senha, então cada uma só enxerga os caminhões
+// cadastrados na sua conta de rastreamento. Senha cifrada com o mesmo
+// esquema AES-256-GCM do certificado digital (CERT_ENCRYPTION_KEY),
+// nunca gravada em texto puro nem devolvida pra tela depois de salva.
+model TrucksControlCredencial {
+  id        String  @id @default(uuid())
+  empresaId String  @unique
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  login String
+
+  senhaCifrada String
+  senhaIv      String
+  senhaAuthTag String
+
+  ativo Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model VeiculoTrucksControl {
   id String @id @default(uuid())
 
-  veiId Int @unique
+  // Cada empresa consulta a própria conta na Trucks Control, então o
+  // mesmo veiId poderia em tese existir em contas diferentes — por isso a
+  // unicidade é por empresa, não mais global. Nullable só pra permitir a
+  // migração sem quebrar as linhas que já existiam antes do retrofit
+  // multi-empresa (registros órfãos, de quando só existia uma conta pro
+  // sistema inteiro) — todo registro novo sempre vem com empresaId
+  // preenchido.
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  veiId Int
 
   placa         String?
   equipamento   Int?
@@ -332,6 +496,34 @@ model VeiculoTrucksControl {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([empresaId, veiId])
+  @@index([empresaId])
+}
+
+// Guarda a hora da última chamada feita a cada tipo de requisição da
+// Trucks Control (RequestVeiculo, RequestMensagemCB...), persistida no
+// banco em vez de só em memória. A API tem um intervalo mínimo entre
+// chamadas do mesmo login (ela conta o tempo do lado dela, não do nosso
+// processo) — sem isso, cada reinício do backend em desenvolvimento
+// (start:dev reinicia a cada salvamento) zera o controle em memória e
+// tenta chamar de novo na hora, mesmo que a chamada anterior tenha sido há
+// poucos segundos, e a API rejeita com "código 7 — não atingiu o tempo
+// mínimo pra reenvio". Agora por empresa, porque cada uma usa um login
+// diferente e tem sua própria janela de espera com a Trucks Control.
+model TrucksControlRateLimit {
+  id        String   @id @default(uuid())
+  // Nullable pelo mesmo motivo do VeiculoTrucksControl acima — registros
+  // órfãos de antes do retrofit multi-empresa ficam parados aqui sem
+  // atrapalhar; toda chamada nova já grava com empresaId.
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  tipoRequisicao  String
+  ultimaChamadaEm DateTime
+  updatedAt       DateTime @updatedAt
+
+  @@unique([empresaId, tipoRequisicao])
 }
 
 // Histórico de posições dos caminhões vindas da API de rastreamento
@@ -347,7 +539,14 @@ model PosicaoCaminhao {
   // BigInt porque a Trucks Control usa uma numeração global (parece
   // compartilhada entre todos os clientes dela), que já passa de 185
   // bilhões — muito maior que o limite de um Int de 32 bits (~2,1 bi).
+  // Continua único globalmente mesmo com o retrofit multi-empresa,
+  // porque esse número já é compartilhado entre contas diferentes.
   mId BigInt @unique
+
+  // Empresa dona da conta que gerou esse ping — só pra filtrar a tela de
+  // rastreamento por empresa; não faz parte da unicidade (mId já garante).
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 
   veiId Int
   placa String?
@@ -377,6 +576,7 @@ model PosicaoCaminhao {
 
   @@index([placa, dataHora])
   @@index([veiId, dataHora])
+  @@index([empresaId])
 }
 
 enum StatusViagemGps {
@@ -393,8 +593,22 @@ enum StatusViagemGps {
 model ViagemGps {
   id String @id @default(uuid())
 
-  veiId Int
+  // Igual ao PosicaoCaminhao.empresaId — filtra a tela de Viagens por
+  // empresa; opcional porque viagens antigas foram detectadas antes do
+  // retrofit multi-empresa e ainda não têm dono.
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  // Nula quando a viagem é de terceiro (caminhão sem cadastro na Trucks
+  // Control) — nesse caso não tem rastreamento GPS nem conclusão
+  // automática, só a placa digitada na hora de criar.
+  veiId Int?
   placa String?
+
+  // Viagem feita por caminhão de terceiro/agregado (não é da frota
+  // própria rastreada pela Trucks Control) — usado pra destacar/separar
+  // essas viagens das próprias nas telas de Viagens.
+  terceiro Boolean @default(false)
 
   origemMunicipio String
   origemUf        String?
@@ -429,6 +643,8 @@ model ViagemGps {
 
   @@index([veiId, status])
   @@index([placa])
+  @@index([empresaId])
+  @@index([empresaId, terceiro])
 }
 
 model RegraClassificacaoFinanceira {
@@ -441,6 +657,11 @@ model RegraClassificacaoFinanceira {
   caminhaoId String?
   caminhao   Caminhao? @relation(fields: [caminhaoId], references: [id])
 
+  // Opcional por retrofit (ver Caminhao.empresaId) — toda regra nova
+  // sempre grava a empresa de quem criou.
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
   ativo      Boolean @default(true)
   prioridade Int     @default(0)
 
@@ -448,4 +669,448 @@ model RegraClassificacaoFinanceira {
   updatedAt DateTime @updatedAt
 
   @@index([palavra])
+  @@index([empresaId])
+}
+
+// =========================================================================
+// Módulo Fiscal — RPA / CIOT / preparação de CT-e e MDF-e.
+//
+// A empresa roda tanto viagens PRÓPRIAS (caminhão dela, responsável pelo
+// frete — exige CT-e e, a partir daí, MDF-e) quanto viagens AGREGADAS
+// (transportando sob o CT-e de outra transportadora, pagando motorista
+// autônomo — exige CIOT + comprovante de pagamento tipo RPA).
+//
+// RPA e CIOT são registros reais, gerados/controlados por aqui. CT-e e
+// MDF-e ainda não são emitidos de verdade pelo sistema (dependem de
+// credenciamento externo na Sefaz/ANTT que a empresa ainda não confirmou
+// ter concluído) — por enquanto é só um checklist de preparação
+// (FiscalPreparoItem), pra não arriscar emitir documento fiscal inválido.
+// =========================================================================
+
+enum StatusRpa {
+  PENDENTE
+  PAGO
+}
+
+// Recibo de Pagamento Autônomo — comprovante interno de pagamento a
+// motorista autônomo/agregado por uma viagem ou período, com retenção de
+// INSS (11%, teto do INSS) e IRRF (tabela progressiva) já calculadas.
+// Não é um documento fiscal eletrônico (não tem webservice de autorização);
+// idealmente é reportado à parte via eSocial (S-2300/S-1200), fora do
+// escopo deste módulo por enquanto.
+model RpaRecibo {
+  id String @id @default(uuid())
+
+  // Adicionado junto do retrofit de empresa do módulo Financeiro/NF —
+  // opcional por enquanto (registros antigos ficam sem empresa até
+  // backfill), mas é o que permite filtrar RPA por empresa mesmo quando
+  // não há caminhaoId (motorista avulso, sem viagem vinculada).
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id])
+
+  motoristaNome String
+  motoristaCpf  String?
+  motoristaPix  String?
+
+  caminhaoId String?
+  caminhao   Caminhao? @relation(fields: [caminhaoId], references: [id])
+
+  competencia      String // 'YYYY-MM'
+  descricaoServico String? // ex: "Frete Santos -> Betim, 12 a 15/09"
+
+  valorBruto   Float
+  aliquotaInss Float @default(11) // %
+  valorInss    Float @default(0)
+  baseIrrf     Float @default(0)
+  aliquotaIrrf Float @default(0) // %
+  valorIrrf    Float @default(0)
+  valorLiquido Float
+
+  status         StatusRpa @default(PENDENTE)
+  dataPagamento  DateTime?
+  formaPagamento String?
+
+  observacao String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([competencia])
+  @@index([status])
+  @@index([caminhaoId])
+  @@index([empresaId])
+}
+
+enum StatusCiot {
+  PENDENTE
+  EMITIDO
+  CANCELADO
+}
+
+// Registro de CIOT (Código Identificador da Operação de Transporte) —
+// obrigatório ao contratar motorista autônomo/TAC pra frete agregado.
+// A emissão real depende de integração com um IPEF credenciado na ANTT
+// (Strada Pay, Repom, Roadcard, SEM PARAR Frete etc.) — a empresa ainda
+// não escolheu/contratou um, então por enquanto isso aqui é um registro
+// manual de controle (pra não perder o prazo/obrigação de nenhuma
+// viagem agregada), já pronto pra guardar o número do CIOT assim que for
+// gerado, aqui ou numa integração futura com o IPEF escolhido.
+model CiotRegistro {
+  id String @id @default(uuid())
+
+  // Mesmo motivo do RpaRecibo.empresaId acima.
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id])
+
+  numeroCiot String?
+  operadora  String? // ex: "Strada Pay", "Repom", "Roadcard"...
+
+  caminhaoId String?
+  caminhao   Caminhao? @relation(fields: [caminhaoId], references: [id])
+
+  motoristaNome String
+  motoristaCpf  String?
+
+  origemMunicipio  String
+  destinoMunicipio String
+  dataViagem       DateTime
+
+  valorFrete Float?
+
+  status      StatusCiot @default(PENDENTE)
+  dataEmissao DateTime?
+
+  observacao String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([caminhaoId])
+  @@index([empresaId])
+}
+
+enum TipoPreparoFiscal {
+  CTE
+  MDFE
+}
+
+// Checklist de pré-requisitos pra emissão real de CT-e/MDF-e (RNTRC ativo,
+// credenciamento na Sefaz, certificado digital, etc.) — o sistema não
+// emite esses documentos ainda, só ajuda a acompanhar o que falta. Os
+// itens de cada tipo são criados automaticamente (seed) na primeira
+// consulta, se ainda não existirem.
+// =========================================================================
+// Módulo Financeiro/NF — espelha o fluxo do Controle NF (NuGalho Hub), mas
+// escopado por Empresa (em vez de Store) e com vínculo opcional a Caminhão
+// (em vez de Purchase/Service): NF de Entrada (mercadoria) e NF de Serviço
+// chegam via sync automático na Sefaz/ADN usando o certificado digital A1
+// da empresa; ao "aceitar" uma NF, o usuário escolhe gerar Conta a Pagar
+// na hora ou só marcar como conciliada. Fornecedor e Categoria são
+// digitáveis com criação automática, igual ao Controle NF.
+// =========================================================================
+
+model Fornecedor {
+  id              String  @id @default(uuid())
+  nome            String
+  nomeNormalizado String
+  cnpj            String?
+  telefone        String?
+  ativo           Boolean @default(true)
+
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contasPagar ContaPagar[]
+
+  @@unique([empresaId, nomeNormalizado])
+  @@index([empresaId])
+}
+
+// Categoria livre da conta a pagar (ex.: Peças, Combustível, Pedágio,
+// Manutenção...) — digitada na hora e criada automaticamente se não
+// existir, igual Fornecedor.
+model CategoriaContaPagar {
+  id              String  @id @default(uuid())
+  nome            String
+  nomeNormalizado String
+  ativo           Boolean @default(true)
+
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contasPagar ContaPagar[]
+
+  @@unique([empresaId, nomeNormalizado])
+  @@index([empresaId])
+}
+
+enum TipoContaPagar {
+  BOLETO
+  PIX
+  CARTAO
+  SEM_BOLETO
+}
+
+enum StatusContaPagar {
+  ABERTA
+  PAGA
+  VENCIDA
+  CANCELADA
+}
+
+enum FormaPagamentoContaPagar {
+  BOLETO
+  PIX
+  CARTAO_CREDITO
+  CARTAO_DEBITO
+  DINHEIRO
+  TRANSFERENCIA
+  CONTA_EMPRESA
+}
+
+enum TipoChavePix {
+  CPF
+  CNPJ
+  EMAIL
+  TELEFONE
+  ALEATORIA
+}
+
+model ContaPagar {
+  id        String @id @default(uuid())
+  descricao String
+  valor     Float
+
+  tipo           TipoContaPagar           @default(BOLETO)
+  formaPagamento FormaPagamentoContaPagar @default(BOLETO)
+
+  vencimento DateTime
+  pagoEm     DateTime?
+
+  status StatusContaPagar @default(ABERTA)
+
+  codigoBarras String?
+
+  pixChave     String?
+  pixTipoChave TipoChavePix?
+  pixQrCode    String?
+
+  banco      String?
+  agencia    String?
+  conta      String?
+  favorecido String?
+
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id])
+
+  fornecedorId String?
+  fornecedor   Fornecedor? @relation(fields: [fornecedorId], references: [id])
+
+  categoriaId String?
+  categoria   CategoriaContaPagar? @relation(fields: [categoriaId], references: [id])
+
+  caminhaoId String?
+  caminhao   Caminhao? @relation(fields: [caminhaoId], references: [id])
+
+  arquivoUrl              String?
+  comprovantePagamentoUrl String?
+  observacao              String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  nfEntradas NfEntrada[] @relation("NfEntradaContaPagar")
+  nfServicos NfServico[] @relation("NfServicoContaPagar")
+
+  @@index([empresaId])
+  @@index([fornecedorId])
+  @@index([categoriaId])
+  @@index([caminhaoId])
+  @@index([status])
+  @@index([vencimento])
+}
+
+// Certificado digital (e-CNPJ) da empresa, usado pra autenticar via mTLS
+// nas APIs da Sefaz (NF-e) e ADN (NFS-e nacional). O arquivo .pfx fica fora
+// de qualquer pasta servida publicamente e a senha nunca é gravada em
+// texto puro — só o resultado da criptografia AES-256-GCM (mesma técnica
+// do Controle NF), cifrada com CERT_ENCRYPTION_KEY.
+model CertificadoDigitalEmpresa {
+  id        String  @id @default(uuid())
+  empresaId String  @unique
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  nomeArquivo    String
+  caminhoArquivo String
+
+  senhaCifrada String
+  senhaIv      String
+  senhaAuthTag String
+
+  // Cursor da distribuição de documentos da Sefaz (NSU = Número Sequencial
+  // Único) pra NFS-e (ADN). Cada busca continua daqui em vez de reprocessar
+  // tudo de novo.
+  ultimoNsu BigInt @default(0)
+
+  // Cursor separado pra distribuição de NF-e de mercadoria (webservice
+  // NFeDistribuicaoDFe) — sistema totalmente diferente do ADN acima, com
+  // numeração de NSU própria; não pode compartilhar o mesmo cursor.
+  ultimoNsuNfe BigInt @default(0)
+
+  // Até quando NÃO vale a pena tentar sincronizar de novo (Sefaz/ADN pedem
+  // espera depois de "nada de novo" ou bloqueio por "consumo indevido").
+  // Null = sem bloqueio conhecido no momento.
+  nfeBloqueadoAte  DateTime?
+  nfseBloqueadoAte DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Registro de cada tentativa de buscar documentos fiscais na Sefaz/ADN —
+// manual ou automática (job agendado) — pra dar visibilidade a erros que
+// aconteceriam sem ninguém olhando.
+model SefazSincronizacaoLog {
+  id        String  @id @default(uuid())
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  // 'NFE_ENTRADA' (mercadoria, via Sefaz) ou 'NFSE_SERVICO' (via ADN).
+  origem String
+
+  sucesso      Boolean
+  mensagem     String
+  totalBuscado Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([empresaId, origem, createdAt])
+}
+
+enum OrigemNf {
+  SEFAZ
+  XML_UPLOAD
+}
+
+// Documento fiscal baixado da distribuição da Sefaz (NF-e de mercadoria
+// destinada ao CNPJ da empresa) que ainda não foi conciliado. A resposta
+// padrão do distDFeInt é só o "resumo" (resNFe) — por isso já guardamos
+// emitente/valor/data extraídos dali. caminhaoId só é preenchido se o
+// usuário decidir vincular a NF a um caminhão específico (ex.: peça,
+// pneu, manutenção); pode ficar solta na empresa (despesa geral).
+model NfEntrada {
+  id String @id @default(uuid())
+
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  nsu           BigInt
+  chaveAcesso   String
+  tipoDocumento String // resNFe | resEvento | resCancNFe | procNFe etc.
+
+  emitenteCnpj String?
+  emitenteNome String?
+  valor        Float?
+  dataEmissao  DateTime?
+  situacao     String? // cSitNFe do resumo: autorizada, cancelada, etc.
+
+  arquivoUrl String?
+  buscadoEm  DateTime @default(now())
+
+  // Manifestação do destinatário (Ciência da Operação) — enviada
+  // automaticamente pro documento que chegou como resumo, pra Sefaz
+  // liberar o XML completo (com itens) na próxima consulta.
+  manifestadoEm      DateTime?
+  statusManifestacao String?
+
+  origem OrigemNf @default(SEFAZ)
+
+  caminhaoId String?
+  caminhao   Caminhao? @relation(fields: [caminhaoId], references: [id])
+
+  ignorado Boolean @default(false) // marcado como "não é nossa"/recusado
+
+  // Aceita direto: accepted = aceita sem gerar conta, contaPagarId =
+  // aceita e a conta a pagar foi criada direto a partir dessa NF.
+  aceita       Boolean     @default(false)
+  contaPagarId String?
+  contaPagar   ContaPagar? @relation("NfEntradaContaPagar", fields: [contaPagarId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([empresaId, chaveAcesso])
+  @@index([empresaId])
+  @@index([caminhaoId])
+  @@index([tipoDocumento])
+  @@index([contaPagarId])
+}
+
+// Documento fiscal baixado da distribuição do ADN (NFS-e nacional) para o
+// CNPJ da empresa (contratação de serviço). Diferente da NfEntrada, o ADN
+// entrega o XML completo, por isso os campos estruturados abaixo já vêm
+// preenchidos na captura.
+model NfServico {
+  id String @id @default(uuid())
+
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  nsu           BigInt
+  chaveAcesso   String
+  tipoDocumento String
+  tipoEvento    String?
+
+  numeroNf      String?
+  prestadorNome String? // nome do prestador do serviço
+  prestadorDoc  String? // CNPJ/CPF do prestador
+  valor         Float?
+  dataEmissao   DateTime?
+
+  arquivoUrl String?
+  geradoEm   DateTime?
+  buscadoEm  DateTime  @default(now())
+
+  caminhaoId String?
+  caminhao   Caminhao? @relation(fields: [caminhaoId], references: [id])
+
+  ignorado Boolean @default(false) // marcado como "não é nossa"/recusado
+
+  aceita       Boolean     @default(false)
+  contaPagarId String?
+  contaPagar   ContaPagar? @relation("NfServicoContaPagar", fields: [contaPagarId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([empresaId, chaveAcesso])
+  @@index([empresaId])
+  @@index([caminhaoId])
+  @@index([tipoDocumento])
+  @@index([contaPagarId])
+}
+
+model FiscalPreparoItem {
+  id String @id @default(uuid())
+
+  tipo      TipoPreparoFiscal
+  chave     String // identificador fixo do item, ex: 'rntrc_ativo'
+  titulo    String
+  descricao String?
+  ordem     Int               @default(0)
+
+  concluido   Boolean   @default(false)
+  concluidoEm DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tipo, chave])
 }

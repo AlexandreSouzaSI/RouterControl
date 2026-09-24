@@ -14,6 +14,13 @@ import { Financeiro } from './pages/Financeiro';
 import { FinanceiroRegras } from './pages/FinanceiroRegras';
 import { TrackingPage } from './pages/TrackingPage';
 import { DadosCapturados } from './pages/DadosCapturados';
+import { Fiscal } from './pages/Fiscal';
+import { DashboardFinanceiro } from './pages/DashboardFinanceiro';
+import { NfEntrada } from './pages/NfEntrada';
+import { NfServico } from './pages/NfServico';
+import { ContasPagar } from './pages/ContasPagar';
+import { Cadastros } from './pages/Cadastros';
+import { Admin } from './pages/Admin';
 
 export default function App() {
   return (
@@ -39,6 +46,13 @@ export default function App() {
                     <Route path="/regras" element={<FinanceiroRegras />} />
                     <Route path="/Rotas" element={<TrackingPage />} />
                     <Route path="/dados-capturados" element={<DadosCapturados />} />
+                    <Route path="/fiscal" element={<Fiscal />} />
+                    <Route path="/financeiro-nf/dashboard" element={<DashboardFinanceiro />} />
+                    <Route path="/financeiro-nf/entrada" element={<NfEntrada />} />
+                    <Route path="/financeiro-nf/servico" element={<NfServico />} />
+                    <Route path="/financeiro-nf/contas-pagar" element={<ContasPagar />} />
+                    <Route path="/cadastros" element={<Cadastros />} />
+                    <Route path="/admin" element={<Admin />} />
                   </Routes>
                 </Layout>
               </ProtectedRoute>

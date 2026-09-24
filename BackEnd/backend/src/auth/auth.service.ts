@@ -11,7 +11,10 @@ export class AuthService {
     ) { }
 
     async login(email: string, senha: string) {
-        const usuario = await this.prisma.usuario.findUnique({ where: { email } });
+        const usuario = await this.prisma.usuario.findUnique({
+            where: { email },
+            include: { empresa: { select: { nome: true, ativo: true, modulosHabilitados: true } } },
+        });
 
         // Mensagem genérica de propósito — não dizer se foi o e-mail ou a
         // senha que errou, pra não ajudar quem estiver tentando adivinhar.
@@ -25,6 +28,12 @@ export class AuthService {
             throw new UnauthorizedException('E-mail ou senha inválidos');
         }
 
+        // Login desativado (usuário individual ou empresa inteira) — não dá
+        // detalhe do motivo pro usuário final, só quem administra sabe.
+        if (!usuario.ativo || !usuario.empresa.ativo) {
+            throw new UnauthorizedException('Acesso desativado. Fale com o administrador.');
+        }
+
         const token = await this.jwtService.signAsync({
             sub: usuario.id,
             email: usuario.email,
@@ -35,7 +44,12 @@ export class AuthService {
             token,
             usuario: {
                 id: usuario.id,
+                nome: usuario.nome,
                 email: usuario.email,
+                isAdminMaster: usuario.isAdminMaster,
+                perfil: usuario.perfil,
+                modulosHabilitados: usuario.empresa.modulosHabilitados,
+                empresaNome: usuario.empresa.nome,
             },
         };
     }
@@ -43,13 +57,23 @@ export class AuthService {
     async me(usuarioId: string) {
         const usuario = await this.prisma.usuario.findUnique({
             where: { id: usuarioId },
-            select: { id: true, email: true, empresaId: true },
+            select: {
+                id: true,
+                nome: true,
+                email: true,
+                empresaId: true,
+                isAdminMaster: true,
+                perfil: true,
+                empresa: { select: { nome: true, modulosHabilitados: true } },
+            },
         });
 
         if (!usuario) {
             throw new UnauthorizedException();
         }
 
-        return usuario;
+        const { empresa, ...resto } = usuario;
+
+        return { ...resto, modulosHabilitados: empresa.modulosHabilitados, empresaNome: empresa.nome };
     }
 }

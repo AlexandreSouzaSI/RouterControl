@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
     DirecaoTransacaoFinanceira,
     Prisma,
@@ -15,8 +15,36 @@ import { CreateRegraClassificacaoDto } from './dto/create-regra-classificacao.dt
 export class FinanceiroService {
     constructor(private readonly prisma: PrismaService) { }
 
-    private montarWhere(filtros: FinanceiroFiltrosDto): Prisma.TransacaoFinanceiraWhereInput {
-        const where: Prisma.TransacaoFinanceiraWhereInput = {};
+    // Garante que um caminhaoId informado pelo usuário (ex.: no filtro, na
+    // classificação manual, numa regra) realmente pertence à empresa dele
+    // antes de usar — sem isso, dava pra referenciar/enxergar caminhão de
+    // outra empresa só sabendo o id.
+    private async validarCaminhaoDaEmpresa(caminhaoId: string, empresaId: string) {
+        const caminhao = await this.prisma.caminhao.findFirst({
+            where: { id: caminhaoId, empresaId },
+        });
+
+        if (!caminhao) {
+            throw new ForbiddenException('Caminhão não encontrado nessa empresa.');
+        }
+
+        return caminhao;
+    }
+
+    private async validarCategoriaDaEmpresa(categoriaId: string, empresaId: string) {
+        const categoria = await this.prisma.categoriaFinanceira.findFirst({
+            where: { id: categoriaId, empresaId },
+        });
+
+        if (!categoria) {
+            throw new ForbiddenException('Categoria não encontrada nessa empresa.');
+        }
+
+        return categoria;
+    }
+
+    private montarWhere(empresaId: string, filtros: FinanceiroFiltrosDto): Prisma.TransacaoFinanceiraWhereInput {
+        const where: Prisma.TransacaoFinanceiraWhereInput = { empresaId };
 
         if (filtros.caminhaoId) {
             where.caminhaoId = filtros.caminhaoId;
@@ -47,8 +75,8 @@ export class FinanceiroService {
         return where;
     }
 
-    async listarTransacoes(filtros: FinanceiroFiltrosDto) {
-        const where = this.montarWhere(filtros);
+    async listarTransacoes(empresaId: string, filtros: FinanceiroFiltrosDto) {
+        const where = this.montarWhere(empresaId, filtros);
 
         return this.prisma.transacaoFinanceira.findMany({
             where,
@@ -63,8 +91,8 @@ export class FinanceiroService {
         });
     }
 
-    async resumo(filtros: FinanceiroFiltrosDto) {
-        const where = this.montarWhere(filtros);
+    async resumo(empresaId: string, filtros: FinanceiroFiltrosDto) {
+        const where = this.montarWhere(empresaId, filtros);
 
         const transacoes = await this.prisma.transacaoFinanceira.findMany({
             where,
@@ -150,17 +178,19 @@ export class FinanceiroService {
         };
     }
 
-    async criarCategoria(dto: CreateCategoriaFinanceiraDto) {
+    async criarCategoria(empresaId: string, dto: CreateCategoriaFinanceiraDto) {
         return this.prisma.categoriaFinanceira.create({
             data: {
                 nome: dto.nome.trim(),
+                empresaId,
             },
         });
     }
 
-    async listarCategorias() {
+    async listarCategorias(empresaId: string) {
         return this.prisma.categoriaFinanceira.findMany({
             where: {
+                empresaId,
                 ativo: true,
             },
             orderBy: {
@@ -169,13 +199,21 @@ export class FinanceiroService {
         });
     }
 
-    async classificarTransacao(id: string, dto: ClassificarTransacaoDto) {
-        const transacao = await this.prisma.transacaoFinanceira.findUnique({
-            where: { id },
+    async classificarTransacao(empresaId: string, id: string, dto: ClassificarTransacaoDto) {
+        const transacao = await this.prisma.transacaoFinanceira.findFirst({
+            where: { id, empresaId },
         });
 
         if (!transacao) {
             throw new NotFoundException('Transação financeira não encontrada.');
+        }
+
+        if (dto.caminhaoId) {
+            await this.validarCaminhaoDaEmpresa(dto.caminhaoId, empresaId);
+        }
+
+        if (dto.categoriaId) {
+            await this.validarCategoriaDaEmpresa(dto.categoriaId, empresaId);
         }
 
         return this.prisma.transacaoFinanceira.update({
@@ -245,7 +283,7 @@ export class FinanceiroService {
             : DirecaoTransacaoFinanceira.SAIDA;
     }
 
-    async importarExtrato(file: Express.Multer.File) {
+    async importarExtrato(empresaId: string, file: Express.Multer.File) {
         if (!file) {
             throw new Error('Arquivo não enviado.');
         }
@@ -278,6 +316,7 @@ export class FinanceiroService {
             data: {
                 nomeArquivo: file.originalname,
                 totalLinhas: Math.max(linhas.length - 10, 0),
+                empresaId,
             },
         });
 
@@ -341,7 +380,7 @@ export class FinanceiroService {
                 continue;
             }
 
-            const regra = await this.aplicarRegraAutomatica({
+            const regra = await this.aplicarRegraAutomatica(empresaId, {
                 lancamento,
                 razaoSocial,
                 descricao: null,
@@ -361,6 +400,7 @@ export class FinanceiroService {
                         importacaoId: importacao.id,
                         categoriaId: regra.categoriaId,
                         caminhaoId: regra.caminhaoId,
+                        empresaId,
                         status: foiClassificada
                             ? StatusTransacaoFinanceira.CLASSIFICADA
                             : StatusTransacaoFinanceira.PENDENTE_CLASSIFICACAO,
@@ -424,13 +464,14 @@ export class FinanceiroService {
             .trim();
     }
 
-    private async aplicarRegraAutomatica(transacao: {
+    private async aplicarRegraAutomatica(empresaId: string, transacao: {
         lancamento: string;
         razaoSocial?: string | null;
         descricao?: string | null;
     }) {
         const regras = await this.prisma.regraClassificacaoFinanceira.findMany({
             where: {
+                empresaId,
                 ativo: true,
             },
             orderBy: [
@@ -476,13 +517,22 @@ export class FinanceiroService {
         };
     }
 
-    async criarRegra(dto: CreateRegraClassificacaoDto) {
+    async criarRegra(empresaId: string, dto: CreateRegraClassificacaoDto) {
+        if (dto.caminhaoId) {
+            await this.validarCaminhaoDaEmpresa(dto.caminhaoId, empresaId);
+        }
+
+        if (dto.categoriaId) {
+            await this.validarCategoriaDaEmpresa(dto.categoriaId, empresaId);
+        }
+
         return this.prisma.regraClassificacaoFinanceira.create({
             data: {
                 palavra: dto.palavra.trim(),
                 categoriaId: dto.categoriaId || null,
                 caminhaoId: dto.caminhaoId || null,
                 prioridade: dto.prioridade ?? 0,
+                empresaId,
             },
             include: {
                 categoria: true,
@@ -491,9 +541,10 @@ export class FinanceiroService {
         });
     }
 
-    async listarRegras() {
+    async listarRegras(empresaId: string) {
         return this.prisma.regraClassificacaoFinanceira.findMany({
             where: {
+                empresaId,
                 ativo: true,
             },
             include: {
@@ -511,9 +562,10 @@ export class FinanceiroService {
         });
     }
 
-    async reprocessarClassificacao() {
+    async reprocessarClassificacao(empresaId: string) {
         const transacoes = await this.prisma.transacaoFinanceira.findMany({
             where: {
+                empresaId,
                 status: StatusTransacaoFinanceira.PENDENTE_CLASSIFICACAO,
             },
         });
@@ -521,7 +573,7 @@ export class FinanceiroService {
         let classificadas = 0;
 
         for (const transacao of transacoes) {
-            const regra = await this.aplicarRegraAutomatica(transacao);
+            const regra = await this.aplicarRegraAutomatica(empresaId, transacao);
 
             if (regra.categoriaId || regra.caminhaoId) {
                 await this.prisma.transacaoFinanceira.update({
@@ -546,9 +598,10 @@ export class FinanceiroService {
         };
     }
 
-    async listarCaminhoes() {
+    async listarCaminhoes(empresaId: string) {
         return this.prisma.caminhao.findMany({
             where: {
+                empresaId,
                 ativo: true,
             },
             orderBy: {

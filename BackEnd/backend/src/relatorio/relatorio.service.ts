@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class RelatorioService {
     constructor(private prisma: PrismaService) { }
 
-    async findAll(params: {
+    async findAll(empresaId: string, params: {
         placa?: string;
         mes?: string;
         dataInicio?: string;
@@ -16,10 +16,13 @@ export class RelatorioService {
         const { placa, mes, dataInicio, dataFim, page = 1, limit = 10 } = params;
 
         const skip = (page - 1) * limit;
-        const where: any = {};
+        const where: any = {
+            caminhao: { empresaId },
+        };
 
         if (placa) {
             where.caminhao = {
+                empresaId,
                 placa: {
                     contains: placa.toUpperCase(),
                 },
@@ -230,13 +233,13 @@ export class RelatorioService {
         };
     }
 
-    async getDashboard(params?: {
+    async getDashboard(empresaId: string, params?: {
         placa?: string;
         mes?: string;
         dataInicio?: string;
         dataFim?: string;
     }) {
-        const result = await this.findAll({
+        const result = await this.findAll(empresaId, {
             placa: params?.placa,
             mes: params?.mes,
             dataInicio: params?.dataInicio,
@@ -446,9 +449,9 @@ export class RelatorioService {
         };
     }
 
-    async findOne(periodoId: string) {
-        return this.prisma.uploadPeriod.findUnique({
-            where: { id: periodoId },
+    async findOne(empresaId: string, periodoId: string) {
+        return this.prisma.uploadPeriod.findFirst({
+            where: { id: periodoId, caminhao: { empresaId } },
             include: {
                 caminhao: true,
                 trips: {
