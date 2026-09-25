@@ -18,6 +18,7 @@ import { DadosCapturados } from './pages/DadosCapturados';
 import { Fiscal } from './pages/Fiscal';
 import { DashboardFinanceiro } from './pages/DashboardFinanceiro';
 import { NfEntrada } from './pages/NfEntrada';
+import { NfTransporte } from './pages/NfTransporte';
 import { NfServico } from './pages/NfServico';
 import { ContasPagar } from './pages/ContasPagar';
 import { ContasPagarConciliar } from './pages/ContasPagarConciliar';
@@ -52,6 +53,7 @@ export default function App() {
                     <Route path="/fiscal" element={<Fiscal />} />
                     <Route path="/financeiro-nf/dashboard" element={<DashboardFinanceiro />} />
                     <Route path="/financeiro-nf/entrada" element={<NfEntrada />} />
+                    <Route path="/financeiro-nf/transporte" element={<NfTransporte />} />
                     <Route path="/financeiro-nf/servico" element={<NfServico />} />
                     <Route path="/financeiro-nf/contas-pagar" element={<ContasPagar />} />
                     <Route path="/financeiro-nf/contas-pagar/conciliar" element={<ContasPagarConciliar />} />

@@ -36,6 +36,7 @@ type NfeViewItem = {
 type NfeView = {
     chaveAcesso: string;
     tipoDocumento?: string;
+    numeroNf?: string;
     naturezaOperacao?: string;
     issueDate?: string;
     situacao?: string;
@@ -395,7 +396,8 @@ function GoodsNfView({ nf }: { nf: NfeView }) {
                 </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-4">
+                <Field label="Número" value={nf.numeroNf} />
                 <Field label="Data de emissão" value={formatDate(nf.issueDate)} />
                 <Field label="Chave de acesso" value={nf.chaveAcesso} />
                 <Field label="Tipo" value={nf.tipoDocumento === '65' ? 'NFC-e' : 'NF-e'} />

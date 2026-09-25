@@ -526,6 +526,15 @@ export class TrucksControlService implements OnModuleInit {
 
         await this.registrarChamadaApi(empresaId, 'Veiculo');
 
+        // Log cru — pra conferir no terminal se a Trucks Control está
+        // mandando motorista/identificação/chassi preenchidos pra essa
+        // empresa, ou se só vem a placa mesmo (limitação de cadastro do
+        // lado deles, como já aconteceu com litrosTanque).
+        console.log(
+            `[TrucksControl] empresa=${empresaId} RequestVeiculo resposta:`,
+            JSON.stringify(data),
+        );
+
         if (data?.ErrorRequest) {
             console.warn(
                 `[TrucksControl] ${new Date().toISOString()} empresa=${empresaId} Erro RequestVeiculo:`,
@@ -749,18 +758,34 @@ export class TrucksControlService implements OnModuleInit {
 
         const veiIds = veiculos.map((v) => Number(v.veiID));
 
-        const ultimasPosicoes = await this.prisma.posicaoCaminhao.findMany({
-            where: { ...this.filtroEmpresa(empresaId), veiId: { in: veiIds } },
-            orderBy: { dataHora: 'desc' },
-            distinct: ['veiId'],
-        });
+        const [ultimasPosicoes, ultimasTelemetrias] = await Promise.all([
+            this.prisma.posicaoCaminhao.findMany({
+                where: { ...this.filtroEmpresa(empresaId), veiId: { in: veiIds } },
+                orderBy: { dataHora: 'desc' },
+                distinct: ['veiId'],
+            }),
+            // Última ocorrência de Telemetria por veículo — é a fonte real
+            // de combustível (percentual do tanque), diferente do
+            // litrosTanque de PosicaoCaminhao (ver comentário grande na
+            // seção "Telemetria" acima).
+            this.prisma.telemetriaOcorrencia.findMany({
+                where: { ...this.filtroEmpresa(empresaId), veiId: { in: veiIds } },
+                orderBy: { dataHora: 'desc' },
+                distinct: ['veiId'],
+            }),
+        ]);
 
         const posicaoPorVeiculo = new Map(
             ultimasPosicoes.map((p) => [p.veiId, p]),
         );
 
+        const telemetriaPorVeiculo = new Map(
+            ultimasTelemetrias.map((t) => [t.veiId, t]),
+        );
+
         const caminhoes = veiculos.map((veiculo) => {
             const ultima = posicaoPorVeiculo.get(Number(veiculo.veiID));
+            const ultimaTelemetria = telemetriaPorVeiculo.get(Number(veiculo.veiID));
 
             return {
                 veiID: veiculo.veiID,
@@ -781,6 +806,13 @@ export class TrucksControlService implements OnModuleInit {
                         litrosTanque: ultima.litrosTanque,
                         odometro: ultima.odometro,
                         rpm: ultima.rpm,
+                    }
+                    : null,
+                telemetria: ultimaTelemetria
+                    ? {
+                        dataHora: ultimaTelemetria.dataHora,
+                        percentualTanque: ultimaTelemetria.percentualTanque,
+                        percentualAcelerador: ultimaTelemetria.percentualAcelerador,
                     }
                     : null,
             };
@@ -973,6 +1005,524 @@ export class TrucksControlService implements OnModuleInit {
         return {
             total: posicoes.length,
             posicoes: posicoes.map((p) => ({ ...p, mId: Number(p.mId) })),
+        };
+    }
+
+    // -----------------------------------------------------------------
+    // Telemetria (RequestTelemetriaOcorrenciasHoje / RequestTelemetriaV25)
+    // -----------------------------------------------------------------
+    //
+    // Duas rotas separadas de RequestMensagemCB — segundo o próprio
+    // suporte da Trucks Control (conferido por WhatsApp), o "lt" de
+    // RequestMensagemCB (litrosTanque acima) não vem preenchido de
+    // verdade; combustível é dado de CAN do veículo, e só vem por
+    // Telemetria, que precisa estar contratada/habilitada no plano da
+    // empresa e embarcada no equipamento (RequestEmbarcarTelemetria no
+    // manual). Estas duas rotas são a fonte real:
+    //   - RequestTelemetriaOcorrenciasHoje: percentual do tanque
+    //     (pTanque, 0-100, NÃO litros absolutos) por minuto/ocorrência —
+    //     só devolve ocorrências do dia corrente, por isso persistimos
+    //     pra manter histórico.
+    //   - RequestTelemetriaV25: consumo em litros por bloco de tempo
+    //     (ConsumoLitros), junto com hodômetro/horímetro do bloco — essa
+    //     é "quantos litros o caminhão gastou", diferente de "quanto tem
+    //     no tanque agora" (pTanque acima).
+    // Ambas documentadas com intervalo mínimo de 10 minutos entre
+    // chamadas do mesmo login.
+
+    private parseDataHoraBr(value: any): Date | null {
+        if (value === undefined || value === null || value === '') return null;
+
+        const str = String(value).trim();
+
+        // Formato dd/mm/yyyy HH:mm:ss, usado no exemplo de
+        // RequestTelemetriaOcorrenciasHoje do manual. new Date() nativo
+        // não entende esse formato (interpretaria errado como mm/dd),
+        // então precisa parsear na mão.
+        const match = str.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
+
+        if (match) {
+            const [, dd, mm, yyyy, hh, mi, ss] = match;
+            return new Date(
+                Number(yyyy),
+                Number(mm) - 1,
+                Number(dd),
+                Number(hh),
+                Number(mi),
+                Number(ss),
+            );
+        }
+
+        // Fallback pra ISO ou outros formatos que o Date nativo entenda
+        // (ex.: RequestTelemetriaV25 não trouxe exemplo no manual — se
+        // vier em ISO, isso já resolve sozinho).
+        const asDate = new Date(str);
+        return Number.isNaN(asDate.getTime()) ? null : asDate;
+    }
+
+    private async requisitarTelemetriaOcorrenciasHoje(empresaId: string) {
+        const podeChamar = await this.podeChamarApi(
+            empresaId,
+            'TelemetriaOcorrenciasHoje',
+            10 * 60 * 1000,
+        );
+
+        if (!podeChamar) {
+            console.log(
+                `[TrucksControl] empresa=${empresaId} — Pulando RequestTelemetriaOcorrenciasHoje, ainda dentro do intervalo mínimo.`,
+            );
+            return [];
+        }
+
+        const credencial = await this.obterCredencialAtiva(empresaId);
+        if (!credencial) return [];
+
+        const xml = `
+<RequestTelemetriaOcorrenciasHoje>
+  <login>${credencial.login}</login>
+  <senha>${credencial.senha}</senha>
+</RequestTelemetriaOcorrenciasHoje>`;
+
+        const data = await this.postXml(xml);
+
+        await this.registrarChamadaApi(empresaId, 'TelemetriaOcorrenciasHoje');
+
+        // Log cru da resposta — pra conferir no terminal se a Trucks
+        // Control está realmente devolvendo ocorrências com pTanque
+        // preenchido pra essa empresa, sem precisar abrir o banco.
+        console.log(
+            `[TrucksControl] empresa=${empresaId} RequestTelemetriaOcorrenciasHoje resposta:`,
+            JSON.stringify(data),
+        );
+
+        if (data?.ErrorRequest) {
+            console.warn(
+                'Erro Trucks RequestTelemetriaOcorrenciasHoje:',
+                data.ErrorRequest,
+            );
+            return [];
+        }
+
+        const ocorrencias = this.toArray(
+            data?.ResponseTelemetriaOcorrenciasHoje?.Ocorrencia,
+        );
+
+        return ocorrencias.map((o: any) => ({
+            veiID: Number(o.veiID),
+            dataHora: this.parseDataHoraBr(o.dtHr),
+            velocidade: this.parseNumber(o.vel),
+            velocidadeMax: this.parseNumber(o.velMax),
+            rpm: this.parseNumber(o.rpm),
+            percentualTanque: this.parseNumber(o.pTanque),
+            percentualAcelerador: this.parseNumber(o.pAcelerador),
+        }));
+    }
+
+    private async requisitarTelemetriaV25(empresaId: string) {
+        const podeChamar = await this.podeChamarApi(empresaId, 'TelemetriaV25', 10 * 60 * 1000);
+
+        if (!podeChamar) {
+            console.log(
+                `[TrucksControl] empresa=${empresaId} — Pulando RequestTelemetriaV25, ainda dentro do intervalo mínimo.`,
+            );
+            return [];
+        }
+
+        const credencial = await this.obterCredencialAtiva(empresaId);
+        if (!credencial) return [];
+
+        const xml = `
+<RequestTelemetriaV25>
+  <login>${credencial.login}</login>
+  <senha>${credencial.senha}</senha>
+</RequestTelemetriaV25>`;
+
+        const data = await this.postXml(xml);
+
+        await this.registrarChamadaApi(empresaId, 'TelemetriaV25');
+
+        // Idem — log cru pra ver no terminal se ConsumoLitros está vindo
+        // preenchido de verdade.
+        console.log(
+            `[TrucksControl] empresa=${empresaId} RequestTelemetriaV25 resposta:`,
+            JSON.stringify(data),
+        );
+
+        if (data?.ErrorRequest) {
+            console.warn('Erro Trucks RequestTelemetriaV25:', data.ErrorRequest);
+            return [];
+        }
+
+        const blocos = this.toArray(data?.ResponseTelemetriaV25?.TelemetriaV25);
+
+        return blocos.map((b: any) => ({
+            veiID: Number(b.veiID),
+            dataHoraInicio: this.parseDataHoraBr(b.DataHoraInicio),
+            dataHoraFim: this.parseDataHoraBr(b.DataHoraFim),
+            hodometroInicial: this.parseNumber(b.HodometroInicial),
+            hodometroTotal: this.parseNumber(b.HodometroTotal),
+            qtdMinutosMotorInicio: this.parseNumber(b.QtdMinutosMotorInicio),
+            qtdMinutosMotorFim: this.parseNumber(b.QtdMinutosMotorFim),
+            consumoLitrosAnterior: this.parseNumber(b.ConsumoLitrosAnterior),
+            consumoLitros: this.parseNumber(b.ConsumoLitros),
+            tempMediaLiqArrefecimento: this.parseNumber(b.TempMediaLiqArrefecimento),
+            tempMaximaLiqArrefecimento: this.parseNumber(b.TempMaximaLiqArrefecimento),
+        }));
+    }
+
+    /**
+     * Roda a cada 10 minutos (mesmo cooldown real das duas requisições,
+     * imposto pelo gate persistido em podeChamarApi) — busca e persiste
+     * telemetria de ocorrências + V25 pra cada empresa com credencial
+     * ativa e telemetria embarcada. Empresas sem telemetria habilitada
+     * simplesmente recebem resposta vazia da API (ou erro), sem quebrar
+     * nada — os arrays ficam vazios e o loop só não grava nada.
+     */
+    @Cron('*/10 * * * *')
+    async persistirTelemetria() {
+        const credenciais = await this.prisma.trucksControlCredencial.findMany({
+            where: { ativo: true },
+        });
+
+        for (const credencial of credenciais) {
+            await this.persistirTelemetriaEmpresa(credencial.empresaId);
+        }
+    }
+
+    private async persistirTelemetriaEmpresa(empresaId: string) {
+        try {
+            const veiculosResult = await this.listarVeiculosComCache(empresaId, false);
+            const veiculosPorId = new Map(
+                veiculosResult.veiculos.map((v) => [Number(v.veiID), v]),
+            );
+
+            const [ocorrencias, blocos] = await Promise.all([
+                this.requisitarTelemetriaOcorrenciasHoje(empresaId),
+                this.requisitarTelemetriaV25(empresaId),
+            ]);
+
+            for (const o of ocorrencias) {
+                if (!o.veiID || !o.dataHora || Number.isNaN(o.dataHora.getTime())) continue;
+
+                const veiculo = veiculosPorId.get(o.veiID);
+
+                await this.prisma.telemetriaOcorrencia.upsert({
+                    where: {
+                        veiId_dataHora: { veiId: o.veiID, dataHora: o.dataHora },
+                    },
+                    update: {
+                        velocidade: o.velocidade,
+                        velocidadeMax: o.velocidadeMax,
+                        rpm: o.rpm !== null ? Math.round(o.rpm) : null,
+                        percentualTanque: o.percentualTanque,
+                        percentualAcelerador: o.percentualAcelerador,
+                    },
+                    create: {
+                        empresaId,
+                        veiId: o.veiID,
+                        placa: veiculo?.placa ?? null,
+                        dataHora: o.dataHora,
+                        velocidade: o.velocidade,
+                        velocidadeMax: o.velocidadeMax,
+                        rpm: o.rpm !== null ? Math.round(o.rpm) : null,
+                        percentualTanque: o.percentualTanque,
+                        percentualAcelerador: o.percentualAcelerador,
+                    },
+                });
+            }
+
+            for (const b of blocos) {
+                if (
+                    !b.veiID ||
+                    !b.dataHoraInicio ||
+                    !b.dataHoraFim ||
+                    Number.isNaN(b.dataHoraInicio.getTime()) ||
+                    Number.isNaN(b.dataHoraFim.getTime())
+                ) {
+                    continue;
+                }
+
+                const veiculo = veiculosPorId.get(b.veiID);
+
+                await this.prisma.telemetriaBlocoV25.upsert({
+                    where: {
+                        veiId_dataHoraInicio_dataHoraFim: {
+                            veiId: b.veiID,
+                            dataHoraInicio: b.dataHoraInicio,
+                            dataHoraFim: b.dataHoraFim,
+                        },
+                    },
+                    update: {},
+                    create: {
+                        empresaId,
+                        veiId: b.veiID,
+                        placa: veiculo?.placa ?? null,
+                        dataHoraInicio: b.dataHoraInicio,
+                        dataHoraFim: b.dataHoraFim,
+                        hodometroInicial: b.hodometroInicial,
+                        hodometroTotal: b.hodometroTotal,
+                        qtdMinutosMotorInicio:
+                            b.qtdMinutosMotorInicio !== null
+                                ? Math.round(b.qtdMinutosMotorInicio)
+                                : null,
+                        qtdMinutosMotorFim:
+                            b.qtdMinutosMotorFim !== null
+                                ? Math.round(b.qtdMinutosMotorFim)
+                                : null,
+                        consumoLitrosAnterior: b.consumoLitrosAnterior,
+                        consumoLitros: b.consumoLitros,
+                        tempMediaLiqArrefecimento: b.tempMediaLiqArrefecimento,
+                        tempMaximaLiqArrefecimento: b.tempMaximaLiqArrefecimento,
+                    },
+                });
+            }
+
+            console.log(
+                `[TrucksControl] empresa=${empresaId} telemetria: ocorrencias=${ocorrencias.length} blocosV25=${blocos.length}`,
+            );
+        } catch (error: any) {
+            console.error(
+                `Erro ao persistir telemetria (empresa=${empresaId}):`,
+                error.message ?? error,
+            );
+        }
+    }
+
+    /**
+     * Histórico de ocorrências de Telemetria (percentual do tanque) salvo
+     * no banco — mesmo padrão de buscarHistorico, filtrando por
+     * placa/veiId/período.
+     */
+    async buscarTelemetriaOcorrencias(empresaId: string, params: {
+        placa?: string;
+        veiId?: number;
+        dataInicio?: string;
+        dataFim?: string;
+    }) {
+        const where: any = { ...this.filtroEmpresa(empresaId) };
+
+        if (params.placa) where.placa = params.placa.toUpperCase();
+        if (params.veiId) where.veiId = params.veiId;
+
+        if (params.dataInicio || params.dataFim) {
+            where.dataHora = {};
+            if (params.dataInicio) where.dataHora.gte = new Date(`${params.dataInicio}T00:00:00`);
+            if (params.dataFim) where.dataHora.lte = new Date(`${params.dataFim}T23:59:59`);
+        }
+
+        const ocorrencias = await this.prisma.telemetriaOcorrencia.findMany({
+            where,
+            orderBy: { dataHora: 'desc' },
+            take: 2000,
+        });
+
+        return { total: ocorrencias.length, ocorrencias };
+    }
+
+    /**
+     * Histórico de blocos de Telemetria V2.5 (consumo em litros) salvo no
+     * banco — mesmo padrão, filtrando pelo fechamento do bloco
+     * (dataHoraFim).
+     */
+    async buscarTelemetriaV25(empresaId: string, params: {
+        placa?: string;
+        veiId?: number;
+        dataInicio?: string;
+        dataFim?: string;
+    }) {
+        const where: any = { ...this.filtroEmpresa(empresaId) };
+
+        if (params.placa) where.placa = params.placa.toUpperCase();
+        if (params.veiId) where.veiId = params.veiId;
+
+        if (params.dataInicio || params.dataFim) {
+            where.dataHoraFim = {};
+            if (params.dataInicio) where.dataHoraFim.gte = new Date(`${params.dataInicio}T00:00:00`);
+            if (params.dataFim) where.dataHoraFim.lte = new Date(`${params.dataFim}T23:59:59`);
+        }
+
+        const blocos = await this.prisma.telemetriaBlocoV25.findMany({
+            where,
+            orderBy: { dataHoraFim: 'desc' },
+            take: 2000,
+        });
+
+        return { total: blocos.length, blocos };
+    }
+
+    /**
+     * Resumo de consumo/autonomia via Telemetria real (CAN), pra um
+     * veículo, num período.
+     *
+     * IMPORTANTE — ConsumoLitros/ConsumoLitrosAnterior de cada bloco da
+     * V2.5 são leituras CUMULATIVAS do medidor do veículo (igual um
+     * hodômetro de combustível), não o valor já gasto naquele bloco. O
+     * consumo real do bloco é a diferença entre as duas:
+     *   litrosDoBloco = ConsumoLitros - ConsumoLitrosAnterior
+     * Tratar ConsumoLitros isolado como "litros gastos nesse bloco" é o
+     * bug que gerava números absurdos tipo 83 mil litros em 30 minutos —
+     * era o valor acumulado desde sempre, não o do bloco.
+     * O km do bloco segue o mesmo princípio: HodometroTotal - HodometroInicial.
+     *
+     * Some os deltas válidos de todos os blocos do período pra chegar em
+     * consumo médio (km/L e L/100km). Com a capacidade do tanque
+     * cadastrada em Caminhao.capacidadeTanqueLitros, converte esse
+     * consumo médio em autonomia: quantos km o caminhão rodaria com o
+     * tanque cheio, e quantos km ainda tem pela frente com o % atual
+     * (vindo da última ocorrência de RequestTelemetriaOcorrenciasHoje).
+     *
+     * Abastecimentos são detectados no histórico de % do tanque
+     * (TelemetriaOcorrencia): salto pra cima de pelo menos 3 pontos
+     * percentuais entre duas leituras seguidas = abasteceu (nível não
+     * sobe sozinho rodando).
+     */
+    async resumoConsumoTelemetria(empresaId: string, params: {
+        veiId: number;
+        dataInicio?: string;
+        dataFim?: string;
+    }) {
+        const whereBlocos: any = { ...this.filtroEmpresa(empresaId), veiId: params.veiId };
+        const whereOcorrencias: any = { ...this.filtroEmpresa(empresaId), veiId: params.veiId };
+
+        if (params.dataInicio || params.dataFim) {
+            whereBlocos.dataHoraFim = {};
+            whereOcorrencias.dataHora = {};
+
+            if (params.dataInicio) {
+                whereBlocos.dataHoraFim.gte = new Date(`${params.dataInicio}T00:00:00`);
+                whereOcorrencias.dataHora.gte = new Date(`${params.dataInicio}T00:00:00`);
+            }
+
+            if (params.dataFim) {
+                whereBlocos.dataHoraFim.lte = new Date(`${params.dataFim}T23:59:59`);
+                whereOcorrencias.dataHora.lte = new Date(`${params.dataFim}T23:59:59`);
+            }
+        }
+
+        const [blocos, ocorrencias] = await Promise.all([
+            this.prisma.telemetriaBlocoV25.findMany({
+                where: whereBlocos,
+                orderBy: { dataHoraFim: 'asc' },
+                take: 2000,
+            }),
+            this.prisma.telemetriaOcorrencia.findMany({
+                where: whereOcorrencias,
+                orderBy: { dataHora: 'asc' },
+                take: 2000,
+            }),
+        ]);
+
+        let totalKm = 0;
+        let totalLitros = 0;
+        let blocosValidos = 0;
+
+        for (const b of blocos) {
+            const km =
+                b.hodometroTotal !== null && b.hodometroInicial !== null
+                    ? b.hodometroTotal - b.hodometroInicial
+                    : null;
+
+            const litros =
+                b.consumoLitros !== null && b.consumoLitrosAnterior !== null
+                    ? b.consumoLitros - b.consumoLitrosAnterior
+                    : null;
+
+            // Só conta bloco onde os dois deltas são válidos (>= 0) — km
+            // ou litros negativo é reset/erro de leitura do equipamento,
+            // não dá pra usar.
+            if (km !== null && litros !== null && km >= 0 && litros >= 0) {
+                totalKm += km;
+                totalLitros += litros;
+                blocosValidos++;
+            }
+        }
+
+        const consumoMedioKmPorLitro = totalLitros > 0 ? totalKm / totalLitros : null;
+        const consumoMedioLPor100km = totalKm > 0 ? (totalLitros / totalKm) * 100 : null;
+
+        const placa =
+            blocos[blocos.length - 1]?.placa ??
+            ocorrencias[ocorrencias.length - 1]?.placa ??
+            null;
+
+        let capacidadeTanqueLitros: number | null = null;
+        if (placa) {
+            const caminhao = await this.prisma.caminhao.findFirst({
+                where: { placa: placa.toUpperCase(), ...this.filtroEmpresa(empresaId) },
+                select: { capacidadeTanqueLitros: true },
+            });
+            capacidadeTanqueLitros = caminhao?.capacidadeTanqueLitros ?? null;
+        }
+
+        const ultimaOcorrencia = ocorrencias[ocorrencias.length - 1] ?? null;
+        const percentualTanqueAtual = ultimaOcorrencia?.percentualTanque ?? null;
+
+        const autonomiaTanqueCheioKm =
+            capacidadeTanqueLitros !== null && consumoMedioKmPorLitro !== null
+                ? Math.round(capacidadeTanqueLitros * consumoMedioKmPorLitro)
+                : null;
+
+        const autonomiaAtualKm =
+            autonomiaTanqueCheioKm !== null && percentualTanqueAtual !== null
+                ? Math.round((percentualTanqueAtual / 100) * autonomiaTanqueCheioKm)
+                : null;
+
+        // Detecção de abastecimento pelo % do tanque: salto >= 3 pontos
+        // percentuais entre duas ocorrências seguidas.
+        const LIMIAR_SALTO_PERCENTUAL = 3;
+        const abastecimentos: {
+            dataHora: Date;
+            percentualAntes: number;
+            percentualDepois: number;
+            deltaPercent: number;
+            litrosEstimados: number | null;
+        }[] = [];
+
+        const comPercentual = ocorrencias.filter((o) => o.percentualTanque !== null) as
+            (typeof ocorrencias[number] & { percentualTanque: number })[];
+
+        for (let i = 1; i < comPercentual.length; i++) {
+            const anterior = comPercentual[i - 1];
+            const atual = comPercentual[i];
+            const delta = atual.percentualTanque - anterior.percentualTanque;
+
+            if (delta >= LIMIAR_SALTO_PERCENTUAL) {
+                abastecimentos.push({
+                    dataHora: atual.dataHora,
+                    percentualAntes: anterior.percentualTanque,
+                    percentualDepois: atual.percentualTanque,
+                    deltaPercent: Math.round(delta * 10) / 10,
+                    litrosEstimados:
+                        capacidadeTanqueLitros !== null
+                            ? Math.round((delta / 100) * capacidadeTanqueLitros * 10) / 10
+                            : null,
+                });
+            }
+        }
+
+        return {
+            veiId: params.veiId,
+            placa,
+            periodo: { dataInicio: params.dataInicio ?? null, dataFim: params.dataFim ?? null },
+            dadosSuficientes: blocosValidos > 0,
+            blocosValidos,
+            totalBlocos: blocos.length,
+            totalKm: Math.round(totalKm * 10) / 10,
+            totalLitros: Math.round(totalLitros * 10) / 10,
+            consumoMedioKmPorLitro:
+                consumoMedioKmPorLitro !== null
+                    ? Math.round(consumoMedioKmPorLitro * 100) / 100
+                    : null,
+            consumoMedioLPor100km:
+                consumoMedioLPor100km !== null
+                    ? Math.round(consumoMedioLPor100km * 100) / 100
+                    : null,
+            capacidadeTanqueLitros,
+            percentualTanqueAtual,
+            autonomiaTanqueCheioKm,
+            autonomiaAtualKm,
+            qtdAbastecimentos: abastecimentos.length,
+            abastecimentos: abastecimentos.reverse(),
         };
     }
 

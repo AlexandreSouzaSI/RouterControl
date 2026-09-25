@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { cifrar } from '../src/common/crypto.util';
 
 const prisma = new PrismaClient();
 
@@ -83,6 +84,46 @@ async function main() {
         console.log(`Conta ${MASTER_EMAIL} já existia — marcada como admin master agora.`);
     } else {
         console.log(`Conta master ${MASTER_EMAIL} já existe — nada foi alterado.`);
+    }
+
+    // Credencial da Trucks Control já pré-cadastrada pra essa empresa, lida
+    // de TRUCKS_LOGIN/TRUCKS_SENHA no .env (nunca do código-fonte) e
+    // gravada cifrada — igual ao fluxo normal de Cadastros → Rastreador.
+    // Existe só pra evitar ter que digitar a credencial de novo toda vez
+    // que o banco de dev/teste é resetado (ex.: `prisma migrate dev`
+    // pedindo confirmação de drift). upsert por empresaId: rodar o seed de
+    // novo não sobrescreve uma credencial que você já trocou pelo próprio
+    // app.
+    const trucksLogin = process.env.TRUCKS_LOGIN?.trim();
+    const trucksSenha = process.env.TRUCKS_SENHA?.trim();
+
+    if (trucksLogin && trucksSenha) {
+        const credencialExistente = await prisma.trucksControlCredencial.findUnique({
+            where: { empresaId: empresa.id },
+        });
+
+        if (!credencialExistente) {
+            const { cifrado, iv, authTag } = cifrar(trucksSenha);
+
+            await prisma.trucksControlCredencial.create({
+                data: {
+                    empresaId: empresa.id,
+                    login: trucksLogin,
+                    senhaCifrada: cifrado,
+                    senhaIv: iv,
+                    senhaAuthTag: authTag,
+                    ativo: true,
+                },
+            });
+
+            console.log('Credencial da Trucks Control pré-cadastrada a partir do .env.');
+        } else {
+            console.log('Credencial da Trucks Control já existia — nada foi alterado.');
+        }
+    } else {
+        console.log(
+            'TRUCKS_LOGIN/TRUCKS_SENHA não configurados no .env — credencial da Trucks Control não foi pré-cadastrada (cadastre pelo app em Cadastros → Rastreador).',
+        );
     }
 }
 

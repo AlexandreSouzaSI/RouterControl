@@ -284,7 +284,9 @@ export class FinanceiroNfController {
         @Query('de') de?: string,
         @Query('ate') ate?: string,
     ) {
-        const items = await this.service.buscarNfEntradaParaZip(empresaId, { de, ate });
+        // Exclui NF de carga (mercadoria de terceiro que a empresa só
+        // transportou) — essas ficam no ZIP separado de NF de Transporte.
+        const items = await this.service.buscarNfEntradaParaZip(empresaId, { de, ate }, { ehCarga: false });
 
         const zip = new AdmZip();
         const usados = new Set<string>();
@@ -318,7 +320,68 @@ export class FinanceiroNfController {
         @Query('pageSize') pageSize?: string,
         @Query('busca') busca?: string,
     ) {
-        return this.service.listarNfEntrada(empresaId, { de, ate, mes, page, pageSize, busca });
+        // NF de carga (mercadoria de terceiro que a empresa só transportou,
+        // não é compra própria) não entra aqui — ver GET /nf-transporte.
+        return this.service.listarNfEntrada(
+            empresaId,
+            { de, ate, mes, page, pageSize, busca },
+            { ehCarga: false },
+        );
+    }
+
+    // Precisa vir antes de "nf-transporte/:id" futura, mesmo motivo do
+    // download/zip de nf-entrada acima.
+    @Get('nf-transporte/download/zip')
+    async baixarZipNfTransporte(
+        @EmpresaAtual() empresaId: string,
+        @Res() res: Response,
+        @Query('de') de?: string,
+        @Query('ate') ate?: string,
+    ) {
+        const items = await this.service.buscarNfEntradaParaZip(empresaId, { de, ate }, { ehCarga: true });
+
+        const zip = new AdmZip();
+        const usados = new Set<string>();
+
+        for (const item of items) {
+            if (!item.arquivoUrl) continue;
+
+            const filePath = join(process.cwd(), item.arquivoUrl.replace(/^\/+/, ''));
+            if (!existsSync(filePath)) continue;
+
+            const entryName = montarNomeArquivoZip(item.dataEmissao, item.emitenteNome, usados);
+            zip.addLocalFile(filePath, '', entryName);
+        }
+
+        const nomeZip = de || ate ? `nf-transporte-${de || 'inicio'}_a_${ate || 'fim'}.zip` : 'nf-transporte.zip';
+
+        res.set({
+            'Content-Type': 'application/zip',
+            'Content-Disposition': `attachment; filename="${nomeZip}"`,
+        });
+        res.send(zip.toBuffer());
+    }
+
+    // NF de Transporte: notas em que a empresa aparece só como
+    // transportadora (mercadoria/destinatário de terceiro), não é compra
+    // própria. Mesma tabela (NfEntrada) que a NF de Entrada, só filtrando
+    // ehCarga=true — ver runSyncNfEntrada em financeiro-nf.service.ts pra
+    // como essa classificação é feita a partir do XML.
+    @Get('nf-transporte')
+    listarNfTransporte(
+        @EmpresaAtual() empresaId: string,
+        @Query('de') de?: string,
+        @Query('ate') ate?: string,
+        @Query('mes') mes?: string,
+        @Query('page') page?: string,
+        @Query('pageSize') pageSize?: string,
+        @Query('busca') busca?: string,
+    ) {
+        return this.service.listarNfEntrada(
+            empresaId,
+            { de, ate, mes, page, pageSize, busca },
+            { ehCarga: true },
+        );
     }
 
     // Precisa vir antes de qualquer rota "nf-entrada/:id" futura que não

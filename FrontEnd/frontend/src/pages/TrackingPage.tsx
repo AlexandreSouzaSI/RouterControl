@@ -12,6 +12,7 @@ import {
     TrendingDown,
     Route as RouteIcon,
     Droplet,
+    Percent,
 } from 'lucide-react';
 import { TruckMap } from '../components/TruckMap';
 import { api } from '../services/api';
@@ -39,6 +40,12 @@ type Localizacao = {
     rpm: number | null;
 };
 
+type TelemetriaResumo = {
+    dataHora: string;
+    percentualTanque: number | null;
+    percentualAcelerador: number | null;
+};
+
 type CaminhaoLocalizacao = {
     veiID: number;
     placa: string | null;
@@ -47,6 +54,41 @@ type CaminhaoLocalizacao = {
     equipamento: number | null;
     localizacao: Localizacao | null;
     historico: Localizacao[];
+    // Última leitura real de combustível via Telemetria (CAN) — vem
+    // separada de `localizacao.litrosTanque` porque o suporte da Trucks
+    // Control confirmou que esse campo antigo normalmente não é
+    // preenchido; percentualTanque é a fonte confiável (ver Cadastros →
+    // Rastreador / Dados Capturados pra mais contexto).
+    telemetria: TelemetriaResumo | null;
+};
+
+// Resumo de consumo/autonomia calculado no backend a partir da Telemetria
+// V2.5 real (combustível via CAN) — já com o delta por bloco corrigido
+// (ConsumoLitros/HodometroTotal são leituras cumulativas, o backend faz a
+// subtração), km/L, autonomia e lista de abastecimentos detectados.
+type TelemetriaResumoConsumo = {
+    veiId: number;
+    placa: string | null;
+    periodo: { dataInicio: string | null; dataFim: string | null };
+    dadosSuficientes: boolean;
+    blocosValidos: number;
+    totalBlocos: number;
+    totalKm: number;
+    totalLitros: number;
+    consumoMedioKmPorLitro: number | null;
+    consumoMedioLPor100km: number | null;
+    capacidadeTanqueLitros: number | null;
+    percentualTanqueAtual: number | null;
+    autonomiaTanqueCheioKm: number | null;
+    autonomiaAtualKm: number | null;
+    qtdAbastecimentos: number;
+    abastecimentos: {
+        dataHora: string;
+        percentualAntes: number;
+        percentualDepois: number;
+        deltaPercent: number;
+        litrosEstimados: number | null;
+    }[];
 };
 
 type Consumo = {
@@ -83,6 +125,21 @@ function dataDiasAtras(dias: number) {
     const data = new Date();
     data.setDate(data.getDate() - dias);
     return formatarDataISO(data);
+}
+
+function formatarDataHoraBr(dataHoraISO?: string | null) {
+    if (!dataHoraISO) return '-';
+
+    const data = new Date(dataHoraISO);
+    if (Number.isNaN(data.getTime())) return dataHoraISO;
+
+    return data.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
 }
 
 function formatarEndereco(loc: Localizacao | null | undefined) {
@@ -137,6 +194,13 @@ export function TrackingPage() {
     const [dataFimConsumo, setDataFimConsumo] = useState(() => formatarDataISO(new Date()));
     const [consumo, setConsumo] = useState<Consumo | null>(null);
     const [loadingConsumo, setLoadingConsumo] = useState(false);
+
+    // Resumo de Telemetria (combustível real, via CAN) pro mesmo período do
+    // card de Consumo & Autonomia acima — vem pronto do backend
+    // (/trucks-control/telemetria-resumo), já com os deltas por bloco
+    // corrigidos, km/L, autonomia e abastecimentos detectados.
+    const [telemetriaResumo, setTelemetriaResumo] = useState<TelemetriaResumoConsumo | null>(null);
+    const [loadingTelemetriaResumo, setLoadingTelemetriaResumo] = useState(false);
 
     async function carregarVeiculos() {
         try {
@@ -244,9 +308,33 @@ export function TrackingPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    async function carregarTelemetriaResumo() {
+        if (!veiculoSelecionado) return;
+
+        try {
+            setLoadingTelemetriaResumo(true);
+
+            const res = await api.get('/trucks-control/telemetria-resumo', {
+                params: {
+                    veiId: String(veiculoSelecionado),
+                    dataInicio: dataInicioConsumo,
+                    dataFim: dataFimConsumo,
+                },
+            });
+
+            setTelemetriaResumo(res.data ?? null);
+        } catch (err) {
+            console.error(err);
+            setTelemetriaResumo(null);
+        } finally {
+            setLoadingTelemetriaResumo(false);
+        }
+    }
+
     useEffect(() => {
         carregarHistorico();
         carregarConsumo();
+        carregarTelemetriaResumo();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [veiculoSelecionado]);
 
@@ -501,7 +589,7 @@ export function TrackingPage() {
 
                                 {posicao?.dataHora && (
                                     <p className="text-xs text-gray-400 mt-0.5">
-                                        {posicao.dataHora}
+                                        {formatarDataHoraBr(posicao.dataHora)}
                                     </p>
                                 )}
                             </div>
@@ -609,13 +697,139 @@ export function TrackingPage() {
                                 </div>
 
                                 <button
-                                    onClick={carregarConsumo}
+                                    onClick={() => {
+                                        carregarConsumo();
+                                        carregarTelemetriaResumo();
+                                    }}
                                     disabled={loadingConsumo}
                                     className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
                                 >
                                     {loadingConsumo ? 'Calculando...' : 'Buscar'}
                                 </button>
                             </div>
+                        </div>
+
+                        {/* Resumo de Telemetria (combustível real) — sempre visível
+                            aqui em cima, independente de calcularConsumo() ter dado
+                            "dados insuficientes" ou não, porque usa fonte diferente
+                            (RequestTelemetriaOcorrenciasHoje/V25), não litrosTanque.
+                            Os litros/km já vêm corrigidos do backend (delta por
+                            bloco, não o valor cumulativo do medidor). */}
+                        <div className="mb-4 p-4 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20">
+                            <div className="flex items-center gap-2 text-blue-800 dark:text-blue-300 text-xs font-semibold mb-3">
+                                <Percent size={14} />
+                                Telemetria (combustível real via CAN)
+                            </div>
+
+                            {loadingTelemetriaResumo && (
+                                <p className="text-sm text-blue-700/80 dark:text-blue-300/70">
+                                    Calculando...
+                                </p>
+                            )}
+
+                            {!loadingTelemetriaResumo && (!telemetriaResumo || !telemetriaResumo.dadosSuficientes) && (
+                                <p className="text-xs text-blue-700/80 dark:text-blue-300/70">
+                                    {telemetriaResumo?.percentualTanqueAtual != null
+                                        ? `Tanque agora: ${telemetriaResumo.percentualTanqueAtual}%. `
+                                        : ''}
+                                    Ainda não há blocos de Telemetria suficientes nesse período pra
+                                    calcular consumo/autonomia — precisa de telemetria habilitada no
+                                    plano e embarcada no equipamento (ver Cadastros → Rastreador).
+                                </p>
+                            )}
+
+                            {!loadingTelemetriaResumo && telemetriaResumo && telemetriaResumo.dadosSuficientes && (
+                                <>
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                                        <div>
+                                            <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                                {telemetriaResumo.consumoMedioKmPorLitro ?? '-'}
+                                                <span className="text-sm font-normal text-gray-400 ml-1">km/L</span>
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                consumo médio
+                                                {telemetriaResumo.consumoMedioLPor100km != null && (
+                                                    <> ({telemetriaResumo.consumoMedioLPor100km} L/100km)</>
+                                                )}
+                                            </p>
+                                        </div>
+
+                                        <div>
+                                            <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                                {telemetriaResumo.percentualTanqueAtual ?? '-'}
+                                                <span className="text-sm font-normal text-gray-400 ml-1">%</span>
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                do tanque agora
+                                                {localizacaoAtual?.telemetria?.dataHora && (
+                                                    <> · {formatarTempoRelativo(localizacaoAtual.telemetria.dataHora)}</>
+                                                )}
+                                            </p>
+                                        </div>
+
+                                        <div>
+                                            <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                                {telemetriaResumo.autonomiaAtualKm ?? '-'}
+                                                <span className="text-sm font-normal text-gray-400 ml-1">km</span>
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                autonomia com o % atual
+                                            </p>
+                                        </div>
+
+                                        <div>
+                                            <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                                {telemetriaResumo.autonomiaTanqueCheioKm ?? '-'}
+                                                <span className="text-sm font-normal text-gray-400 ml-1">km</span>
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                autonomia com tanque cheio
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <p className="text-xs text-blue-700/70 dark:text-blue-300/60 mt-3">
+                                        {telemetriaResumo.totalLitros} L consumidos em {telemetriaResumo.totalKm} km
+                                        ({telemetriaResumo.blocosValidos} bloco{telemetriaResumo.blocosValidos === 1 ? '' : 's'} válido{telemetriaResumo.blocosValidos === 1 ? '' : 's'} no período)
+                                        {' · '}
+                                        {telemetriaResumo.qtdAbastecimentos} abastecimento{telemetriaResumo.qtdAbastecimentos === 1 ? '' : 's'} detectado{telemetriaResumo.qtdAbastecimentos === 1 ? '' : 's'}
+                                    </p>
+
+                                    {telemetriaResumo.capacidadeTanqueLitros == null && (
+                                        <p className="text-xs text-amber-700 dark:text-amber-400 mt-1.5">
+                                            Autonomia não calculada — cadastre a capacidade do tanque
+                                            (litros) desse caminhão em Cadastros → Caminhões.
+                                        </p>
+                                    )}
+
+                                    {telemetriaResumo.abastecimentos.length > 0 && (
+                                        <div className="mt-3">
+                                            <h4 className="text-xs font-semibold text-blue-800 dark:text-blue-300 mb-1.5">
+                                                Abastecimentos detectados no período
+                                            </h4>
+
+                                            <div className="space-y-1">
+                                                {telemetriaResumo.abastecimentos.map((a, index) => (
+                                                    <div
+                                                        key={`${a.dataHora}-${index}`}
+                                                        className="flex items-center justify-between text-sm px-3 py-1.5 rounded-lg bg-white/60 dark:bg-[#0B1120]/60 border border-blue-100 dark:border-blue-500/10"
+                                                    >
+                                                        <span className="text-gray-600 dark:text-gray-300">
+                                                            {formatarDataHoraBr(a.dataHora)}
+                                                        </span>
+                                                        <span className="text-gray-500 dark:text-gray-400 text-xs">
+                                                            {a.percentualAntes}% → {a.percentualDepois}%
+                                                        </span>
+                                                        <span className="font-medium text-gray-900 dark:text-white">
+                                                            {a.litrosEstimados != null ? `+${a.litrosEstimados} L` : `+${a.deltaPercent}%`}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            )}
                         </div>
 
                         {loadingConsumo && (
@@ -728,7 +942,7 @@ export function TrackingPage() {
                                                     className="flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-gray-50 dark:bg-[#0B1120] border border-gray-100 dark:border-gray-800"
                                                 >
                                                     <span className="text-gray-600 dark:text-gray-300">
-                                                        {a.dataHora}
+                                                        {formatarDataHoraBr(a.dataHora)}
                                                     </span>
                                                     <span className="font-medium text-gray-900 dark:text-white">
                                                         +{a.litros} L
@@ -880,7 +1094,7 @@ export function TrackingPage() {
                                         </strong>
 
                                         <p className="text-xs text-gray-500 dark:text-gray-400 my-1.5">
-                                            {item.dataHora}
+                                            {formatarDataHoraBr(item.dataHora)}
                                         </p>
 
                                         <p className="text-sm text-gray-600 dark:text-gray-300 my-1.5">

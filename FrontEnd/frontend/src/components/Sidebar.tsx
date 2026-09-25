@@ -64,6 +64,7 @@ const grupos: MenuGroup[] = [
         itens: [
             { name: 'Dashboard', icon: LayoutGrid, path: '/financeiro-nf/dashboard' },
             { name: 'NF de Entrada', icon: FileText, path: '/financeiro-nf/entrada' },
+            { name: 'NF de Transporte', icon: Truck, path: '/financeiro-nf/transporte' },
             { name: 'NF de Serviço', icon: FileCheck, path: '/financeiro-nf/servico' },
             { name: 'Contas a Pagar', icon: Wallet, path: '/financeiro-nf/contas-pagar' },
         ],

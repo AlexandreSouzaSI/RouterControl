@@ -1,26 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Info, Download, Eye, Loader2, RefreshCw, Search } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { Info, Download, Eye, Loader2, Search } from 'lucide-react';
 import { api } from '../services/api';
 import { Pagination } from '../components/Pagination';
 import { NfViewerModal } from '../components/NfViewerModal';
 
 // =============================================================================
-// NF de Entrada — página própria (grupo Financeiro no menu).
-// O botão "Buscar agora" dispara a sincronização com a Sefaz sob demanda
-// (POST /financeiro-nf/nf-entrada/buscar) além do cron automático que já
-// roda a cada 10 minutos no backend.
+// NF de Transporte — notas fiscais em que a empresa aparece só como
+// transportadora (mercadoria de terceiro, destinatário de outra empresa).
+// Vem da mesma sincronização e da mesma tabela da NF de Entrada
+// (financeiro-nf/nf-entrada), só filtrando ehCarga=true no backend — não é
+// compra própria, por isso fica separada e não tem botão de aceitar/gerar
+// conta a pagar.
 // =============================================================================
-
-type SefazSyncLog = {
-    id: string;
-    origem: string;
-    sucesso: boolean;
-    mensagem: string;
-    totalBuscado: number;
-    createdAt: string;
-};
 
 const campoClasse =
     'w-full px-3 py-2 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400';
@@ -30,22 +21,18 @@ function formatCurrency(value: number | null | undefined) {
     return (value ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-type NfEntradaItem = {
+type NfTransporteItem = {
     id: string;
     chaveAcesso: string;
     numeroNf: string | null;
     emitenteNome: string | null;
     emitenteCnpj: string | null;
+    destinatarioNome: string | null;
     valor: number | null;
     dataEmissao: string | null;
     situacao: string | null;
-    aceita: boolean;
-    caminhao: { placa: string } | null;
 };
 
-// Extrai a mensagem de erro mesmo quando a resposta veio como blob (caso
-// do download de ZIP) — sem isso, o alert mostrava "[object Object]" em
-// vez do texto real do backend.
 async function extrairMensagemErro(erro: any, padrao: string) {
     const dado = erro?.response?.data;
     if (dado instanceof Blob) {
@@ -60,25 +47,23 @@ async function extrairMensagemErro(erro: any, padrao: string) {
     return dado?.message || padrao;
 }
 
-export function NfEntrada() {
+export function NfTransporte() {
     const [de, setDe] = useState('');
     const [ate, setAte] = useState('');
     const [mes, setMes] = useState('');
     const [busca, setBusca] = useState('');
-    const [items, setItems] = useState<NfEntradaItem[]>([]);
+    const [items, setItems] = useState<NfTransporteItem[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(20);
     const [loading, setLoading] = useState(false);
     const [baixando, setBaixando] = useState(false);
-    const [buscando, setBuscando] = useState(false);
-    const [ultimoLog, setUltimoLog] = useState<SefazSyncLog | null>(null);
     const [visualizandoId, setVisualizandoId] = useState<string | null>(null);
 
     async function carregar(pageAlvo = page, pageSizeAlvo = pageSize) {
         setLoading(true);
         try {
-            const res = await api.get('/financeiro-nf/nf-entrada', {
+            const res = await api.get('/financeiro-nf/nf-transporte', {
                 params: {
                     de: mes ? undefined : de || undefined,
                     ate: mes ? undefined : ate || undefined,
@@ -112,45 +97,15 @@ export function NfEntrada() {
         carregar(1, novoTamanho);
     }
 
-    async function carregarUltimoLog() {
-        try {
-            const res = await api.get<SefazSyncLog[]>('/financeiro-nf/sefaz-logs');
-            const logNfEntrada = (res.data ?? []).find((log) => log.origem === 'NFE_ENTRADA');
-            setUltimoLog(logNfEntrada ?? null);
-        } catch {
-            // histórico é só informativo — não precisa travar a tela
-        }
-    }
-
     useEffect(() => {
         carregar();
-        carregarUltimoLog();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-
-    async function buscarAgora() {
-        setBuscando(true);
-        try {
-            const res = await api.post('/financeiro-nf/nf-entrada/buscar');
-            const totalNovas = res.data?.totalNovas ?? 0;
-            toast.success(
-                totalNovas > 0
-                    ? `${totalNovas} NF-e nova(s) encontrada(s).`
-                    : 'Busca concluída, nenhuma NF-e nova.',
-            );
-            await carregar(1, pageSize);
-            await carregarUltimoLog();
-        } catch (e) {
-            toast.error(await extrairMensagemErro(e, 'Não foi possível buscar as NFs agora.'));
-        } finally {
-            setBuscando(false);
-        }
-    }
 
     async function baixarZip() {
         setBaixando(true);
         try {
-            const res = await api.get('/financeiro-nf/nf-entrada/download/zip', {
+            const res = await api.get('/financeiro-nf/nf-transporte/download/zip', {
                 params: { de: de || undefined, ate: ate || undefined },
                 responseType: 'blob',
             });
@@ -158,7 +113,7 @@ export function NfEntrada() {
             const url = window.URL.createObjectURL(new Blob([res.data]));
             const link = document.createElement('a');
             link.href = url;
-            link.setAttribute('download', `nf-entrada${de || ate ? `-${de || 'inicio'}_a_${ate || 'fim'}` : ''}.zip`);
+            link.setAttribute('download', `nf-transporte${de || ate ? `-${de || 'inicio'}_a_${ate || 'fim'}` : ''}.zip`);
             document.body.appendChild(link);
             link.click();
             link.remove();
@@ -173,42 +128,28 @@ export function NfEntrada() {
     return (
         <div className="space-y-6">
             <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">NF de Entrada</h1>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">NF de Transporte</h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Notas fiscais de compra recebidas pela empresa.
+                    Notas fiscais de carga de terceiros — a empresa aparece só como
+                    transportadora, não são compras próprias.
                 </p>
             </div>
 
             <div className="flex items-start gap-3 p-5 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
-                <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-500/10 flex items-center justify-center shrink-0">
-                    <Info size={18} className="text-amber-600 dark:text-amber-400" />
+                <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center shrink-0">
+                    <Info size={18} className="text-blue-600 dark:text-blue-400" />
                 </div>
                 <div className="flex-1">
                     <h3 className="font-semibold text-gray-900 dark:text-white text-sm mb-1">
-                        Busca na Sefaz
+                        O que aparece aqui
                     </h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                        A lista abaixo é alimentada automaticamente a cada 10 minutos (quando há
-                        certificado digital cadastrado em Financeiro → Certificado Digital e CNPJ
-                        preenchido). Use "Buscar agora" pra forçar uma busca imediata.
+                        Quando a Sefaz devolve uma NF-e em que a empresa consta só no
+                        grupo de transporte (destinatário é outra empresa), ela cai
+                        aqui automaticamente em vez de entrar em NF de Entrada — pra
+                        não misturar carga transportada com compra própria.
                     </p>
-                    {ultimoLog && (
-                        <p className="text-xs text-gray-400 mt-2">
-                            Última busca: {new Date(ultimoLog.createdAt).toLocaleString('pt-BR')} —{' '}
-                            <span className={ultimoLog.sucesso ? 'text-green-600 dark:text-green-400' : 'text-red-500'}>
-                                {ultimoLog.mensagem}
-                            </span>
-                        </p>
-                    )}
                 </div>
-                <button
-                    onClick={buscarAgora}
-                    disabled={buscando}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition shrink-0"
-                >
-                    {buscando ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                    Buscar agora
-                </button>
             </div>
 
             <div className="flex flex-wrap items-end gap-3">
@@ -288,7 +229,7 @@ export function NfEntrada() {
                     <p className="text-sm text-gray-400 py-8 text-center">Carregando...</p>
                 ) : items.length === 0 ? (
                     <p className="text-sm text-gray-400 py-8 text-center">
-                        Nenhuma NF de entrada encontrada {de || ate ? 'nesse período' : 'ainda'}.
+                        Nenhuma NF de transporte encontrada {de || ate ? 'nesse período' : 'ainda'}.
                     </p>
                 ) : (
                     <div className="overflow-x-auto">
@@ -297,11 +238,10 @@ export function NfEntrada() {
                                 <tr className="text-left text-xs text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-800">
                                     <th className="py-2.5 px-4 font-medium">Nº NF</th>
                                     <th className="py-2.5 px-4 font-medium">Emitente</th>
+                                    <th className="py-2.5 px-4 font-medium">Destinatário</th>
                                     <th className="py-2.5 px-4 font-medium">Emissão</th>
                                     <th className="py-2.5 px-4 font-medium">Valor</th>
                                     <th className="py-2.5 px-4 font-medium">Situação</th>
-                                    <th className="py-2.5 px-4 font-medium">Caminhão</th>
-                                    <th className="py-2.5 px-4 font-medium">Status</th>
                                     <th className="py-2.5 px-4 font-medium"></th>
                                 </tr>
                             </thead>
@@ -313,33 +253,12 @@ export function NfEntrada() {
                                             <p className="font-semibold text-gray-900 dark:text-white">{item.emitenteNome ?? '-'}</p>
                                             {item.emitenteCnpj && <p className="text-xs text-gray-400">{item.emitenteCnpj}</p>}
                                         </td>
+                                        <td className="py-2.5 px-4">{item.destinatarioNome ?? '-'}</td>
                                         <td className="py-2.5 px-4 whitespace-nowrap">
                                             {item.dataEmissao ? new Date(item.dataEmissao).toLocaleDateString('pt-BR') : '-'}
                                         </td>
                                         <td className="py-2.5 px-4 font-semibold text-gray-900 dark:text-white">{formatCurrency(item.valor)}</td>
                                         <td className="py-2.5 px-4">{item.situacao ?? '-'}</td>
-                                        <td className="py-2.5 px-4">
-                                            {item.caminhao ? (
-                                                <Link
-                                                    to={`/caminhoes/${encodeURIComponent(item.caminhao.placa)}`}
-                                                    className="font-medium text-blue-600 dark:text-blue-400 hover:underline"
-                                                >
-                                                    🚚 {item.caminhao.placa}
-                                                </Link>
-                                            ) : (
-                                                '-'
-                                            )}
-                                        </td>
-                                        <td className="py-2.5 px-4">
-                                            <span
-                                                className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${item.aceita
-                                                    ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400'
-                                                    : 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400'
-                                                    }`}
-                                            >
-                                                {item.aceita ? 'Aceita' : 'Pendente'}
-                                            </span>
-                                        </td>
                                         <td className="py-2.5 px-4 text-right">
                                             <button
                                                 onClick={() => setVisualizandoId(item.id)}
@@ -366,7 +285,7 @@ export function NfEntrada() {
 
             {visualizandoId && (
                 <NfViewerModal
-                    title="NF de Entrada"
+                    title="NF de Transporte"
                     viewUrl={`/financeiro-nf/nf-entrada/${visualizandoId}/view`}
                     danfeUrl={`/financeiro-nf/nf-entrada/${visualizandoId}/danfe`}
                     xmlUrl={`/financeiro-nf/nf-entrada/${visualizandoId}/xml`}

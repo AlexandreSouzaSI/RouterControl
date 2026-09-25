@@ -80,7 +80,7 @@ export class CaminhaoController {
     @Put(':id')
     update(
         @Param('id') id: string,
-        @Body() body: { placa?: string; ativo?: boolean },
+        @Body() body: { placa?: string; ativo?: boolean; capacidadeTanqueLitros?: number | null },
         @EmpresaAtual() empresaId: string,
     ) {
         return this.service.update(id, body, empresaId);
@@ -89,7 +89,7 @@ export class CaminhaoController {
     @Patch(':id')
     patch(
         @Param('id') id: string,
-        @Body() body: { placa?: string; ativo?: boolean },
+        @Body() body: { placa?: string; ativo?: boolean; capacidadeTanqueLitros?: number | null },
         @EmpresaAtual() empresaId: string,
     ) {
         return this.service.update(id, body, empresaId);

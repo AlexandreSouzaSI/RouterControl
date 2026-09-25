@@ -101,6 +101,42 @@ export class TrucksControlController {
         });
     }
 
+    // Histórico de ocorrências de Telemetria (percentual do tanque, por
+    // minuto — RequestTelemetriaOcorrenciasHoje) salvo no banco.
+    @Get('telemetria-ocorrencias')
+    buscarTelemetriaOcorrencias(
+        @EmpresaAtual() empresaId: string,
+        @Query('placa') placa?: string,
+        @Query('veiId') veiId?: string,
+        @Query('dataInicio') dataInicio?: string,
+        @Query('dataFim') dataFim?: string,
+    ) {
+        return this.service.buscarTelemetriaOcorrencias(empresaId, {
+            placa,
+            veiId: veiId ? Number(veiId) : undefined,
+            dataInicio,
+            dataFim,
+        });
+    }
+
+    // Histórico de blocos de Telemetria V2.5 (consumo em litros, hodômetro
+    // e horímetro por bloco — RequestTelemetriaV25) salvo no banco.
+    @Get('telemetria-v25')
+    buscarTelemetriaV25(
+        @EmpresaAtual() empresaId: string,
+        @Query('placa') placa?: string,
+        @Query('veiId') veiId?: string,
+        @Query('dataInicio') dataInicio?: string,
+        @Query('dataFim') dataFim?: string,
+    ) {
+        return this.service.buscarTelemetriaV25(empresaId, {
+            placa,
+            veiId: veiId ? Number(veiId) : undefined,
+            dataInicio,
+            dataFim,
+        });
+    }
+
     // Consumo médio (km/L) e autonomia estimada de um caminhão, calculado
     // a partir do histórico real de litros no tanque + odômetro.
     @Get('consumo')
@@ -111,6 +147,24 @@ export class TrucksControlController {
         @Query('dataFim') dataFim?: string,
     ) {
         return this.service.calcularConsumo(empresaId, {
+            veiId: Number(veiId),
+            dataInicio,
+            dataFim,
+        });
+    }
+
+    // Resumo de consumo/autonomia via Telemetria real (CAN) — consumo
+    // médio (km/L, L/100km), autonomia com tanque cheio e atual (precisa
+    // de Caminhao.capacidadeTanqueLitros cadastrado) e lista de
+    // abastecimentos detectados pelo salto de % do tanque.
+    @Get('telemetria-resumo')
+    resumoConsumoTelemetria(
+        @EmpresaAtual() empresaId: string,
+        @Query('veiId') veiId: string,
+        @Query('dataInicio') dataInicio?: string,
+        @Query('dataFim') dataFim?: string,
+    ) {
+        return this.service.resumoConsumoTelemetria(empresaId, {
             veiId: Number(veiId),
             dataInicio,
             dataFim,

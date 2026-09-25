@@ -339,7 +339,8 @@ function RastreadorTab() {
                             </div>
                             <div>
                                 <p className="font-semibold text-gray-900 dark:text-white text-sm">{credencial.login}</p>
-                                <p className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
+                                <p className="text-xs text-gray-400 dark:text-gray-500 tracking-widest">••••••••</p>
+                                <p className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                                     {credencial.ativo ? (
                                         <>
                                             <CheckCircle2 size={12} className="text-green-500" />
@@ -367,7 +368,24 @@ function RastreadorTab() {
 
                     <div className="flex gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
                         <button
-                            onClick={() => { setLogin(credencial.login ?? ''); setEditando(true); }}
+                            onClick={() => {
+                                // Trava de segurança: enquanto a credencial está
+                                // ativa e funcionando, esse botão não abre o
+                                // formulário direto — exige uma confirmação
+                                // explícita (OK), porque editar aqui limpa a
+                                // senha salva e para o rastreamento até alguém
+                                // digitar uma nova.
+                                if (
+                                    credencial.ativo &&
+                                    !confirm(
+                                        'A credencial atual está ativa e funcionando. Trocar login/senha agora vai pausar o rastreamento até você salvar a nova credencial. Deseja continuar?',
+                                    )
+                                ) {
+                                    return;
+                                }
+                                setLogin(credencial.login ?? '');
+                                setEditando(true);
+                            }}
                             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
                         >
                             <Pencil size={14} />

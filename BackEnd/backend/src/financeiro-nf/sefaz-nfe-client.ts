@@ -357,10 +357,16 @@ function toArray<T>(value: T | T[] | undefined | null): T[] {
 export type ParsedFullNfe = {
     chaveAcesso: string;
     tipoDocumento?: string; // mod do XML: 55 = NF-e, 65 = NFC-e
+    numeroNf?: string; // ide.nNF — número da nota (diferente da chave de acesso)
     issuerCnpj?: string;
     issuerName?: string;
     recipientCnpj?: string;
     recipientName?: string;
+    // Destinatário sem CNPJ/CPF no XML (tag <idEstrangeiro/> presente) —
+    // acontece em NF-e de exportação/operação com o exterior. Nesse caso
+    // recipientCnpj fica vazio mas ainda dá pra saber que não é a própria
+    // empresa (nenhuma empresa brasileira é "estrangeira").
+    recipientIsForeign?: boolean;
     value?: number;
     issueDate?: string;
     situacao?: string;
@@ -410,6 +416,7 @@ export type NfeViewItem = {
 export type NfeView = {
     chaveAcesso: string;
     tipoDocumento?: string;
+    numeroNf?: string;
     naturezaOperacao?: string;
     issueDate?: string;
     situacao?: string;
@@ -493,6 +500,7 @@ export function parseFullNfeForView(xml: string): NfeView | null {
     return {
         chaveAcesso,
         tipoDocumento: extractText(ide.mod) || undefined,
+        numeroNf: extractText(ide.nNF) || undefined,
         naturezaOperacao: extractText(ide.natOp) || undefined,
         issueDate: extractText(ide.dhEmi) || extractText(ide.dEmi) || undefined,
         situacao: cStat
@@ -569,13 +577,21 @@ export function parseFullNfeXml(xml: string): ParsedFullNfe | null {
     const cStat = infProt ? extractText(infProt.cStat) : '';
     const xMotivo = infProt ? extractText(infProt.xMotivo) : '';
 
+    // <idEstrangeiro/> vem como tag vazia (self-closing) quando o
+    // destinatário é do exterior — o parser devolve string vazia ('') ou
+    // null pra ela, nunca undefined, então dá pra distinguir "não veio a
+    // tag" de "veio vazia".
+    const recipientIsForeign = dest.idEstrangeiro !== undefined;
+
     return {
         chaveAcesso,
         tipoDocumento: extractText(ide.mod) || undefined,
+        numeroNf: extractText(ide.nNF) || undefined,
         issuerCnpj: extractText(emit.CNPJ) || undefined,
         issuerName: extractText(emit.xNome) || undefined,
         recipientCnpj: extractText(dest.CNPJ) || undefined,
         recipientName: extractText(dest.xNome) || undefined,
+        recipientIsForeign,
         value: total.vNF != null ? Number(extractText(total.vNF)) : undefined,
         issueDate: extractText(ide.dhEmi) || extractText(ide.dEmi) || undefined,
         situacao: cStat

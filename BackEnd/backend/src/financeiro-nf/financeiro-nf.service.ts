@@ -13,6 +13,7 @@ import {
     parseResNFe,
     ufToCode,
     type NfeView,
+    type ParsedFullNfe,
 } from './sefaz-nfe-client';
 import {
     decodeArquivoXml,
@@ -864,6 +865,7 @@ export class FinanceiroNfService {
             pageSize?: string;
             busca?: string;
         },
+        opcoes?: { ehCarga?: boolean },
     ) {
         const buscaOr = this.buildBuscaFilterNf(filtros?.busca, 'emitenteNome', 'emitenteCnpj');
 
@@ -872,6 +874,7 @@ export class FinanceiroNfService {
             ignorado: false,
             dataEmissao: this.buildDateFilterNf(filtros),
         };
+        if (opcoes?.ehCarga !== undefined) where.ehCarga = opcoes.ehCarga;
         if (buscaOr) where.OR = buscaOr;
 
         const { page, pageSize, skip, take } = this.parsePaginacao(
@@ -1102,12 +1105,17 @@ export class FinanceiroNfService {
     // Traz TODAS as NFs com arquivo no período — aceitas, pendentes ou só
     // vinculadas a caminhão, não só as já resolvidas. O usuário quer
     // acesso ao XML de qualquer NF baixada, tenha sido aceita ou não.
-    async buscarNfEntradaParaZip(empresaId: string, filtros?: { de?: string; ate?: string }) {
+    async buscarNfEntradaParaZip(
+        empresaId: string,
+        filtros?: { de?: string; ate?: string },
+        opcoes?: { ehCarga?: boolean },
+    ) {
         const items = await this.prisma.nfEntrada.findMany({
             where: {
                 empresaId,
                 arquivoUrl: { not: null },
                 dataEmissao: this.buildDateFilterNf(filtros),
+                ...(opcoes?.ehCarga !== undefined ? { ehCarga: opcoes.ehCarga } : {}),
             },
             orderBy: { dataEmissao: { sort: 'desc', nulls: 'last' } },
         });
@@ -1575,6 +1583,41 @@ export class FinanceiroNfService {
                 const arquivoUrl = `/storage/nf-entrada/${empresaId}/${nomeArquivo}`;
                 const dataEmissao = parsedNf.issueDate ? new Date(parsedNf.issueDate) : undefined;
 
+                // Só o XML completo (procNFe) traz o destinatário — o resumo
+                // (resNFe) não tem esse dado, então nesses casos não dá pra
+                // saber se é carga de terceiro ou não (assume compra própria
+                // até vir o XML completo, igual já era o comportamento).
+                let camposClassificacao: {
+                    numeroNf?: string;
+                    destinatarioCnpj?: string;
+                    destinatarioNome?: string;
+                    ehCarga?: boolean;
+                } = {};
+
+                if (doc.schema.startsWith('procNFe')) {
+                    const parsedFull = parsedNf as ParsedFullNfe;
+                    const empresaCnpjNormalizado = (empresa.cnpj || '').replace(/\D/g, '');
+                    const destCnpjNormalizado = (parsedFull.recipientCnpj || '').replace(/\D/g, '');
+
+                    // "Carga de terceiro": a NF-e tem destinatário, e ele não
+                    // é a própria empresa (inclui destinatário estrangeiro,
+                    // que nunca bate com nosso CNPJ) — significa que a gente
+                    // só aparece como transportadora dessa mercadoria, não é
+                    // uma compra nossa.
+                    const ehCarga =
+                        parsedFull.recipientIsForeign ||
+                        (!!destCnpjNormalizado &&
+                            !!empresaCnpjNormalizado &&
+                            destCnpjNormalizado !== empresaCnpjNormalizado);
+
+                    camposClassificacao = {
+                        numeroNf: parsedFull.numeroNf,
+                        destinatarioCnpj: parsedFull.recipientCnpj,
+                        destinatarioNome: parsedFull.recipientName,
+                        ehCarga,
+                    };
+                }
+
                 await this.prisma.nfEntrada.upsert({
                     where: {
                         empresaId_chaveAcesso: { empresaId, chaveAcesso: parsedNf.chaveAcesso },
@@ -1588,6 +1631,7 @@ export class FinanceiroNfService {
                         dataEmissao,
                         situacao: parsedNf.situacao,
                         arquivoUrl,
+                        ...camposClassificacao,
                     },
                     create: {
                         empresaId,
@@ -1600,6 +1644,7 @@ export class FinanceiroNfService {
                         dataEmissao,
                         situacao: parsedNf.situacao,
                         arquivoUrl,
+                        ...camposClassificacao,
                     },
                 });
 

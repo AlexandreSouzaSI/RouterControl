@@ -68,6 +68,34 @@ type Posicao = {
     rpm: number | null;
 };
 
+type TelemetriaOcorrencia = {
+    id?: string;
+    veiId: number;
+    placa: string | null;
+    dataHora: string;
+    velocidade: number | null;
+    velocidadeMax: number | null;
+    rpm: number | null;
+    percentualTanque: number | null;
+    percentualAcelerador: number | null;
+};
+
+type TelemetriaBlocoV25 = {
+    id?: string;
+    veiId: number;
+    placa: string | null;
+    dataHoraInicio: string;
+    dataHoraFim: string;
+    hodometroInicial: number | null;
+    hodometroTotal: number | null;
+    qtdMinutosMotorInicio: number | null;
+    qtdMinutosMotorFim: number | null;
+    consumoLitrosAnterior: number | null;
+    consumoLitros: number | null;
+    tempMediaLiqArrefecimento: number | null;
+    tempMaximaLiqArrefecimento: number | null;
+};
+
 type ViagemGps = {
     id: string;
     veiId: number;
@@ -95,6 +123,21 @@ function dataDiasAtras(dias: number) {
     const data = new Date();
     data.setDate(data.getDate() - dias);
     return formatarDataISO(data);
+}
+
+function formatarDataHoraBr(dataHoraISO?: string | null) {
+    if (!dataHoraISO) return '-';
+
+    const data = new Date(dataHoraISO);
+    if (Number.isNaN(data.getTime())) return dataHoraISO;
+
+    return data.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
 }
 
 function Secao({
@@ -166,6 +209,8 @@ export function DadosCapturados() {
     const [abertas, setAbertas] = useState<Record<string, boolean>>({
         veiculos: true,
         posicoes: false,
+        telemetriaOcorrencias: true,
+        telemetriaV25: false,
         viagens: false,
         diasParados: false,
     });
@@ -215,6 +260,50 @@ export function DadosCapturados() {
         }
     }
 
+    // --- Telemetria: percentual do tanque (RequestTelemetriaOcorrenciasHoje) ---
+    const [telemetriaOcorrencias, setTelemetriaOcorrencias] = useState<TelemetriaOcorrencia[]>([]);
+    const [loadingTelemetriaOcorrencias, setLoadingTelemetriaOcorrencias] = useState(false);
+
+    async function carregarTelemetriaOcorrencias() {
+        try {
+            setLoadingTelemetriaOcorrencias(true);
+            const res = await api.get('/trucks-control/telemetria-ocorrencias', {
+                params: {
+                    placa: placaFiltro || undefined,
+                    dataInicio,
+                    dataFim,
+                },
+            });
+            setTelemetriaOcorrencias(res.data?.ocorrencias ?? []);
+        } catch {
+            // idem
+        } finally {
+            setLoadingTelemetriaOcorrencias(false);
+        }
+    }
+
+    // --- Telemetria V2.5: consumo em litros por bloco (RequestTelemetriaV25) ---
+    const [telemetriaV25, setTelemetriaV25] = useState<TelemetriaBlocoV25[]>([]);
+    const [loadingTelemetriaV25, setLoadingTelemetriaV25] = useState(false);
+
+    async function carregarTelemetriaV25() {
+        try {
+            setLoadingTelemetriaV25(true);
+            const res = await api.get('/trucks-control/telemetria-v25', {
+                params: {
+                    placa: placaFiltro || undefined,
+                    dataInicio,
+                    dataFim,
+                },
+            });
+            setTelemetriaV25(res.data?.blocos ?? []);
+        } catch {
+            // idem
+        } finally {
+            setLoadingTelemetriaV25(false);
+        }
+    }
+
     // --- Viagens GPS ---
     const [viagens, setViagens] = useState<ViagemGps[]>([]);
     const [loadingViagens, setLoadingViagens] = useState(false);
@@ -258,6 +347,8 @@ export function DadosCapturados() {
     useEffect(() => {
         carregarVeiculos();
         carregarPosicoes();
+        carregarTelemetriaOcorrencias();
+        carregarTelemetriaV25();
         carregarViagens();
         carregarDiasParados();
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -285,6 +376,21 @@ export function DadosCapturados() {
                     esses três campos em branco, e mesmo os novos só vêm
                     preenchidos se o rastreador do veículo tiver o sensor
                     correspondente.
+                </p>
+            </div>
+
+            <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 text-sm text-amber-800 dark:text-amber-300">
+                <Info size={16} className="shrink-0 mt-0.5" />
+                <p>
+                    Segundo o suporte da Trucks Control, a coluna "Combustível" da
+                    tabela de Posições abaixo (campo <code>lt</code> da
+                    MensagemCB) normalmente NÃO vem preenchida de verdade —
+                    combustível é dado de CAN do veículo, só vem por{' '}
+                    <strong>Telemetria</strong> (precisa estar contratada e
+                    embarcada no equipamento). As duas seções novas abaixo usam
+                    as rotas certas: percentual do tanque (Telemetria —
+                    Ocorrências) e litros efetivamente consumidos (Telemetria
+                    V2.5). Atualizam a cada 10 minutos.
                 </p>
             </div>
 
@@ -405,11 +511,15 @@ export function DadosCapturados() {
                         </div>
 
                         <button
-                            onClick={carregarPosicoes}
+                            onClick={() => {
+                                carregarPosicoes();
+                                carregarTelemetriaOcorrencias();
+                                carregarTelemetriaV25();
+                            }}
                             disabled={loadingPosicoes}
                             className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
                         >
-                            {loadingPosicoes ? 'Buscando...' : 'Buscar'}
+                            {loadingPosicoes ? 'Buscando...' : 'Buscar (também atualiza Telemetria)'}
                         </button>
                     </div>
                 }
@@ -453,7 +563,7 @@ export function DadosCapturados() {
                                                 '-'
                                             )}
                                         </td>
-                                        <td className="py-2 px-2 whitespace-nowrap">{p.dataHora}</td>
+                                        <td className="py-2 px-2 whitespace-nowrap">{formatarDataHoraBr(p.dataHora)}</td>
                                         <td className="py-2 px-2 whitespace-nowrap">
                                             {p.latitude?.toFixed(5)}, {p.longitude?.toFixed(5)}
                                         </td>
@@ -474,6 +584,156 @@ export function DadosCapturados() {
                                                 : '-'}
                                         </td>
                                         <td className="py-2 px-2">{p.rpm ?? '-'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </Secao>
+
+            {/* TELEMETRIA — PERCENTUAL DO TANQUE */}
+            <Secao
+                titulo="Telemetria — % do tanque (ocorrências de hoje)"
+                subtitulo={`RequestTelemetriaOcorrenciasHoje — combustível real via CAN, em percentual (${telemetriaOcorrencias.length} registro${telemetriaOcorrencias.length === 1 ? '' : 's'})`}
+                icone={Database}
+                aberto={abertas.telemetriaOcorrencias}
+                onToggle={() => toggle('telemetriaOcorrencias')}
+                acoes={
+                    <button
+                        onClick={carregarTelemetriaOcorrencias}
+                        disabled={loadingTelemetriaOcorrencias}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-xs font-medium hover:bg-gray-300 dark:hover:bg-gray-700 disabled:opacity-50 transition"
+                    >
+                        <RefreshCw size={12} className={loadingTelemetriaOcorrencias ? 'animate-spin' : ''} />
+                        Atualizar
+                    </button>
+                }
+            >
+                {telemetriaOcorrencias.length === 0 ? (
+                    <TabelaVazia texto="Nenhuma ocorrência de telemetria salva nesse filtro. Se a empresa não tiver telemetria contratada/embarcada no equipamento, essa lista fica sempre vazia." />
+                ) : (
+                    <div className="overflow-x-auto -mx-1 max-h-[480px] overflow-y-auto">
+                        <table className="w-full text-sm">
+                            <thead className="sticky top-0 bg-white dark:bg-[#111827]">
+                                <tr className="text-left text-xs text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-800">
+                                    <th className="py-2 px-2 font-medium">Placa</th>
+                                    <th className="py-2 px-2 font-medium">Data/Hora</th>
+                                    <th className="py-2 px-2 font-medium">% Tanque</th>
+                                    <th className="py-2 px-2 font-medium">% Acelerador</th>
+                                    <th className="py-2 px-2 font-medium">Velocidade</th>
+                                    <th className="py-2 px-2 font-medium">Vel. Máxima</th>
+                                    <th className="py-2 px-2 font-medium">RPM</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {telemetriaOcorrencias.map((o) => (
+                                    <tr
+                                        key={o.id ?? `${o.veiId}-${o.dataHora}`}
+                                        className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300"
+                                    >
+                                        <td className="py-2 px-2 font-semibold text-gray-900 dark:text-white">
+                                            {o.placa ? (
+                                                <Link
+                                                    to={`/caminhoes/${encodeURIComponent(o.placa)}`}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    {o.placa}
+                                                </Link>
+                                            ) : (
+                                                '-'
+                                            )}
+                                        </td>
+                                        <td className="py-2 px-2 whitespace-nowrap">{formatarDataHoraBr(o.dataHora)}</td>
+                                        <td className="py-2 px-2 font-semibold">
+                                            {o.percentualTanque != null ? `${o.percentualTanque}%` : '-'}
+                                        </td>
+                                        <td className="py-2 px-2">
+                                            {o.percentualAcelerador != null ? `${o.percentualAcelerador}%` : '-'}
+                                        </td>
+                                        <td className="py-2 px-2">{o.velocidade ?? 0} km/h</td>
+                                        <td className="py-2 px-2">{o.velocidadeMax ?? '-'}</td>
+                                        <td className="py-2 px-2">{o.rpm ?? '-'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </Secao>
+
+            {/* TELEMETRIA V2.5 — CONSUMO EM LITROS */}
+            <Secao
+                titulo="Telemetria V2.5 — consumo em litros"
+                subtitulo={`RequestTelemetriaV25 — litros consumidos por bloco + hodômetro/horímetro (${telemetriaV25.length} bloco${telemetriaV25.length === 1 ? '' : 's'})`}
+                icone={Database}
+                aberto={abertas.telemetriaV25}
+                onToggle={() => toggle('telemetriaV25')}
+                acoes={
+                    <button
+                        onClick={carregarTelemetriaV25}
+                        disabled={loadingTelemetriaV25}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-xs font-medium hover:bg-gray-300 dark:hover:bg-gray-700 disabled:opacity-50 transition"
+                    >
+                        <RefreshCw size={12} className={loadingTelemetriaV25 ? 'animate-spin' : ''} />
+                        Atualizar
+                    </button>
+                }
+            >
+                {telemetriaV25.length === 0 ? (
+                    <TabelaVazia texto="Nenhum bloco de Telemetria V2.5 salvo nesse filtro." />
+                ) : (
+                    <div className="overflow-x-auto -mx-1 max-h-[480px] overflow-y-auto">
+                        <table className="w-full text-sm">
+                            <thead className="sticky top-0 bg-white dark:bg-[#111827]">
+                                <tr className="text-left text-xs text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-800">
+                                    <th className="py-2 px-2 font-medium">Placa</th>
+                                    <th className="py-2 px-2 font-medium">Início</th>
+                                    <th className="py-2 px-2 font-medium">Fim</th>
+                                    <th className="py-2 px-2 font-medium">Consumo (L)</th>
+                                    <th className="py-2 px-2 font-medium">Hodômetro</th>
+                                    <th className="py-2 px-2 font-medium">Horímetro (min)</th>
+                                    <th className="py-2 px-2 font-medium">Temp. Arrefec.</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {telemetriaV25.map((b) => (
+                                    <tr
+                                        key={b.id ?? `${b.veiId}-${b.dataHoraInicio}-${b.dataHoraFim}`}
+                                        className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300"
+                                    >
+                                        <td className="py-2 px-2 font-semibold text-gray-900 dark:text-white">
+                                            {b.placa ? (
+                                                <Link
+                                                    to={`/caminhoes/${encodeURIComponent(b.placa)}`}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    {b.placa}
+                                                </Link>
+                                            ) : (
+                                                '-'
+                                            )}
+                                        </td>
+                                        <td className="py-2 px-2 whitespace-nowrap">{formatarDataHoraBr(b.dataHoraInicio)}</td>
+                                        <td className="py-2 px-2 whitespace-nowrap">{formatarDataHoraBr(b.dataHoraFim)}</td>
+                                        <td className="py-2 px-2 font-semibold">
+                                            {b.consumoLitros != null ? `${b.consumoLitros} L` : '-'}
+                                        </td>
+                                        <td className="py-2 px-2">
+                                            {b.hodometroTotal != null
+                                                ? `${b.hodometroTotal.toLocaleString('pt-BR')} km`
+                                                : '-'}
+                                        </td>
+                                        <td className="py-2 px-2">
+                                            {b.qtdMinutosMotorInicio != null && b.qtdMinutosMotorFim != null
+                                                ? `${b.qtdMinutosMotorInicio} → ${b.qtdMinutosMotorFim}`
+                                                : '-'}
+                                        </td>
+                                        <td className="py-2 px-2">
+                                            {b.tempMediaLiqArrefecimento != null
+                                                ? `${b.tempMediaLiqArrefecimento}° (máx ${b.tempMaximaLiqArrefecimento ?? '-'}°)`
+                                                : '-'}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -537,7 +797,7 @@ export function DadosCapturados() {
                                             {v.origemMunicipio}/{v.origemUf ?? '-'}
                                         </td>
                                         <td className="py-2 px-2 whitespace-nowrap">
-                                            {v.dataHoraInicio}
+                                            {formatarDataHoraBr(v.dataHoraInicio)}
                                         </td>
                                         <td className="py-2 px-2">
                                             {v.destinoMunicipio
@@ -545,7 +805,7 @@ export function DadosCapturados() {
                                                 : '-'}
                                         </td>
                                         <td className="py-2 px-2 whitespace-nowrap">
-                                            {v.dataHoraFim ?? '-'}
+                                            {formatarDataHoraBr(v.dataHoraFim)}
                                         </td>
                                         <td className="py-2 px-2">
                                             <span

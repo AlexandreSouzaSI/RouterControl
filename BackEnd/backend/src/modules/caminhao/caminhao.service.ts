@@ -67,6 +67,7 @@ export class CaminhaoService {
         data: {
             placa?: string;
             ativo?: boolean;
+            capacidadeTanqueLitros?: number | null;
         },
         empresaId: string,
     ) {
@@ -79,6 +80,10 @@ export class CaminhaoService {
                     ? data.placa.toUpperCase()
                     : undefined,
                 ativo: data.ativo,
+                capacidadeTanqueLitros:
+                    data.capacidadeTanqueLitros !== undefined
+                        ? data.capacidadeTanqueLitros
+                        : undefined,
             },
         });
     }
@@ -191,6 +196,7 @@ export class CaminhaoService {
             cadastrado: !!caminhao,
             id: caminhao?.id ?? null,
             ativo: caminhao?.ativo ?? null,
+            capacidadeTanqueLitros: caminhao?.capacidadeTanqueLitros ?? null,
             terceiro: !!viagemTerceiro,
             totalReceita,
             totalDespesa,

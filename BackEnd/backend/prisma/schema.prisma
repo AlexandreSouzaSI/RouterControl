@@ -39,6 +39,12 @@ model Caminhao {
   ativo Boolean @default(true)
   placa String  @unique
 
+  // Capacidade do tanque em litros — cadastro manual, opcional. Sem isso
+  // não dá pra converter "está com X% do tanque" (o que a Telemetria
+  // manda) em "quantos km ele ainda roda" — o percentual sozinho não diz
+  // nada sobre litros/km sem saber o tamanho do tanque desse caminhão.
+  capacidadeTanqueLitros Float?
+
   // Dono do caminhão pro módulo Financeiro/NF (Fornecedor, Conta a Pagar,
   // NF de Entrada/Serviço) e demais módulos que passarem a filtrar por
   // empresa. Fica opcional por enquanto (retrofit): caminhões cadastrados
@@ -167,6 +173,8 @@ model Empresa {
   trucksControlRateLimits TrucksControlRateLimit[]
   posicoesCaminhao        PosicaoCaminhao[]
   viagensGps              ViagemGps[]
+  telemetriaOcorrencias   TelemetriaOcorrencia[]
+  telemetriaBlocosV25     TelemetriaBlocoV25[]
 
   // Retrofit de isolamento por empresa do módulo Financeiro (extrato
   // bancário), Pagamentos e Relatórios/Upload — ver comentário em cada
@@ -601,6 +609,83 @@ model PosicaoCaminhao {
   @@index([empresaId])
 }
 
+// Ocorrências de Telemetria (RequestTelemetriaOcorrenciasHoje) — uma linha
+// por minuto/evento de CAN do veículo, com o percentual do tanque
+// (pTanque) e do pedal do acelerador (pAcelerador). É o dado real de nível
+// de combustível "ao vivo" — diferente do "lt" de RequestMensagemCB
+// (PosicaoCaminhao.litrosTanque), que segundo o suporte da Trucks Control
+// não vem preenchido de verdade; pTanque é a fonte confiável, mas só
+// funciona se a empresa tiver telemetria habilitada no plano e embarcada
+// no equipamento (ver RequestEmbarcarTelemetria no manual). Só existe
+// "hoje" no nome da requisição porque a API só devolve ocorrências do dia
+// corrente — por isso persistimos aqui pra manter histórico.
+model TelemetriaOcorrencia {
+  id String @id @default(uuid())
+
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  veiId Int
+  placa String?
+
+  dataHora DateTime
+
+  velocidade    Float? // "vel" — velocidade aferida na ocorrência
+  velocidadeMax Float? // "velMax" — velocidade máxima atingida na ocorrência
+  rpm           Int? // "rpm" — RPM atingido na ocorrência
+
+  // Percentual do nível do tanque (0-100), não litros absolutos — é assim
+  // que a Trucks Control manda esse dado por telemetria/CAN.
+  percentualTanque     Float? // "pTanque"
+  percentualAcelerador Float? // "pAcelerador"
+
+  createdAt DateTime @default(now())
+
+  // Sem @unique por mId (essa requisição não tem um ID de mensagem igual
+  // MensagemCB) — dedup é feito na aplicação por veiId+dataHora antes do
+  // upsert.
+  @@unique([veiId, dataHora])
+  @@index([placa, dataHora])
+  @@index([empresaId])
+}
+
+// Blocos de Telemetria V2.5 (RequestTelemetriaV25) — consumo de
+// combustível de verdade (litros consumidos no bloco), hodômetro e
+// horímetro, agregados em blocos de tempo (não é um ping por minuto como
+// a Ocorrência acima). Essa é a fonte pra "quantos litros o caminhão
+// gastou", enquanto TelemetriaOcorrencia.percentualTanque é "quanto ainda
+// tem no tanque agora".
+model TelemetriaBlocoV25 {
+  id String @id @default(uuid())
+
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  veiId Int
+  placa String?
+
+  dataHoraInicio DateTime
+  dataHoraFim    DateTime
+
+  hodometroInicial Float? // "HodometroInicial"
+  hodometroTotal   Float? // "HodometroTotal" — hodômetro aferido no fechamento do bloco
+
+  qtdMinutosMotorInicio Int? // "QtdMinutosMotorInicio" — horímetro inicial, em minutos
+  qtdMinutosMotorFim    Int? // "QtdMinutosMotorFim" — horímetro final, em minutos
+
+  consumoLitrosAnterior Float? // "ConsumoLitrosAnterior" — consumo que finalizou o bloco anterior
+  consumoLitros         Float? // "ConsumoLitros" — consumo do bloco atual
+
+  tempMediaLiqArrefecimento  Float? // "TempMediaLiqArrefecimento"
+  tempMaximaLiqArrefecimento Float? // "TempMaximaLiqArrefecimento"
+
+  createdAt DateTime @default(now())
+
+  @@unique([veiId, dataHoraInicio, dataHoraFim])
+  @@index([placa, dataHoraFim])
+  @@index([empresaId])
+}
+
 enum StatusViagemGps {
   EM_ANDAMENTO
   CONCLUIDA
@@ -1010,8 +1095,8 @@ model LancamentoCaminhao {
 
   tipo      TipoLancamentoCaminhao
   descricao String
-  valor     Decimal  @db.Decimal(10, 2)
-  data      DateTime @default(now())
+  valor     Decimal                @db.Decimal(10, 2)
+  data      DateTime               @default(now())
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1103,6 +1188,17 @@ model NfEntrada {
   valor        Float?
   dataEmissao  DateTime?
   situacao     String? // cSitNFe do resumo: autorizada, cancelada, etc.
+  numeroNf     String? // ide.nNF do XML completo (só disponível quando tipoDocumento é procNFe)
+
+  // Destinatário da NF-e, extraído do XML completo (procNFe). Usado pra
+  // detectar "NF de carga": como a empresa é transportadora, ela recebe
+  // via distribuição da Sefaz notas em que só aparece no grupo <transp>
+  // (transportando a mercadoria de terceiro) — não é compra própria.
+  // ehCarga = destinatário preenchido e diferente do CNPJ da empresa
+  // (inclui destinatário estrangeiro, que nunca bate com o nosso CNPJ).
+  destinatarioCnpj String?
+  destinatarioNome String?
+  ehCarga          Boolean @default(false)
 
   arquivoUrl String?
   buscadoEm  DateTime @default(now())
@@ -1134,6 +1230,7 @@ model NfEntrada {
   @@index([caminhaoId])
   @@index([tipoDocumento])
   @@index([contaPagarId])
+  @@index([ehCarga])
 }
 
 // Documento fiscal baixado da distribuição do ADN (NFS-e nacional) para o
