@@ -240,3 +240,161 @@ function truncate(text: string, max = 500) {
     if (text.length <= max) return text;
     return `${text.slice(0, max)}...`;
 }
+
+// ---------------------------------------------------------------------
+// Tela de visualização ("view") da NFS-e — portado do Controle NF
+// (src/stores/sefaz-nfse-client.ts, parseNfseForView). Diferente de
+// parseNfseXml acima (que só pega o resumo pra conciliação), esse extrai
+// prestador/tomador, endereços, descrição do serviço e ISS pra montar o
+// modal de "Visualizar" na tela de NF de Serviço.
+function findWithin(node: any, key: string): any | null {
+    return findNodeByName(node, key);
+}
+
+type NfseAddress = {
+    logradouro?: string;
+    numero?: string;
+    bairro?: string;
+    municipio?: string;
+    uf?: string;
+    cep?: string;
+};
+
+function extractNfseAddress(partyNode: any): NfseAddress | undefined {
+    if (!partyNode) return undefined;
+
+    const endNac =
+        findWithin(partyNode, 'endNac') || findWithin(partyNode, 'enderNac');
+
+    if (!endNac) return undefined;
+
+    const address: NfseAddress = {
+        logradouro: extractText(endNac.xLgr) || undefined,
+        numero: extractText(endNac.nro) || undefined,
+        bairro: extractText(endNac.xBairro) || undefined,
+        municipio: extractText(endNac.xMun) || undefined,
+        uf: extractText(endNac.UF) || undefined,
+        cep: extractText(endNac.CEP) || undefined,
+    };
+
+    const hasAnyField = Object.values(address).some((value) => value !== undefined);
+
+    return hasAnyField ? address : undefined;
+}
+
+export type NfseViewParty = {
+    nome?: string;
+    cnpj?: string;
+    cpf?: string;
+    inscricaoMunicipal?: string;
+    email?: string;
+    endereco?: NfseAddress;
+};
+
+export type NfseView = {
+    numeroNf?: string;
+    issueDate?: string;
+    competencia?: string;
+    prestador: NfseViewParty;
+    tomador: NfseViewParty;
+    servico: {
+        descricao?: string;
+        codigoTributacaoNacional?: string;
+        codigoTributacaoMunicipal?: string;
+    };
+    valores: {
+        valorServico?: number;
+        baseCalculo?: number;
+        aliquota?: number;
+        valorISS?: number;
+        valorLiquido?: number;
+        issRetido?: boolean;
+    };
+    detalhamentoCompleto: boolean;
+};
+
+export function parseNfseForView(xml: string): NfseView | null {
+    let parsed: any;
+
+    try {
+        parsed = nfseXmlParser.parse(xml);
+    } catch {
+        return null;
+    }
+
+    const numeroNf =
+        extractText(findNodeByName(parsed, 'nDFSe')) ||
+        extractText(findNodeByName(parsed, 'nNFSe'));
+
+    const prestNode = findNodeByName(parsed, 'prest');
+    const emitNode = findNodeByName(parsed, 'emit');
+    const tomaNode = findNodeByName(parsed, 'toma');
+
+    const prestador: NfseViewParty = {
+        nome: extractText(prestNode?.xNome) || extractText(emitNode?.xNome) || undefined,
+        cnpj: extractText(prestNode?.CNPJ) || extractText(emitNode?.CNPJ) || undefined,
+        cpf: extractText(prestNode?.CPF) || extractText(emitNode?.CPF) || undefined,
+        inscricaoMunicipal:
+            extractText(prestNode?.IM) || extractText(emitNode?.IM) || undefined,
+        email: extractText(prestNode?.email) || extractText(emitNode?.email) || undefined,
+        endereco: extractNfseAddress(emitNode) || extractNfseAddress(prestNode),
+    };
+
+    const tomador: NfseViewParty = {
+        nome: extractText(tomaNode?.xNome) || undefined,
+        cnpj: extractText(tomaNode?.CNPJ) || undefined,
+        cpf: extractText(tomaNode?.CPF) || undefined,
+        inscricaoMunicipal: extractText(tomaNode?.IM) || undefined,
+        email: extractText(tomaNode?.email) || undefined,
+        endereco: extractNfseAddress(tomaNode),
+    };
+
+    const cServNode = findNodeByName(parsed, 'cServ');
+
+    const servico = {
+        descricao: extractText(cServNode?.xDescServ) || undefined,
+        codigoTributacaoNacional: extractText(cServNode?.cTribNac) || undefined,
+        codigoTributacaoMunicipal: extractText(cServNode?.cTribMun) || undefined,
+    };
+
+    const vServPrest = findNodeByName(parsed, 'vServPrest');
+    const valorServicoRaw =
+        typeof vServPrest === 'object' ? extractText(vServPrest?.vServ) : extractText(vServPrest);
+
+    const tribMunNode = findNodeByName(parsed, 'tribMun');
+    const vLiqRaw = extractText(findNodeByName(parsed, 'vLiq'));
+    const vBCRaw = extractText(findNodeByName(parsed, 'vBC'));
+    const vISSRaw =
+        extractText(tribMunNode?.vISSQN) || extractText(findNodeByName(parsed, 'vISSQN'));
+    const pAliqRaw = extractText(tribMunNode?.pAliq) || extractText(findNodeByName(parsed, 'pAliq'));
+    const tpRetISSQN = extractText(tribMunNode?.tpRetISSQN);
+
+    const issueDateRaw =
+        extractText(findNodeByName(parsed, 'dhEmi')) ||
+        extractText(findNodeByName(parsed, 'dhProc'));
+    const competenciaRaw = extractText(findNodeByName(parsed, 'dCompet'));
+
+    const detalhamentoCompleto = Boolean(
+        servico.descricao || valorServicoRaw || tomador.nome,
+    );
+
+    return {
+        numeroNf: numeroNf || undefined,
+        issueDate: issueDateRaw || undefined,
+        competencia: competenciaRaw || undefined,
+        prestador,
+        tomador,
+        servico,
+        valores: {
+            valorServico: valorServicoRaw ? Number(valorServicoRaw) : undefined,
+            baseCalculo: vBCRaw ? Number(vBCRaw) : undefined,
+            aliquota: pAliqRaw ? Number(pAliqRaw) : undefined,
+            valorISS: vISSRaw ? Number(vISSRaw) : undefined,
+            valorLiquido: vLiqRaw ? Number(vLiqRaw) : undefined,
+            // 1 = retido, 2 = não retido, conforme tabela do leiaute nacional —
+            // tolerante: se o schema divergir, fica undefined em vez de mentir.
+            issRetido: tpRetISSQN ? tpRetISSQN === '1' : undefined,
+        },
+        detalhamentoCompleto,
+    };
+}

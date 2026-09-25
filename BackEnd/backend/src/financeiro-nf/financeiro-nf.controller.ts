@@ -316,8 +316,44 @@ export class FinanceiroNfController {
         @Query('mes') mes?: string,
         @Query('page') page?: string,
         @Query('pageSize') pageSize?: string,
+        @Query('busca') busca?: string,
     ) {
-        return this.service.listarNfEntrada(empresaId, { de, ate, mes, page, pageSize });
+        return this.service.listarNfEntrada(empresaId, { de, ate, mes, page, pageSize, busca });
+    }
+
+    // Precisa vir antes de qualquer rota "nf-entrada/:id" futura que não
+    // seja essas três (view/danfe/xml), pra não colidir com download/zip.
+    @Get('nf-entrada/:id/view')
+    visualizarNfEntrada(@Param('id') id: string, @EmpresaAtual() empresaId: string) {
+        return this.service.viewNfEntrada(id, empresaId);
+    }
+
+    @Get('nf-entrada/:id/danfe')
+    async baixarDanfeNfEntrada(
+        @Param('id') id: string,
+        @EmpresaAtual() empresaId: string,
+        @Res() res: Response,
+    ) {
+        const buffer = await this.service.downloadNfEntradaDanfe(id, empresaId);
+        res.set({
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="danfe-entrada-${id}.pdf"`,
+        });
+        res.send(buffer);
+    }
+
+    @Get('nf-entrada/:id/xml')
+    async baixarXmlNfEntrada(
+        @Param('id') id: string,
+        @EmpresaAtual() empresaId: string,
+        @Res() res: Response,
+    ) {
+        const { buffer, filename } = await this.service.downloadNfEntradaXml(id, empresaId);
+        res.set({
+            'Content-Type': 'application/xml',
+            'Content-Disposition': `attachment; filename="${filename}"`,
+        });
+        res.send(buffer);
     }
 
     // ---------------- NF de Serviço ----------------
@@ -361,8 +397,42 @@ export class FinanceiroNfController {
         @Query('mes') mes?: string,
         @Query('page') page?: string,
         @Query('pageSize') pageSize?: string,
+        @Query('busca') busca?: string,
     ) {
-        return this.service.listarNfServico(empresaId, { de, ate, mes, page, pageSize });
+        return this.service.listarNfServico(empresaId, { de, ate, mes, page, pageSize, busca });
+    }
+
+    @Get('nf-servico/:id/view')
+    visualizarNfServico(@Param('id') id: string, @EmpresaAtual() empresaId: string) {
+        return this.service.viewNfServico(id, empresaId);
+    }
+
+    @Get('nf-servico/:id/danfe')
+    async baixarDanfeNfServico(
+        @Param('id') id: string,
+        @EmpresaAtual() empresaId: string,
+        @Res() res: Response,
+    ) {
+        const buffer = await this.service.downloadNfServicoDanfe(id, empresaId);
+        res.set({
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="danfe-servico-${id}.pdf"`,
+        });
+        res.send(buffer);
+    }
+
+    @Get('nf-servico/:id/xml')
+    async baixarXmlNfServico(
+        @Param('id') id: string,
+        @EmpresaAtual() empresaId: string,
+        @Res() res: Response,
+    ) {
+        const { buffer, filename } = await this.service.downloadNfServicoXml(id, empresaId);
+        res.set({
+            'Content-Type': 'application/xml',
+            'Content-Disposition': `attachment; filename="${filename}"`,
+        });
+        res.send(buffer);
     }
 
     // ---------------- Busca manual na Sefaz/ADN ----------------

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Info, Download, Loader2, RefreshCw } from 'lucide-react';
+import { Info, Download, Eye, Loader2, RefreshCw, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { Pagination } from '../components/Pagination';
+import { NfViewerModal } from '../components/NfViewerModal';
 
 // =============================================================================
 // NF de Serviço — página própria (grupo Financeiro no menu).
@@ -61,6 +62,7 @@ export function NfServico() {
     const [de, setDe] = useState('');
     const [ate, setAte] = useState('');
     const [mes, setMes] = useState('');
+    const [busca, setBusca] = useState('');
     const [items, setItems] = useState<NfServicoItem[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
@@ -69,6 +71,7 @@ export function NfServico() {
     const [baixando, setBaixando] = useState(false);
     const [buscando, setBuscando] = useState(false);
     const [ultimoLog, setUltimoLog] = useState<SefazSyncLog | null>(null);
+    const [visualizandoId, setVisualizandoId] = useState<string | null>(null);
 
     async function carregar(pageAlvo = page, pageSizeAlvo = pageSize) {
         setLoading(true);
@@ -78,6 +81,7 @@ export function NfServico() {
                     de: mes ? undefined : de || undefined,
                     ate: mes ? undefined : ate || undefined,
                     mes: mes || undefined,
+                    busca: busca || undefined,
                     page: pageAlvo,
                     pageSize: pageSizeAlvo,
                 },
@@ -206,6 +210,22 @@ export function NfServico() {
             </div>
 
             <div className="flex flex-wrap items-end gap-3">
+                <div className="min-w-[220px] flex-1">
+                    <label className={labelClasse}>Buscar (prestador, doc, número ou valor)</label>
+                    <div className="relative">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                            type="text"
+                            value={busca}
+                            onChange={(e) => setBusca(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') filtrar();
+                            }}
+                            placeholder="Ex: Oficina, 123 ou 350,00..."
+                            className={`${campoClasse} pl-8`}
+                        />
+                    </div>
+                </div>
                 <div>
                     <label className={labelClasse}>Mês</label>
                     <input
@@ -279,6 +299,7 @@ export function NfServico() {
                                     <th className="py-2.5 px-4 font-medium">Valor</th>
                                     <th className="py-2.5 px-4 font-medium">Caminhão</th>
                                     <th className="py-2.5 px-4 font-medium">Status</th>
+                                    <th className="py-2.5 px-4 font-medium"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -315,6 +336,15 @@ export function NfServico() {
                                                 {item.aceita ? 'Aceita' : 'Pendente'}
                                             </span>
                                         </td>
+                                        <td className="py-2.5 px-4 text-right">
+                                            <button
+                                                onClick={() => setVisualizandoId(item.id)}
+                                                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                            >
+                                                <Eye size={14} />
+                                                Visualizar
+                                            </button>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -329,6 +359,16 @@ export function NfServico() {
                     </div>
                 )}
             </div>
+
+            {visualizandoId && (
+                <NfViewerModal
+                    title="NF de Serviço"
+                    viewUrl={`/financeiro-nf/nf-servico/${visualizandoId}/view`}
+                    danfeUrl={`/financeiro-nf/nf-servico/${visualizandoId}/danfe`}
+                    xmlUrl={`/financeiro-nf/nf-servico/${visualizandoId}/xml`}
+                    onClose={() => setVisualizandoId(null)}
+                />
+            )}
         </div>
     );
 }

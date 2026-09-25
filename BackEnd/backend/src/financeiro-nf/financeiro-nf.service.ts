@@ -1,20 +1,25 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildDanfePdf } from '../common/danfe-builder';
 import { CertificadoDigitalService } from './certificado-digital.service';
 import { parseOfx } from './ofx-parser';
 import {
     fetchGoodsDistribution,
+    parseFullNfeForView,
     parseFullNfeXml,
     parseResNFe,
     ufToCode,
+    type NfeView,
 } from './sefaz-nfe-client';
 import {
     decodeArquivoXml,
     fetchDistribution,
+    parseNfseForView,
     parseNfseXml,
+    type NfseView,
 } from './sefaz-nfse-client';
 import {
     FormaPagamentoContaPagar,
@@ -49,6 +54,17 @@ const SYNC_DELAY_MS = 2000;
 // Sefaz/ADN só libera consulta de novo depois de 1h — e reinicia essa
 // contagem se a gente insistir antes da hora passar.
 const SEFAZ_COOLDOWN_MS = 60 * 60 * 1000;
+
+// Quando uma empresa tem muito histórico pra buscar (primeiro sync, ou
+// depois de recadastrar o certificado — o que reseta o cursor de NSU pra
+// zero), o loop de MAX_SYNC_BATCHES pode esgotar os 25 lotes sem nunca
+// chegar no "fim" (cStat 137) nem seria certo esperar 1h pra continuar.
+// Sem cooldown nenhum nesse caso, o cron de 10 em 10 min dispara outra
+// rajada de 25 lotes imediatamente, de novo e de novo, o que a Sefaz/ADN
+// enxerga como abuso e acaba bloqueando por "consumo indevido" (656) —
+// era exatamente isso que estava acontecendo. Uma pausa curta entre
+// rajadas de catch-up resolve sem esperar 1h inteira a cada vez.
+const CATCHUP_COOLDOWN_MS = 5 * 60 * 1000;
 
 function parseDataEmissaoServico(value?: string): Date | undefined {
     if (!value) return undefined;
@@ -807,15 +823,56 @@ export class FinanceiroNfService {
         };
     }
 
+    // Monta o OR de busca livre — aceita nome do fornecedor/prestador
+    // (contains, case-insensitive), CNPJ/CPF, chave de acesso e, se o termo
+    // parece um número, valor exato (comparação float com pequena
+    // tolerância, já que valor vem de NF real com centavos).
+    private buildBuscaFilterNf(
+        busca: string | undefined,
+        nomeField: string,
+        docField: string,
+        numeroField?: string,
+    ): any[] | undefined {
+        const termo = busca?.trim();
+        if (!termo) return undefined;
+
+        const or: any[] = [
+            { [nomeField]: { contains: termo, mode: 'insensitive' } },
+            { [docField]: { contains: termo } },
+            { chaveAcesso: { contains: termo } },
+        ];
+
+        if (numeroField) {
+            or.push({ [numeroField]: { contains: termo, mode: 'insensitive' } });
+        }
+
+        const valorNum = Number(termo.replace(/\./g, '').replace(',', '.'));
+        if (!Number.isNaN(valorNum) && termo !== '') {
+            or.push({ valor: { gte: valorNum - 0.01, lte: valorNum + 0.01 } });
+        }
+
+        return or;
+    }
+
     async listarNfEntrada(
         empresaId: string,
-        filtros?: { de?: string; ate?: string; mes?: string; page?: string; pageSize?: string },
+        filtros?: {
+            de?: string;
+            ate?: string;
+            mes?: string;
+            page?: string;
+            pageSize?: string;
+            busca?: string;
+        },
     ) {
-        const where = {
+        const buscaOr = this.buildBuscaFilterNf(filtros?.busca, 'emitenteNome', 'emitenteCnpj');
+
+        const where: any = {
             empresaId,
             ignorado: false,
             dataEmissao: this.buildDateFilterNf(filtros),
         };
+        if (buscaOr) where.OR = buscaOr;
 
         const { page, pageSize, skip, take } = this.parsePaginacao(
             filtros?.page,
@@ -843,13 +900,28 @@ export class FinanceiroNfService {
 
     async listarNfServico(
         empresaId: string,
-        filtros?: { de?: string; ate?: string; mes?: string; page?: string; pageSize?: string },
+        filtros?: {
+            de?: string;
+            ate?: string;
+            mes?: string;
+            page?: string;
+            pageSize?: string;
+            busca?: string;
+        },
     ) {
-        const where = {
+        const buscaOr = this.buildBuscaFilterNf(
+            filtros?.busca,
+            'prestadorNome',
+            'prestadorDoc',
+            'numeroNf',
+        );
+
+        const where: any = {
             empresaId,
             ignorado: false,
             dataEmissao: this.buildDateFilterNf(filtros),
         };
+        if (buscaOr) where.OR = buscaOr;
 
         const { page, pageSize, skip, take } = this.parsePaginacao(
             filtros?.page,
@@ -872,6 +944,158 @@ export class FinanceiroNfService {
             total,
             page,
             pageSize,
+        };
+    }
+
+    // -----------------------------------------------------------------
+    // Visualizar / DANFE / XML — NF de Entrada
+    // -----------------------------------------------------------------
+    //
+    // Igual ao padrão do Controle NF (purchases.service.ts
+    // viewIncomingGoodsNf): parseia o XML salvo em disco sob demanda, sem
+    // guardar nada parseado no banco. Se não tiver arquivo ou o parse
+    // falhar, cai pro resumo que já está nas colunas da NfEntrada.
+    async viewNfEntrada(id: string, empresaId: string) {
+        const nf = await this.prisma.nfEntrada.findFirst({ where: { id, empresaId } });
+
+        if (!nf) throw new NotFoundException('NF de entrada não encontrada.');
+
+        if (!nf.arquivoUrl) {
+            return { source: 'nenhum' as const, resumo: null, nf: null };
+        }
+
+        const filePath = join(process.cwd(), nf.arquivoUrl.replace(/^\/+/, ''));
+
+        if (!existsSync(filePath)) {
+            return {
+                source: 'resumo' as const,
+                resumo: {
+                    issuerName: nf.emitenteNome,
+                    issuerCnpj: nf.emitenteCnpj,
+                    value: nf.valor,
+                    issueDate: nf.dataEmissao,
+                    situacao: nf.situacao,
+                    chaveAcesso: nf.chaveAcesso,
+                },
+                nf: null,
+            };
+        }
+
+        let parsed: NfeView | null = null;
+        try {
+            parsed = parseFullNfeForView(readFileSync(filePath, 'utf-8'));
+        } catch {
+            parsed = null;
+        }
+
+        if (!parsed) {
+            return {
+                source: 'resumo' as const,
+                resumo: {
+                    issuerName: nf.emitenteNome,
+                    issuerCnpj: nf.emitenteCnpj,
+                    value: nf.valor,
+                    issueDate: nf.dataEmissao,
+                    situacao: nf.situacao,
+                    chaveAcesso: nf.chaveAcesso,
+                },
+                nf: null,
+            };
+        }
+
+        return { source: 'xml' as const, resumo: null, nf: parsed };
+    }
+
+    async downloadNfEntradaDanfe(id: string, empresaId: string): Promise<Buffer> {
+        const view = await this.viewNfEntrada(id, empresaId);
+        return buildDanfePdf('NF-e de Entrada', view);
+    }
+
+    async downloadNfEntradaXml(id: string, empresaId: string): Promise<{ buffer: Buffer; filename: string }> {
+        const nf = await this.prisma.nfEntrada.findFirst({ where: { id, empresaId } });
+
+        if (!nf) throw new NotFoundException('NF de entrada não encontrada.');
+        if (!nf.arquivoUrl) throw new NotFoundException('Essa NF não tem XML anexado.');
+
+        const filePath = join(process.cwd(), nf.arquivoUrl.replace(/^\/+/, ''));
+        if (!existsSync(filePath)) throw new NotFoundException('Arquivo XML não encontrado no servidor.');
+
+        return {
+            buffer: readFileSync(filePath),
+            filename: `nf-entrada-${nf.chaveAcesso || id}.xml`,
+        };
+    }
+
+    // -----------------------------------------------------------------
+    // Visualizar / DANFE / XML — NF de Serviço
+    // -----------------------------------------------------------------
+
+    async viewNfServico(id: string, empresaId: string) {
+        const nf = await this.prisma.nfServico.findFirst({ where: { id, empresaId } });
+
+        if (!nf) throw new NotFoundException('NF de serviço não encontrada.');
+
+        if (!nf.arquivoUrl) {
+            return { source: 'nenhum' as const, resumo: null, nf: null };
+        }
+
+        const filePath = join(process.cwd(), nf.arquivoUrl.replace(/^\/+/, ''));
+
+        if (!existsSync(filePath)) {
+            return {
+                source: 'resumo' as const,
+                resumo: {
+                    issuerName: nf.prestadorNome,
+                    issuerDoc: nf.prestadorDoc,
+                    value: nf.valor,
+                    issueDate: nf.dataEmissao,
+                    chaveAcesso: nf.chaveAcesso,
+                },
+                nf: null,
+            };
+        }
+
+        let parsed: NfseView | null = null;
+        try {
+            parsed = parseNfseForView(readFileSync(filePath, 'utf-8'));
+        } catch {
+            parsed = null;
+        }
+
+        if (!parsed) {
+            return {
+                source: 'resumo' as const,
+                resumo: {
+                    issuerName: nf.prestadorNome,
+                    issuerDoc: nf.prestadorDoc,
+                    value: nf.valor,
+                    issueDate: nf.dataEmissao,
+                    chaveAcesso: nf.chaveAcesso,
+                },
+                nf: null,
+            };
+        }
+
+        return { source: 'xml' as const, resumo: null, nf: parsed };
+    }
+
+    async downloadNfServicoDanfe(id: string, empresaId: string): Promise<Buffer> {
+        const view = await this.viewNfServico(id, empresaId);
+        return buildDanfePdf('NFS-e de Serviço', view);
+    }
+
+    async downloadNfServicoXml(id: string, empresaId: string): Promise<{ buffer: Buffer; filename: string }> {
+        const nf = await this.prisma.nfServico.findFirst({ where: { id, empresaId } });
+
+        if (!nf) throw new NotFoundException('NF de serviço não encontrada.');
+        if (!nf.arquivoUrl) throw new NotFoundException('Essa NF não tem XML anexado.');
+
+        const filePath = join(process.cwd(), nf.arquivoUrl.replace(/^\/+/, ''));
+        if (!existsSync(filePath)) throw new NotFoundException('Arquivo XML não encontrado no servidor.');
+
+        return {
+            buffer: readFileSync(filePath),
+            filename: `nf-servico-${nf.chaveAcesso || id}.xml`,
         };
     }
 
@@ -1293,6 +1517,7 @@ export class FinanceiroNfService {
 
         let cursor = certificadoRegistro.ultimoNsuNfe;
         let totalNovas = 0;
+        let cooldownSet = false;
 
         for (let lote = 0; lote < MAX_SYNC_BATCHES; lote++) {
             const resultado = await fetchGoodsDistribution(cert, {
@@ -1307,6 +1532,7 @@ export class FinanceiroNfService {
                 // 656 = consumo indevido) — guarda o cooldown antes de
                 // avisar, pra não deixar a próxima tentativa reiniciar o
                 // bloqueio.
+                cooldownSet = true;
                 await this.prisma.certificadoDigitalEmpresa.update({
                     where: { empresaId },
                     data: {
@@ -1396,6 +1622,7 @@ export class FinanceiroNfService {
             if (resultado.cStat === '137' || respUltNsu >= maxNsu) {
                 // Chegou ao fim do que existe pra consultar agora — só
                 // libera consulta de novo depois de 1h.
+                cooldownSet = true;
                 await this.prisma.certificadoDigitalEmpresa.update({
                     where: { empresaId },
                     data: { nfeBloqueadoAte: new Date(Date.now() + SEFAZ_COOLDOWN_MS) },
@@ -1406,6 +1633,20 @@ export class FinanceiroNfService {
             // Ainda tem mais lote pela frente — espera antes da próxima
             // consulta pra não martelar o webservice da Sefaz.
             await sleep(SYNC_DELAY_MS);
+        }
+
+        if (!cooldownSet) {
+            // Estourou o teto de lotes (MAX_SYNC_BATCHES) sem terminar
+            // naturalmente nem ser bloqueada — tem muito backlog ainda
+            // (ex: primeiro sync ou certificado recadastrado, que reseta o
+            // cursor). Sem cooldown aqui, o cron de 10 em 10 min dispararia
+            // outra rajada de 25 lotes imediatamente, martelando a Sefaz
+            // até ela bloquear por consumo indevido. Uma pausa curta evita
+            // isso sem esperar a 1h inteira do cooldown normal.
+            await this.prisma.certificadoDigitalEmpresa.update({
+                where: { empresaId },
+                data: { nfeBloqueadoAte: new Date(Date.now() + CATCHUP_COOLDOWN_MS) },
+            });
         }
 
         return { totalNovas };
@@ -1453,6 +1694,7 @@ export class FinanceiroNfService {
 
         let cursor = certificadoRegistro.ultimoNsu;
         let totalNovas = 0;
+        let cooldownSet = false;
 
         for (let lote = 0; lote < MAX_SYNC_BATCHES; lote++) {
             let resposta: Awaited<ReturnType<typeof fetchDistribution>>;
@@ -1463,6 +1705,7 @@ export class FinanceiroNfService {
                 // Rejeição do ADN (inclui possível bloqueio por excesso de
                 // consultas) — guarda o cursor já avançado e o cooldown
                 // antes de propagar o erro.
+                cooldownSet = true;
                 await this.prisma.certificadoDigitalEmpresa.update({
                     where: { empresaId },
                     data: {
@@ -1475,6 +1718,7 @@ export class FinanceiroNfService {
             }
 
             if (resposta.StatusProcessamento === 'NENHUM_DOCUMENTO_LOCALIZADO') {
+                cooldownSet = true;
                 await this.prisma.certificadoDigitalEmpresa.update({
                     where: { empresaId },
                     data: {
@@ -1488,6 +1732,7 @@ export class FinanceiroNfService {
             const loteDfe = resposta.LoteDFe || [];
 
             if (loteDfe.length === 0) {
+                cooldownSet = true;
                 await this.prisma.certificadoDigitalEmpresa.update({
                     where: { empresaId },
                     data: {
@@ -1585,6 +1830,17 @@ export class FinanceiroNfService {
             await sleep(SYNC_DELAY_MS);
         }
 
+        if (!cooldownSet) {
+            // Mesmo problema do runSyncNfEntrada: estourou o teto de lotes
+            // sem terminar naturalmente nem ser rejeitada. Sem esse cooldown
+            // curto, o cron de 10 em 10 min martelaria o ADN com rajada de
+            // 25 lotes de novo antes do backlog acabar.
+            await this.prisma.certificadoDigitalEmpresa.update({
+                where: { empresaId },
+                data: { nfseBloqueadoAte: new Date(Date.now() + CATCHUP_COOLDOWN_MS) },
+            });
+        }
+
         return { totalNovas };
     }
 
@@ -1611,7 +1867,10 @@ export class FinanceiroNfService {
 
             if (!certificado) continue;
 
+            let chamouAlgumaSync = false;
+
             if (!certificado.nfeBloqueadoAte || certificado.nfeBloqueadoAte <= agora) {
+                chamouAlgumaSync = true;
                 try {
                     const resultado = await this.runSyncNfEntrada(empresa.id);
 
@@ -1636,6 +1895,13 @@ export class FinanceiroNfService {
             }
 
             if (!certificado.nfseBloqueadoAte || certificado.nfseBloqueadoAte <= agora) {
+                if (chamouAlgumaSync) {
+                    // Já chamou a Sefaz agora mesmo pra NF-e dessa empresa —
+                    // dá uma respirada antes de chamar o ADN da NFS-e, pra
+                    // não emendar duas rajadas de consulta uma na outra.
+                    await sleep(SYNC_DELAY_MS);
+                }
+                chamouAlgumaSync = true;
                 try {
                     const resultado = await this.runSyncNfServico(empresa.id);
 
@@ -1657,6 +1923,13 @@ export class FinanceiroNfService {
                         0,
                     );
                 }
+            }
+
+            if (chamouAlgumaSync) {
+                // Antes de passar pra próxima empresa, espera um pouco —
+                // evita emendar a última consulta desta empresa com a
+                // primeira da próxima.
+                await sleep(SYNC_DELAY_MS);
             }
         }
     }

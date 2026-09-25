@@ -349,6 +349,11 @@ export function parseResNFe(xml: string): ParsedResNFe | null {
     };
 }
 
+function toArray<T>(value: T | T[] | undefined | null): T[] {
+    if (value == null) return [];
+    return Array.isArray(value) ? value : [value];
+}
+
 export type ParsedFullNfe = {
     chaveAcesso: string;
     tipoDocumento?: string; // mod do XML: 55 = NF-e, 65 = NFC-e
@@ -360,6 +365,175 @@ export type ParsedFullNfe = {
     issueDate?: string;
     situacao?: string;
 };
+
+// ---------------------------------------------------------------------
+// Tela de visualização ("view") da NF-e — portado do Controle NF
+// (src/stores/sefaz-nfe-client.ts, parseFullNfeForView). Diferente de
+// parseFullNfeXml acima (que só pega o resumo pra conciliação), esse
+// extrai itens, endereços e impostos (ICMS/IPI/PIS/COFINS) pra montar o
+// modal de "Visualizar" na tela de NF de Entrada.
+type NfeAddress = {
+    logradouro?: string;
+    numero?: string;
+    complemento?: string;
+    bairro?: string;
+    municipio?: string;
+    uf?: string;
+    cep?: string;
+};
+
+function extractAddress(ender: any): NfeAddress | undefined {
+    if (!ender) return undefined;
+
+    return {
+        logradouro: extractText(ender.xLgr) || undefined,
+        numero: extractText(ender.nro) || undefined,
+        complemento: extractText(ender.xCpl) || undefined,
+        bairro: extractText(ender.xBairro) || undefined,
+        municipio: extractText(ender.xMun) || undefined,
+        uf: extractText(ender.UF) || undefined,
+        cep: extractText(ender.CEP) || undefined,
+    };
+}
+
+export type NfeViewItem = {
+    numero?: string;
+    descricao?: string;
+    ncm?: string;
+    cfop?: string;
+    quantidade?: number;
+    unidade?: string;
+    valorUnitario?: number;
+    valorTotal?: number;
+};
+
+export type NfeView = {
+    chaveAcesso: string;
+    tipoDocumento?: string;
+    naturezaOperacao?: string;
+    issueDate?: string;
+    situacao?: string;
+    emitente: {
+        nome?: string;
+        cnpj?: string;
+        inscricaoEstadual?: string;
+        endereco?: NfeAddress;
+    };
+    destinatario: {
+        nome?: string;
+        cnpj?: string;
+        cpf?: string;
+        endereco?: NfeAddress;
+    };
+    itens: NfeViewItem[];
+    totais: {
+        valorProdutos?: number;
+        valorDesconto?: number;
+        valorFrete?: number;
+        valorSeguro?: number;
+        valorOutrasDespesas?: number;
+        valorTotal?: number;
+        valorICMS?: number;
+        valorIPI?: number;
+        valorPIS?: number;
+        valorCOFINS?: number;
+    };
+    // Quando o XML disponível é só o resumo (resNFe), não tem itens nem
+    // impostos detalhados — sinaliza pro front mostrar um aviso em vez de
+    // uma tabela vazia.
+    detalhamentoCompleto: boolean;
+};
+
+export function parseFullNfeForView(xml: string): NfeView | null {
+    let parsed: any;
+
+    try {
+        parsed = parser.parse(xml);
+    } catch {
+        return null;
+    }
+
+    const infNFe = findNode(parsed, 'infNFe');
+
+    if (!infNFe) return null;
+
+    const idAttr = extractText(infNFe['@_Id']) || String(infNFe['@_Id'] || '');
+    const chaveFromId = idAttr.replace(/^NFe/i, '').replace(/\D/g, '');
+
+    const ide = infNFe.ide || {};
+    const emit = infNFe.emit || {};
+    const dest = infNFe.dest || {};
+    const total = infNFe.total?.ICMSTot || {};
+
+    const chNFeExplicit = extractText(ide.chNFe) || extractText(infNFe.chNFe);
+    const chaveAcesso = chaveFromId.length === 44 ? chaveFromId : chNFeExplicit;
+
+    if (!chaveAcesso || chaveAcesso.length !== 44) return null;
+
+    const infProt = findNode(parsed, 'infProt');
+    const cStat = infProt ? extractText(infProt.cStat) : '';
+    const xMotivo = infProt ? extractText(infProt.xMotivo) : '';
+
+    const itens: NfeViewItem[] = toArray(infNFe.det).map((det: any) => {
+        const prod = det?.prod || {};
+
+        return {
+            numero: extractText(det?.['@_nItem']) || undefined,
+            descricao: extractText(prod.xProd) || undefined,
+            ncm: extractText(prod.NCM) || undefined,
+            cfop: extractText(prod.CFOP) || undefined,
+            quantidade: prod.qCom != null ? Number(extractText(prod.qCom)) : undefined,
+            unidade: extractText(prod.uCom) || undefined,
+            valorUnitario:
+                prod.vUnCom != null ? Number(extractText(prod.vUnCom)) : undefined,
+            valorTotal: prod.vProd != null ? Number(extractText(prod.vProd)) : undefined,
+        };
+    });
+
+    return {
+        chaveAcesso,
+        tipoDocumento: extractText(ide.mod) || undefined,
+        naturezaOperacao: extractText(ide.natOp) || undefined,
+        issueDate: extractText(ide.dhEmi) || extractText(ide.dEmi) || undefined,
+        situacao: cStat
+            ? cStat === '100'
+                ? 'Autorizada'
+                : `${cStat} - ${xMotivo}`
+            : undefined,
+        emitente: {
+            nome: extractText(emit.xNome) || undefined,
+            cnpj: extractText(emit.CNPJ) || undefined,
+            inscricaoEstadual: extractText(emit.IE) || undefined,
+            endereco: extractAddress(emit.enderEmit),
+        },
+        destinatario: {
+            nome: extractText(dest.xNome) || undefined,
+            cnpj: extractText(dest.CNPJ) || undefined,
+            cpf: extractText(dest.CPF) || undefined,
+            endereco: extractAddress(dest.enderDest),
+        },
+        itens,
+        totais: {
+            valorProdutos:
+                total.vProd != null ? Number(extractText(total.vProd)) : undefined,
+            valorDesconto:
+                total.vDesc != null ? Number(extractText(total.vDesc)) : undefined,
+            valorFrete:
+                total.vFrete != null ? Number(extractText(total.vFrete)) : undefined,
+            valorSeguro:
+                total.vSeg != null ? Number(extractText(total.vSeg)) : undefined,
+            valorOutrasDespesas:
+                total.vOutro != null ? Number(extractText(total.vOutro)) : undefined,
+            valorTotal: total.vNF != null ? Number(extractText(total.vNF)) : undefined,
+            valorICMS: total.vICMS != null ? Number(extractText(total.vICMS)) : undefined,
+            valorIPI: total.vIPI != null ? Number(extractText(total.vIPI)) : undefined,
+            valorPIS: total.vPIS != null ? Number(extractText(total.vPIS)) : undefined,
+            valorCOFINS:
+                total.vCOFINS != null ? Number(extractText(total.vCOFINS)) : undefined,
+        },
+        detalhamentoCompleto: itens.length > 0,
+    };
+}
 
 // Diferente de parseResNFe (que só entende o resumo devolvido pela
 // distribuição automática), essa função lê o XML completo da NF-e — usado
