@@ -203,8 +203,49 @@ function ordenarPorPlaca<T extends { placa: string | null }>(lista: T[]): T[] {
 
 function filtrarPorPlaca<T extends { placa: string | null }>(lista: T[], filtro: string): T[] {
     if (!filtro) return lista;
-    const alvo = filtro.toUpperCase();
-    return lista.filter((item) => (item.placa || '').toUpperCase().includes(alvo));
+    return lista.filter((item) => (item.placa || '') === filtro);
+}
+
+// Seletor de placa em cards clicáveis (troca o antigo campo de texto) —
+// cada seção usa sua própria instância, com o próprio estado selecionado.
+function PlacaCards({
+    placas,
+    selecionada,
+    onSelect,
+}: {
+    placas: string[];
+    selecionada: string;
+    onSelect: (placa: string) => void;
+}) {
+    return (
+        <div className="flex flex-wrap gap-2">
+            <button
+                type="button"
+                onClick={() => onSelect('')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition ${
+                    selecionada === ''
+                        ? 'bg-blue-600 border-blue-600 text-white'
+                        : 'bg-white dark:bg-[#0B1120] border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-blue-400'
+                }`}
+            >
+                Todas
+            </button>
+            {placas.map((placa) => (
+                <button
+                    type="button"
+                    key={placa}
+                    onClick={() => onSelect(placa === selecionada ? '' : placa)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition ${
+                        selecionada === placa
+                            ? 'bg-blue-600 border-blue-600 text-white'
+                            : 'bg-white dark:bg-[#0B1120] border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-blue-400'
+                    }`}
+                >
+                    {placa}
+                </button>
+            ))}
+        </div>
+    );
 }
 
 function TabelaVazia({ texto }: { texto: string }) {
@@ -245,8 +286,10 @@ export function DadosCapturados() {
         }
     }
 
-    // --- Posições / histórico ---
-    const [placaFiltro, setPlacaFiltro] = useState('');
+    // --- Posições / histórico (esse filtro de placa também é usado pra
+    // buscar as duas seções de Telemetria, que compartilham o mesmo
+    // período e o mesmo botão "Buscar") ---
+    const [placaBusca, setPlacaBusca] = useState('');
     const [dataInicio, setDataInicio] = useState(() => dataDiasAtras(2));
     const [dataFim, setDataFim] = useState(() => formatarDataISO(new Date()));
     const [posicoes, setPosicoes] = useState<Posicao[]>([]);
@@ -257,7 +300,7 @@ export function DadosCapturados() {
             setLoadingPosicoes(true);
             const res = await api.get('/trucks-control/historico', {
                 params: {
-                    placa: placaFiltro || undefined,
+                    placa: placaBusca || undefined,
                     dataInicio,
                     dataFim,
                 },
@@ -279,7 +322,7 @@ export function DadosCapturados() {
             setLoadingTelemetriaOcorrencias(true);
             const res = await api.get('/trucks-control/telemetria-ocorrencias', {
                 params: {
-                    placa: placaFiltro || undefined,
+                    placa: placaBusca || undefined,
                     dataInicio,
                     dataFim,
                 },
@@ -301,7 +344,7 @@ export function DadosCapturados() {
             setLoadingTelemetriaV25(true);
             const res = await api.get('/trucks-control/telemetria-v25', {
                 params: {
-                    placa: placaFiltro || undefined,
+                    placa: placaBusca || undefined,
                     dataInicio,
                     dataFim,
                 },
@@ -317,6 +360,8 @@ export function DadosCapturados() {
     // --- Viagens GPS ---
     const [viagens, setViagens] = useState<ViagemGps[]>([]);
     const [loadingViagens, setLoadingViagens] = useState(false);
+    const [placaViagens, setPlacaViagens] = useState('');
+    const [placaVeiculos, setPlacaVeiculos] = useState('');
 
     async function carregarViagens() {
         try {
@@ -364,13 +409,13 @@ export function DadosCapturados() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // --- Filtro global por placa + ordenação: as seções que ainda não
-    // mandam o filtro pro backend (Veículos, Viagens) filtram aqui na
-    // hora, e todas ficam agrupadas/ordenadas por placa em vez de
-    // misturadas por ordem de chegada.
+    // --- Filtro por placa em cards + ordenação, cada seção com o
+    // próprio estado selecionado (Veículos, Posições+Telemetria, Viagens).
+    // Todas ficam agrupadas/ordenadas por placa em vez de misturadas por
+    // ordem de chegada.
     const veiculosFiltrados = useMemo(
-        () => ordenarPorPlaca(filtrarPorPlaca(veiculos, placaFiltro)),
-        [veiculos, placaFiltro],
+        () => ordenarPorPlaca(filtrarPorPlaca(veiculos, placaVeiculos)),
+        [veiculos, placaVeiculos],
     );
     const posicoesOrdenadas = useMemo(() => ordenarPorPlaca(posicoes), [posicoes]);
     const telemetriaOcorrenciasOrdenadas = useMemo(
@@ -379,8 +424,37 @@ export function DadosCapturados() {
     );
     const telemetriaV25Ordenado = useMemo(() => ordenarPorPlaca(telemetriaV25), [telemetriaV25]);
     const viagensFiltradas = useMemo(
-        () => ordenarPorPlaca(filtrarPorPlaca(viagens, placaFiltro)),
-        [viagens, placaFiltro],
+        () => ordenarPorPlaca(filtrarPorPlaca(viagens, placaViagens)),
+        [viagens, placaViagens],
+    );
+
+    // Lista de placas conhecidas pra montar os cards de cada seção —
+    // junta tudo que já apareceu em qualquer seção (veículos costuma ser
+    // a fonte mais completa, mas viagens/posições podem ter placa que
+    // ainda não caiu no cadastro).
+    const placasVeiculos = useMemo(
+        () => Array.from(new Set(veiculos.map((v) => v.placa).filter((p): p is string => !!p))).sort(),
+        [veiculos],
+    );
+    const placasBusca = useMemo(
+        () =>
+            Array.from(
+                new Set([
+                    ...veiculos.map((v) => v.placa),
+                    ...posicoes.map((p) => p.placa),
+                ].filter((p): p is string => !!p)),
+            ).sort(),
+        [veiculos, posicoes],
+    );
+    const placasViagens = useMemo(
+        () =>
+            Array.from(
+                new Set([
+                    ...veiculos.map((v) => v.placa),
+                    ...viagens.map((v) => v.placa),
+                ].filter((p): p is string => !!p)),
+            ).sort(),
+        [veiculos, viagens],
     );
 
     return (
@@ -423,34 +497,6 @@ export function DadosCapturados() {
                 </p>
             </div>
 
-            {/* FILTRO GLOBAL POR PLACA */}
-            <div className="flex items-center gap-3 p-4 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
-                <Truck size={16} className="text-gray-400 shrink-0" />
-                <div className="flex-1">
-                    <label className="text-xs text-gray-500 block mb-1">
-                        Filtrar tudo por placa (todas as seções abaixo ficam agrupadas por placa)
-                    </label>
-                    <input
-                        type="text"
-                        value={placaFiltro}
-                        onChange={(e) => setPlacaFiltro(e.target.value.toUpperCase())}
-                        placeholder="Todas as placas"
-                        className="px-3 py-1.5 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700 w-full max-w-xs"
-                    />
-                </div>
-                <button
-                    onClick={() => {
-                        carregarPosicoes();
-                        carregarTelemetriaOcorrencias();
-                        carregarTelemetriaV25();
-                    }}
-                    disabled={loadingPosicoes}
-                    className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition shrink-0"
-                >
-                    {loadingPosicoes ? 'Buscando...' : 'Aplicar na busca'}
-                </button>
-            </div>
-
             {/* VEÍCULOS */}
             <Secao
                 titulo="Veículos"
@@ -459,14 +505,17 @@ export function DadosCapturados() {
                 aberto={abertas.veiculos}
                 onToggle={() => toggle('veiculos')}
                 acoes={
-                    <button
-                        onClick={carregarVeiculos}
-                        disabled={loadingVeiculos}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-xs font-medium hover:bg-gray-300 dark:hover:bg-gray-700 disabled:opacity-50 transition"
-                    >
-                        <RefreshCw size={12} className={loadingVeiculos ? 'animate-spin' : ''} />
-                        Atualizar
-                    </button>
+                    <div className="space-y-3">
+                        <PlacaCards placas={placasVeiculos} selecionada={placaVeiculos} onSelect={setPlacaVeiculos} />
+                        <button
+                            onClick={carregarVeiculos}
+                            disabled={loadingVeiculos}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-xs font-medium hover:bg-gray-300 dark:hover:bg-gray-700 disabled:opacity-50 transition"
+                        >
+                            <RefreshCw size={12} className={loadingVeiculos ? 'animate-spin' : ''} />
+                            Atualizar
+                        </button>
+                    </div>
                 }
             >
                 {veiculosFiltrados.length === 0 ? (
@@ -535,49 +584,47 @@ export function DadosCapturados() {
                 aberto={abertas.posicoes}
                 onToggle={() => toggle('posicoes')}
                 acoes={
-                    <div className="flex flex-wrap items-end gap-2">
+                    <div className="space-y-3">
                         <div>
-                            <label className="text-xs text-gray-500 block mb-1">Placa</label>
-                            <input
-                                type="text"
-                                value={placaFiltro}
-                                onChange={(e) => setPlacaFiltro(e.target.value.toUpperCase())}
-                                placeholder="Todas"
-                                className="px-2 py-1.5 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700 w-28"
-                            />
+                            <label className="text-xs text-gray-500 block mb-1.5">
+                                Placa (também vale pras duas seções de Telemetria abaixo)
+                            </label>
+                            <PlacaCards placas={placasBusca} selecionada={placaBusca} onSelect={setPlacaBusca} />
                         </div>
 
-                        <div>
-                            <label className="text-xs text-gray-500 block mb-1">De</label>
-                            <input
-                                type="date"
-                                value={dataInicio}
-                                onChange={(e) => setDataInicio(e.target.value)}
-                                className="px-2 py-1.5 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
-                            />
-                        </div>
+                        <div className="flex flex-wrap items-end gap-2">
+                            <div>
+                                <label className="text-xs text-gray-500 block mb-1">De</label>
+                                <input
+                                    type="date"
+                                    value={dataInicio}
+                                    onChange={(e) => setDataInicio(e.target.value)}
+                                    className="px-2 py-1.5 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
+                                />
+                            </div>
 
-                        <div>
-                            <label className="text-xs text-gray-500 block mb-1">Até</label>
-                            <input
-                                type="date"
-                                value={dataFim}
-                                onChange={(e) => setDataFim(e.target.value)}
-                                className="px-2 py-1.5 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
-                            />
-                        </div>
+                            <div>
+                                <label className="text-xs text-gray-500 block mb-1">Até</label>
+                                <input
+                                    type="date"
+                                    value={dataFim}
+                                    onChange={(e) => setDataFim(e.target.value)}
+                                    className="px-2 py-1.5 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700"
+                                />
+                            </div>
 
-                        <button
-                            onClick={() => {
-                                carregarPosicoes();
-                                carregarTelemetriaOcorrencias();
-                                carregarTelemetriaV25();
-                            }}
-                            disabled={loadingPosicoes}
-                            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
-                        >
-                            {loadingPosicoes ? 'Buscando...' : 'Buscar (também atualiza Telemetria)'}
-                        </button>
+                            <button
+                                onClick={() => {
+                                    carregarPosicoes();
+                                    carregarTelemetriaOcorrencias();
+                                    carregarTelemetriaV25();
+                                }}
+                                disabled={loadingPosicoes}
+                                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
+                            >
+                                {loadingPosicoes ? 'Buscando...' : 'Buscar (também atualiza Telemetria)'}
+                            </button>
+                        </div>
                     </div>
                 }
             >
@@ -807,14 +854,17 @@ export function DadosCapturados() {
                 aberto={abertas.viagens}
                 onToggle={() => toggle('viagens')}
                 acoes={
-                    <button
-                        onClick={carregarViagens}
-                        disabled={loadingViagens}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-xs font-medium hover:bg-gray-300 dark:hover:bg-gray-700 disabled:opacity-50 transition"
-                    >
-                        <RefreshCw size={12} className={loadingViagens ? 'animate-spin' : ''} />
-                        Atualizar
-                    </button>
+                    <div className="space-y-3">
+                        <PlacaCards placas={placasViagens} selecionada={placaViagens} onSelect={setPlacaViagens} />
+                        <button
+                            onClick={carregarViagens}
+                            disabled={loadingViagens}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-xs font-medium hover:bg-gray-300 dark:hover:bg-gray-700 disabled:opacity-50 transition"
+                        >
+                            <RefreshCw size={12} className={loadingViagens ? 'animate-spin' : ''} />
+                            Atualizar
+                        </button>
+                    </div>
                 }
             >
                 {viagensFiltradas.length === 0 ? (
