@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
     Database,
@@ -197,6 +197,16 @@ function Secao({
     );
 }
 
+function ordenarPorPlaca<T extends { placa: string | null }>(lista: T[]): T[] {
+    return [...lista].sort((a, b) => (a.placa || '').localeCompare(b.placa || ''));
+}
+
+function filtrarPorPlaca<T extends { placa: string | null }>(lista: T[], filtro: string): T[] {
+    if (!filtro) return lista;
+    const alvo = filtro.toUpperCase();
+    return lista.filter((item) => (item.placa || '').toUpperCase().includes(alvo));
+}
+
 function TabelaVazia({ texto }: { texto: string }) {
     return (
         <p className="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">
@@ -354,6 +364,25 @@ export function DadosCapturados() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // --- Filtro global por placa + ordenação: as seções que ainda não
+    // mandam o filtro pro backend (Veículos, Viagens) filtram aqui na
+    // hora, e todas ficam agrupadas/ordenadas por placa em vez de
+    // misturadas por ordem de chegada.
+    const veiculosFiltrados = useMemo(
+        () => ordenarPorPlaca(filtrarPorPlaca(veiculos, placaFiltro)),
+        [veiculos, placaFiltro],
+    );
+    const posicoesOrdenadas = useMemo(() => ordenarPorPlaca(posicoes), [posicoes]);
+    const telemetriaOcorrenciasOrdenadas = useMemo(
+        () => ordenarPorPlaca(telemetriaOcorrencias),
+        [telemetriaOcorrencias],
+    );
+    const telemetriaV25Ordenado = useMemo(() => ordenarPorPlaca(telemetriaV25), [telemetriaV25]);
+    const viagensFiltradas = useMemo(
+        () => ordenarPorPlaca(filtrarPorPlaca(viagens, placaFiltro)),
+        [viagens, placaFiltro],
+    );
+
     return (
         <div className="space-y-6">
             <div>
@@ -394,10 +423,38 @@ export function DadosCapturados() {
                 </p>
             </div>
 
+            {/* FILTRO GLOBAL POR PLACA */}
+            <div className="flex items-center gap-3 p-4 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
+                <Truck size={16} className="text-gray-400 shrink-0" />
+                <div className="flex-1">
+                    <label className="text-xs text-gray-500 block mb-1">
+                        Filtrar tudo por placa (todas as seções abaixo ficam agrupadas por placa)
+                    </label>
+                    <input
+                        type="text"
+                        value={placaFiltro}
+                        onChange={(e) => setPlacaFiltro(e.target.value.toUpperCase())}
+                        placeholder="Todas as placas"
+                        className="px-3 py-1.5 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700 w-full max-w-xs"
+                    />
+                </div>
+                <button
+                    onClick={() => {
+                        carregarPosicoes();
+                        carregarTelemetriaOcorrencias();
+                        carregarTelemetriaV25();
+                    }}
+                    disabled={loadingPosicoes}
+                    className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition shrink-0"
+                >
+                    {loadingPosicoes ? 'Buscando...' : 'Aplicar na busca'}
+                </button>
+            </div>
+
             {/* VEÍCULOS */}
             <Secao
                 titulo="Veículos"
-                subtitulo={`RequestVeiculo — cadastro/frota (${veiculos.length} veículo${veiculos.length === 1 ? '' : 's'})`}
+                subtitulo={`RequestVeiculo — cadastro/frota (${veiculosFiltrados.length} de ${veiculos.length} veículo${veiculos.length === 1 ? '' : 's'})`}
                 icone={Truck}
                 aberto={abertas.veiculos}
                 onToggle={() => toggle('veiculos')}
@@ -412,7 +469,7 @@ export function DadosCapturados() {
                     </button>
                 }
             >
-                {veiculos.length === 0 ? (
+                {veiculosFiltrados.length === 0 ? (
                     <TabelaVazia texto="Nenhum veículo carregado." />
                 ) : (
                     <div className="overflow-x-auto -mx-1">
@@ -429,7 +486,7 @@ export function DadosCapturados() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {veiculos.map((v) => (
+                                {veiculosFiltrados.map((v) => (
                                     <tr
                                         key={v.veiID}
                                         className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300"
@@ -545,7 +602,7 @@ export function DadosCapturados() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {posicoes.map((p) => (
+                                {posicoesOrdenadas.map((p) => (
                                     <tr
                                         key={`${p.mId}-${p.id ?? p.veiId}`}
                                         className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300"
@@ -627,7 +684,7 @@ export function DadosCapturados() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {telemetriaOcorrencias.map((o) => (
+                                {telemetriaOcorrenciasOrdenadas.map((o) => (
                                     <tr
                                         key={o.id ?? `${o.veiId}-${o.dataHora}`}
                                         className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300"
@@ -697,7 +754,7 @@ export function DadosCapturados() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {telemetriaV25.map((b) => (
+                                {telemetriaV25Ordenado.map((b) => (
                                     <tr
                                         key={b.id ?? `${b.veiId}-${b.dataHoraInicio}-${b.dataHoraFim}`}
                                         className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300"
@@ -745,7 +802,7 @@ export function DadosCapturados() {
             {/* VIAGENS GPS */}
             <Secao
                 titulo="Viagens detectadas por GPS"
-                subtitulo={`Derivado das posições — entrada/saída de Santos, Betim e Pouso Alegre (${viagens.length} viagem${viagens.length === 1 ? '' : 'ns'})`}
+                subtitulo={`Derivado das posições — entrada/saída de Santos, Betim e Pouso Alegre (${viagensFiltradas.length} de ${viagens.length} viagem${viagens.length === 1 ? '' : 'ns'})`}
                 icone={RouteIcon}
                 aberto={abertas.viagens}
                 onToggle={() => toggle('viagens')}
@@ -760,7 +817,7 @@ export function DadosCapturados() {
                     </button>
                 }
             >
-                {viagens.length === 0 ? (
+                {viagensFiltradas.length === 0 ? (
                     <TabelaVazia texto="Nenhuma viagem detectada ainda." />
                 ) : (
                     <div className="overflow-x-auto -mx-1 max-h-[480px] overflow-y-auto">
@@ -776,7 +833,7 @@ export function DadosCapturados() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {viagens.map((v) => (
+                                {viagensFiltradas.map((v) => (
                                     <tr
                                         key={v.id}
                                         className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300"
