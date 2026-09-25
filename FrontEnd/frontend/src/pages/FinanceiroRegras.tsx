@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
     criarCategoriaFinanceira,
     criarRegraFinanceira,
@@ -214,7 +215,18 @@ export function FinanceiroRegras() {
                         {regras.map((regra) => (
                             <tr key={regra.id} className="border-t">
                                 <td className="p-3 font-medium">{regra.palavra}</td>
-                                <td className="p-3">{regra.caminhao?.placa || '-'}</td>
+                                <td className="p-3">
+                                    {regra.caminhao?.placa ? (
+                                        <Link
+                                            to={`/caminhoes/${encodeURIComponent(regra.caminhao.placa)}`}
+                                            className="text-blue-600 dark:text-blue-400 hover:underline"
+                                        >
+                                            {regra.caminhao.placa}
+                                        </Link>
+                                    ) : (
+                                        '-'
+                                    )}
+                                </td>
                                 <td className="p-3">{regra.categoria?.nome || '-'}</td>
                                 <td className="p-3">{regra.prioridade}</td>
                             </tr>

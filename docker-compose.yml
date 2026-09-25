@@ -74,6 +74,13 @@ services:
       TRUCKS_URL: ${TRUCKS_URL:?defina TRUCKS_URL no .env}
       TRUCKS_LOGIN: ${TRUCKS_LOGIN:?defina TRUCKS_LOGIN no .env}
       TRUCKS_SENHA: ${TRUCKS_SENHA:?defina TRUCKS_SENHA no .env}
+    volumes:
+      # Sem isso, todo "docker compose up -d --build" recria o container
+      # do zero e apaga o certificado digital (.pfx) e os XMLs de NF já
+      # baixados — o registro no banco continua existindo, mas aponta pra
+      # um arquivo que já era. Com o volume, os arquivos sobrevivem a
+      # rebuilds normalmente (igual o Controle NF já faz).
+      - backend_rota_storage:/app/storage
 
   frontend_rota:
     build:
@@ -89,3 +96,4 @@ services:
 
 volumes:
   postgres_rota_data:
+  backend_rota_storage:

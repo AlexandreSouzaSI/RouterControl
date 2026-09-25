@@ -23,13 +23,28 @@ const HOMOLOGACAO_URL =
 const SOAP_ACTION =
     'http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe/nfeDistDFeInteresse';
 
-// Código do "autor" (cUFAutor) exigido no pedido. O Controle Rota não tem
-// (ainda) um cadastro de UF por empresa — em vez de bloquear a
-// funcionalidade nisso, usamos 91 (Ambiente Nacional/SVAN), código
-// documentado pela Receita como válido pra quem consulta através do
-// Ambiente Nacional em vez de uma UF específica. Se no futuro a empresa
-// tiver um campo de UF cadastrado, dá pra trocar por ufToCode(empresa.uf).
-const CUF_AUTOR_AMBIENTE_NACIONAL = 91;
+// Código do IBGE da UF — exigido no pedido (cUFAutor). O valor "91"
+// (Ambiente Nacional) usado antes NÃO é aceito pelo schema do distDFeInt
+// — a Sefaz rejeita com "Falha no esquema xml" porque cUFAutor só aceita
+// os códigos reais de UF (11-53), não existe um valor coringa. Por isso
+// precisa mesmo da UF cadastrada da empresa (Cadastros → Empresa).
+const UF_CODES: Record<string, number> = {
+    AC: 12, AL: 27, AP: 16, AM: 13, BA: 29, CE: 23, DF: 53, ES: 32, GO: 52,
+    MA: 21, MT: 51, MS: 50, MG: 31, PA: 15, PB: 25, PR: 41, PE: 26, PI: 22,
+    RJ: 33, RN: 24, RS: 43, RO: 11, RR: 14, SC: 42, SP: 35, SE: 28, TO: 17,
+};
+
+export function ufToCode(uf: string): number {
+    const code = UF_CODES[uf.trim().toUpperCase()];
+
+    if (!code) {
+        throw new Error(
+            `UF "${uf}" não reconhecida. Use a sigla de 2 letras (ex: SP, MG).`,
+        );
+    }
+
+    return code;
+}
 
 type RawResponse = { status: number; body: string };
 
@@ -99,6 +114,7 @@ function padNsu(nsu: number | bigint): string {
 function buildEnvelope(params: {
     tpAmb: 1 | 2;
     cnpj: string;
+    ufCode: number;
     ultNsu: number | bigint;
 }): string {
     const cnpjDigits = params.cnpj.replace(/\D/g, '');
@@ -110,7 +126,7 @@ function buildEnvelope(params: {
       <nfeDadosMsg>
         <distDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">
           <tpAmb>${params.tpAmb}</tpAmb>
-          <cUFAutor>${CUF_AUTOR_AMBIENTE_NACIONAL}</cUFAutor>
+          <cUFAutor>${params.ufCode}</cUFAutor>
           <CNPJ>${cnpjDigits}</CNPJ>
           <distNSU>
             <ultNSU>${padNsu(params.ultNsu)}</ultNSU>
@@ -206,11 +222,12 @@ export function decodeArquivoXml(base64Content: string): string {
 
 export async function fetchGoodsDistribution(
     cert: CertificadoCarregado,
-    params: { cnpj: string; ultNsu: number | bigint; tpAmb?: 1 | 2 },
+    params: { cnpj: string; ufCode: number; ultNsu: number | bigint; tpAmb?: 1 | 2 },
 ): Promise<DistDFeIntResult> {
     const envelope = buildEnvelope({
         tpAmb: params.tpAmb || 1,
         cnpj: params.cnpj,
+        ufCode: params.ufCode,
         ultNsu: params.ultNsu,
     });
 

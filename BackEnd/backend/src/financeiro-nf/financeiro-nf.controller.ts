@@ -175,13 +175,43 @@ export class FinanceiroNfController {
         @EmpresaAtual() empresaId: string,
         @Query('status') status?: any,
         @Query('mes') mes?: string,
+        @Query('page') page?: string,
+        @Query('pageSize') pageSize?: string,
     ) {
-        return this.service.listarContasPagar(empresaId, { status, mes });
+        return this.service.listarContasPagar(empresaId, { status, mes, page, pageSize });
     }
 
     @Get('contas-pagar/resumo')
     resumoContasPagar(@EmpresaAtual() empresaId: string, @Query('mes') mes?: string) {
         return this.service.resumoContasPagar(empresaId, mes);
+    }
+
+    // ABERTA + PARCIAL — usado pelo dropdown de conciliação bancária.
+    // Precisa vir antes de 'contas-pagar/:id' pra não colidir.
+    @Get('contas-pagar/pendentes')
+    listarContasPendentes(@EmpresaAtual() empresaId: string) {
+        return this.service.listarContasPendentes(empresaId);
+    }
+
+    // Baixa (total ou parcial) de uma conta — dívida de 5000, baixa de 3000
+    // agora, 2000 depois: duas chamadas aqui, mesma ContaPagar.
+    @Post('contas-pagar/:id/pagamentos')
+    registrarPagamento(
+        @Param('id') id: string,
+        @EmpresaAtual() empresaId: string,
+        @Body() body: Record<string, any>,
+    ) {
+        return this.service.registrarPagamento(id, empresaId, body as any);
+    }
+
+    @Get('contas-pagar/:id/pagamentos')
+    listarPagamentos(@Param('id') id: string, @EmpresaAtual() empresaId: string) {
+        return this.service.listarPagamentos(id, empresaId);
+    }
+
+    @Delete('contas-pagar/pagamentos/:pagamentoId')
+    excluirPagamento(@Param('pagamentoId') pagamentoId: string, @EmpresaAtual() empresaId: string) {
+        return this.service.excluirPagamento(pagamentoId, empresaId);
     }
 
     @Post('contas-pagar')
@@ -283,8 +313,11 @@ export class FinanceiroNfController {
         @EmpresaAtual() empresaId: string,
         @Query('de') de?: string,
         @Query('ate') ate?: string,
+        @Query('mes') mes?: string,
+        @Query('page') page?: string,
+        @Query('pageSize') pageSize?: string,
     ) {
-        return this.service.listarNfEntrada(empresaId, { de, ate });
+        return this.service.listarNfEntrada(empresaId, { de, ate, mes, page, pageSize });
     }
 
     // ---------------- NF de Serviço ----------------
@@ -325,8 +358,11 @@ export class FinanceiroNfController {
         @EmpresaAtual() empresaId: string,
         @Query('de') de?: string,
         @Query('ate') ate?: string,
+        @Query('mes') mes?: string,
+        @Query('page') page?: string,
+        @Query('pageSize') pageSize?: string,
     ) {
-        return this.service.listarNfServico(empresaId, { de, ate });
+        return this.service.listarNfServico(empresaId, { de, ate, mes, page, pageSize });
     }
 
     // ---------------- Busca manual na Sefaz/ADN ----------------

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Loader2, CheckCircle2, Trash2, Pencil, Landmark } from 'lucide-react';
+import { Fragment, useEffect, useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Plus, Loader2, CheckCircle2, Trash2, Pencil, Landmark, X, History } from 'lucide-react';
 import { api } from '../services/api';
+import { Pagination } from '../components/Pagination';
 
 // =============================================================================
 // Contas a Pagar — página própria (grupo Financeiro no menu). Lançamento
@@ -39,10 +40,20 @@ type ContaPagar = {
     formaPagamento: string;
     vencimento: string;
     pagoEm: string | null;
-    status: 'ABERTA' | 'PAGA' | 'VENCIDA' | 'CANCELADA';
+    status: 'ABERTA' | 'PAGA' | 'VENCIDA' | 'CANCELADA' | 'PARCIAL';
     fornecedor: Fornecedor | null;
     categoria: Categoria | null;
     caminhao: Caminhao | null;
+    observacao: string | null;
+    valorPago?: number;
+    saldoDevedor?: number;
+};
+
+type Pagamento = {
+    id: string;
+    valor: number;
+    data: string;
+    formaPagamento: string | null;
     observacao: string | null;
 };
 
@@ -76,6 +87,9 @@ export function ContasPagar() {
     const navigate = useNavigate();
     const [mesFiltro, setMesFiltro] = useState(mesAtual());
     const [contas, setContas] = useState<ContaPagar[]>([]);
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(20);
     const [resumo, setResumo] = useState<Resumo | null>(null);
     const [loading, setLoading] = useState(false);
     const [formAberto, setFormAberto] = useState(false);
@@ -96,20 +110,45 @@ export function ContasPagar() {
     const [caminhaoId, setCaminhaoId] = useState('');
     const [observacao, setObservacao] = useState('');
 
-    async function carregar() {
+    // Registrar pagamento (total ou parcial)
+    const [contaPagamento, setContaPagamento] = useState<ContaPagar | null>(null);
+    const [pagamentoValor, setPagamentoValor] = useState('');
+    const [pagamentoData, setPagamentoData] = useState(hojeISO());
+    const [pagamentoForma, setPagamentoForma] = useState('PIX');
+    const [registrandoPagamento, setRegistrandoPagamento] = useState(false);
+
+    // Histórico de baixas por conta (expandido por linha)
+    const [historicoAbertoId, setHistoricoAbertoId] = useState<string | null>(null);
+    const [historicoPagamentos, setHistoricoPagamentos] = useState<Pagamento[]>([]);
+    const [carregandoHistorico, setCarregandoHistorico] = useState(false);
+
+    async function carregar(pageAlvo = page, pageSizeAlvo = pageSize) {
         setLoading(true);
         try {
             const [resContas, resResumo] = await Promise.all([
-                api.get('/financeiro-nf/contas-pagar', { params: { mes: mesFiltro || undefined } }),
+                api.get('/financeiro-nf/contas-pagar', {
+                    params: { mes: mesFiltro || undefined, page: pageAlvo, pageSize: pageSizeAlvo },
+                }),
                 api.get('/financeiro-nf/contas-pagar/resumo', { params: { mes: mesFiltro || undefined } }),
             ]);
-            setContas(resContas.data ?? []);
+            setContas(resContas.data?.items ?? []);
+            setTotal(resContas.data?.total ?? 0);
+            setPage(resContas.data?.page ?? pageAlvo);
+            setPageSize(resContas.data?.pageSize ?? pageSizeAlvo);
             setResumo(resResumo.data ?? null);
         } catch {
             // segue com lista vazia
         } finally {
             setLoading(false);
         }
+    }
+
+    function mudarPagina(novaPagina: number) {
+        carregar(novaPagina, pageSize);
+    }
+
+    function mudarPageSize(novoTamanho: number) {
+        carregar(1, novoTamanho);
     }
 
     async function carregarCadastros() {
@@ -129,7 +168,7 @@ export function ContasPagar() {
     }
 
     useEffect(() => {
-        carregar();
+        carregar(1, pageSize);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [mesFiltro]);
 
@@ -210,12 +249,64 @@ export function ContasPagar() {
         }
     }
 
-    async function marcarPaga(id: string) {
+    function abrirPagamento(conta: ContaPagar) {
+        const saldo = conta.saldoDevedor ?? conta.valor;
+        setContaPagamento(conta);
+        setPagamentoValor(saldo.toFixed(2));
+        setPagamentoData(hojeISO());
+        setPagamentoForma(conta.formaPagamento || 'PIX');
+    }
+
+    function fecharPagamento() {
+        setContaPagamento(null);
+        setPagamentoValor('');
+    }
+
+    async function confirmarPagamento() {
+        if (!contaPagamento || !pagamentoValor || Number(pagamentoValor) <= 0) return;
+        setRegistrandoPagamento(true);
         try {
-            await api.patch(`/financeiro-nf/contas-pagar/${id}/pagar`, { pagoEm: hojeISO() });
+            await api.post(`/financeiro-nf/contas-pagar/${contaPagamento.id}/pagamentos`, {
+                valor: Number(pagamentoValor),
+                data: pagamentoData,
+                formaPagamento: pagamentoForma,
+            });
+            fecharPagamento();
+            carregar();
+        } catch (e: any) {
+            alert(e?.response?.data?.message || 'Não foi possível registrar o pagamento.');
+        } finally {
+            setRegistrandoPagamento(false);
+        }
+    }
+
+    async function alternarHistorico(id: string) {
+        if (historicoAbertoId === id) {
+            setHistoricoAbertoId(null);
+            return;
+        }
+
+        setHistoricoAbertoId(id);
+        setCarregandoHistorico(true);
+        try {
+            const res = await api.get(`/financeiro-nf/contas-pagar/${id}/pagamentos`);
+            setHistoricoPagamentos(res.data ?? []);
+        } catch {
+            setHistoricoPagamentos([]);
+        } finally {
+            setCarregandoHistorico(false);
+        }
+    }
+
+    async function excluirPagamento(pagamentoId: string, contaId: string) {
+        if (!confirm('Excluir essa baixa? O status da conta volta a refletir o valor pendente.')) return;
+        try {
+            await api.delete(`/financeiro-nf/contas-pagar/pagamentos/${pagamentoId}`);
+            const res = await api.get(`/financeiro-nf/contas-pagar/${contaId}/pagamentos`);
+            setHistoricoPagamentos(res.data ?? []);
             carregar();
         } catch {
-            alert('Não foi possível marcar como paga.');
+            alert('Não foi possível excluir o pagamento.');
         }
     }
 
@@ -234,12 +325,14 @@ export function ContasPagar() {
         PAGA: 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400',
         VENCIDA: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400',
         CANCELADA: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
+        PARCIAL: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',
     };
     const traduzStatus: Record<string, string> = {
         ABERTA: 'Aberta',
         PAGA: 'Paga',
         VENCIDA: 'Vencida',
         CANCELADA: 'Cancelada',
+        PARCIAL: 'Parcial',
     };
 
     return (
@@ -413,42 +506,167 @@ export function ContasPagar() {
                             </thead>
                             <tbody>
                                 {contas.map((c) => (
-                                    <tr key={c.id} className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300">
-                                        <td className="py-2.5 px-4">
-                                            <p className="font-semibold text-gray-900 dark:text-white">{c.descricao}</p>
-                                            {c.caminhao && <p className="text-xs text-gray-400">{c.caminhao.placa}</p>}
-                                        </td>
-                                        <td className="py-2.5 px-4">{c.fornecedor?.nome ?? '-'}</td>
-                                        <td className="py-2.5 px-4">{c.categoria?.nome ?? '-'}</td>
-                                        <td className="py-2.5 px-4 whitespace-nowrap">{new Date(c.vencimento).toLocaleDateString('pt-BR')}</td>
-                                        <td className="py-2.5 px-4 font-semibold text-gray-900 dark:text-white">{formatCurrency(c.valor)}</td>
-                                        <td className="py-2.5 px-4">
-                                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${tonsStatus[c.status]}`}>
-                                                {traduzStatus[c.status]}
-                                            </span>
-                                        </td>
-                                        <td className="py-2.5 px-4">
-                                            <div className="flex items-center gap-2">
-                                                {c.status !== 'PAGA' && (
-                                                    <button onClick={() => marcarPaga(c.id)} title="Marcar como paga" className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 dark:hover:bg-green-500/10 transition">
-                                                        <CheckCircle2 size={16} />
-                                                    </button>
+                                    <Fragment key={c.id}>
+                                        <tr className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300">
+                                            <td className="py-2.5 px-4">
+                                                <p className="font-semibold text-gray-900 dark:text-white">{c.descricao}</p>
+                                                {c.caminhao && (
+                                                    <Link
+                                                        to={`/caminhoes/${encodeURIComponent(c.caminhao.placa)}`}
+                                                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                                                    >
+                                                        🚚 {c.caminhao.placa}
+                                                    </Link>
                                                 )}
-                                                <button onClick={() => editar(c)} title="Editar" className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
-                                                    <Pencil size={16} />
-                                                </button>
-                                                <button onClick={() => excluir(c.id)} title="Excluir" className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition">
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
+                                            </td>
+                                            <td className="py-2.5 px-4">{c.fornecedor?.nome ?? '-'}</td>
+                                            <td className="py-2.5 px-4">{c.categoria?.nome ?? '-'}</td>
+                                            <td className="py-2.5 px-4 whitespace-nowrap">{new Date(c.vencimento).toLocaleDateString('pt-BR')}</td>
+                                            <td className="py-2.5 px-4">
+                                                <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(c.valor)}</p>
+                                                {c.status === 'PARCIAL' && (
+                                                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                                                        Pago {formatCurrency(c.valorPago)} · falta {formatCurrency(c.saldoDevedor)}
+                                                    </p>
+                                                )}
+                                            </td>
+                                            <td className="py-2.5 px-4">
+                                                <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${tonsStatus[c.status]}`}>
+                                                    {traduzStatus[c.status]}
+                                                </span>
+                                            </td>
+                                            <td className="py-2.5 px-4">
+                                                <div className="flex items-center gap-2">
+                                                    {c.status !== 'PAGA' && c.status !== 'CANCELADA' && (
+                                                        <button onClick={() => abrirPagamento(c)} title="Registrar pagamento" className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 dark:hover:bg-green-500/10 transition">
+                                                            <CheckCircle2 size={16} />
+                                                        </button>
+                                                    )}
+                                                    {(c.status === 'PAGA' || c.status === 'PARCIAL') && (
+                                                        <button onClick={() => alternarHistorico(c.id)} title="Ver baixas" className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                                                            <History size={16} />
+                                                        </button>
+                                                    )}
+                                                    <button onClick={() => editar(c)} title="Editar" className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                                                        <Pencil size={16} />
+                                                    </button>
+                                                    <button onClick={() => excluir(c.id)} title="Excluir" className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition">
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {historicoAbertoId === c.id && (
+                                            <tr key={`${c.id}-historico`} className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-100 dark:border-gray-800">
+                                                <td colSpan={7} className="py-3 px-4">
+                                                    {carregandoHistorico ? (
+                                                        <p className="text-xs text-gray-400">Carregando baixas...</p>
+                                                    ) : historicoPagamentos.length === 0 ? (
+                                                        <p className="text-xs text-gray-400">Nenhuma baixa registrada.</p>
+                                                    ) : (
+                                                        <div className="space-y-1.5">
+                                                            {historicoPagamentos.map((p) => (
+                                                                <div key={p.id} className="flex items-center justify-between text-xs bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-lg px-3 py-1.5">
+                                                                    <span className="text-gray-700 dark:text-gray-300">
+                                                                        {new Date(p.data).toLocaleDateString('pt-BR')} — {formatCurrency(p.valor)}
+                                                                        {p.formaPagamento ? ` · ${p.formaPagamento}` : ''}
+                                                                    </span>
+                                                                    <button
+                                                                        onClick={() => excluirPagamento(p.id, c.id)}
+                                                                        title="Excluir baixa"
+                                                                        className="p-1 rounded text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition"
+                                                                    >
+                                                                        <Trash2 size={13} />
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </Fragment>
                                 ))}
                             </tbody>
                         </table>
+                        <Pagination
+                            page={page}
+                            pageSize={pageSize}
+                            total={total}
+                            onPageChange={mudarPagina}
+                            onPageSizeChange={mudarPageSize}
+                        />
                     </div>
                 )}
             </div>
+
+            {contaPagamento && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                    <div className="w-full max-w-sm bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl p-5 space-y-4">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <h3 className="font-semibold text-gray-900 dark:text-white text-sm">Registrar pagamento</h3>
+                                <p className="text-xs text-gray-400 mt-0.5">{contaPagamento.descricao}</p>
+                            </div>
+                            <button onClick={fecharPagamento} className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        <div className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/40 rounded-lg px-3 py-2">
+                            Valor total: <strong>{formatCurrency(contaPagamento.valor)}</strong>
+                            {(contaPagamento.valorPago ?? 0) > 0 && (
+                                <> · Já pago: <strong>{formatCurrency(contaPagamento.valorPago)}</strong></>
+                            )}
+                            <> · Saldo devedor: <strong>{formatCurrency(contaPagamento.saldoDevedor ?? contaPagamento.valor)}</strong></>
+                        </div>
+
+                        <p className="text-xs text-gray-400 -mt-2">
+                            Se a pessoa não pagou tudo, digite só o valor pago agora — a conta fica "Parcial" e o restante continua em aberto pra uma próxima baixa.
+                        </p>
+
+                        <div>
+                            <label className={labelClasse}>Valor pago agora (R$) *</label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max={contaPagamento.saldoDevedor ?? contaPagamento.valor}
+                                value={pagamentoValor}
+                                onChange={(e) => setPagamentoValor(e.target.value)}
+                                className={campoClasse}
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className={labelClasse}>Data</label>
+                                <input type="date" value={pagamentoData} onChange={(e) => setPagamentoData(e.target.value)} className={campoClasse} />
+                            </div>
+                            <div>
+                                <label className={labelClasse}>Forma</label>
+                                <select value={pagamentoForma} onChange={(e) => setPagamentoForma(e.target.value)} className={campoClasse}>
+                                    {FORMAS_PAGAMENTO.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-2 pt-1">
+                            <button onClick={fecharPagamento} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={confirmarPagamento}
+                                disabled={registrandoPagamento || !pagamentoValor || Number(pagamentoValor) <= 0}
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition"
+                            >
+                                {registrandoPagamento && <Loader2 size={14} className="animate-spin" />}
+                                Confirmar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

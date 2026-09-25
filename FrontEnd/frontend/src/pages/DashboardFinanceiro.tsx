@@ -23,6 +23,7 @@ import {
     CalendarRange,
     AlertTriangle,
     Info,
+    ClipboardList,
 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -61,6 +62,7 @@ type Bucket = { total: number; quantidade: number };
 type DashboardData = {
     mesReferencia: string;
     entradas: { total: number; quantidade: number; aceitas: number; pendentes: number };
+    servicos: { total: number; quantidade: number; aceitas: number; pendentes: number };
     servicosPagos: { total: number; quantidade: number };
     receitas: { disponivel: boolean };
     contasPagar: {
@@ -219,11 +221,11 @@ export function DashboardFinanceiro() {
                 <p className="text-sm text-gray-400 py-12 text-center">Não foi possível carregar o dashboard.</p>
             ) : (
                 <>
-                    {(dados.entradas.quantidade === 0 && dados.servicosPagos.quantidade === 0) && (
+                    {(dados.entradas.quantidade === 0 && dados.servicos.quantidade === 0 && dados.servicosPagos.quantidade === 0) && (
                         <div className="flex items-start gap-3 p-4 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
                             <Info size={16} className="text-amber-500 shrink-0 mt-0.5" />
                             <p className="text-xs text-gray-500 dark:text-gray-400">
-                                Entradas e Serviços Pagos ainda estão zerados porque a busca automática de NF (Sefaz/ADN)
+                                Entradas e Serviços ainda estão zerados porque a busca automática de NF (Sefaz/ADN)
                                 está em construção. Os números de Contas a Pagar abaixo já refletem os lançamentos
                                 manuais existentes.
                             </p>
@@ -231,13 +233,20 @@ export function DashboardFinanceiro() {
                     )}
 
                     {/* KPIs principais */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                         <KpiCard
                             titulo="Entradas (NF)"
                             valor={formatCurrency(dados.entradas.total)}
                             subtitulo={`${dados.entradas.quantidade} NF · ${dados.entradas.aceitas} aceitas`}
                             icone={FileText}
                             cor="#3b82f6"
+                        />
+                        <KpiCard
+                            titulo="NF de Serviço"
+                            valor={formatCurrency(dados.servicos.total)}
+                            subtitulo={`${dados.servicos.quantidade} NF · ${dados.servicos.aceitas} aceitas`}
+                            icone={ClipboardList}
+                            cor="#0ea5e9"
                         />
                         <KpiCard
                             titulo="Serviços Pagos"

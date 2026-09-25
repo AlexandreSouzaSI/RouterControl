@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
     Gauge,
     MapPin,
@@ -427,7 +428,16 @@ export function TrackingPage() {
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
                                 <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                                    {veiculoAtual.placa ?? `Veículo ${veiculoAtual.veiID}`}
+                                    {veiculoAtual.placa ? (
+                                        <Link
+                                            to={`/caminhoes/${encodeURIComponent(veiculoAtual.placa)}`}
+                                            className="text-blue-600 dark:text-blue-400 hover:underline"
+                                        >
+                                            {veiculoAtual.placa}
+                                        </Link>
+                                    ) : (
+                                        `Veículo ${veiculoAtual.veiID}`
+                                    )}
                                 </h2>
 
                                 <p className="text-sm text-gray-500 dark:text-gray-400">

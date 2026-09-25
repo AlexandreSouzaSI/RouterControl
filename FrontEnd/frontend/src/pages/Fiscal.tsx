@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
     Receipt,
     FileSignature,
@@ -394,7 +395,18 @@ function RpaTab({ caminhoes }: { caminhoes: Caminhao[] }) {
                                             <p className="font-semibold text-gray-900 dark:text-white">{r.motoristaNome}</p>
                                             {r.descricaoServico && <p className="text-xs text-gray-400">{r.descricaoServico}</p>}
                                         </td>
-                                        <td className="py-2.5 px-4">{r.caminhao?.placa ?? '-'}</td>
+                                        <td className="py-2.5 px-4">
+                                            {r.caminhao?.placa ? (
+                                                <Link
+                                                    to={`/caminhoes/${encodeURIComponent(r.caminhao.placa)}`}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    {r.caminhao.placa}
+                                                </Link>
+                                            ) : (
+                                                '-'
+                                            )}
+                                        </td>
                                         <td className="py-2.5 px-4">{formatCurrency(r.valorBruto)}</td>
                                         <td className="py-2.5 px-4">{formatCurrency(r.valorInss)}</td>
                                         <td className="py-2.5 px-4">{formatCurrency(r.valorIrrf)}</td>
@@ -677,7 +689,18 @@ function CiotTab({ caminhoes }: { caminhoes: Caminhao[] }) {
                                 {registros.map((r) => (
                                     <tr key={r.id} className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300 align-top">
                                         <td className="py-2.5 px-4 font-semibold text-gray-900 dark:text-white">{r.motoristaNome}</td>
-                                        <td className="py-2.5 px-4">{r.caminhao?.placa ?? '-'}</td>
+                                        <td className="py-2.5 px-4">
+                                            {r.caminhao?.placa ? (
+                                                <Link
+                                                    to={`/caminhoes/${encodeURIComponent(r.caminhao.placa)}`}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    {r.caminhao.placa}
+                                                </Link>
+                                            ) : (
+                                                '-'
+                                            )}
+                                        </td>
                                         <td className="py-2.5 px-4">{r.origemMunicipio} → {r.destinoMunicipio}</td>
                                         <td className="py-2.5 px-4 whitespace-nowrap">{new Date(r.dataViagem).toLocaleDateString('pt-BR')}</td>
                                         <td className="py-2.5 px-4">

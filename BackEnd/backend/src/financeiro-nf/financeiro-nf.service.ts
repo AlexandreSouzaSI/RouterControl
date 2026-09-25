@@ -9,6 +9,7 @@ import {
     fetchGoodsDistribution,
     parseFullNfeXml,
     parseResNFe,
+    ufToCode,
 } from './sefaz-nfe-client';
 import {
     decodeArquivoXml,
@@ -388,9 +389,23 @@ export class FinanceiroNfService {
     // não foi implementado). Por enquanto o único jeito de entrar uma
     // conta aqui é lançar manualmente.
 
+    // Só aceita 20 ou 50 (o resto do valor enviado é ignorado e cai no
+    // default de 20) — é o que a tela oferece como escolha pro usuário.
+    private parsePaginacao(page?: string, pageSize?: string) {
+        const pageSizeNum = Number(pageSize) === 50 ? 50 : 20;
+        const pageNum = Math.max(1, Number(page) || 1);
+
+        return {
+            page: pageNum,
+            pageSize: pageSizeNum,
+            skip: (pageNum - 1) * pageSizeNum,
+            take: pageSizeNum,
+        };
+    }
+
     async listarContasPagar(
         empresaId: string,
-        filtros?: { status?: StatusContaPagar; mes?: string },
+        filtros?: { status?: StatusContaPagar; mes?: string; page?: string; pageSize?: string },
     ) {
         const where: any = { empresaId };
 
@@ -404,11 +419,30 @@ export class FinanceiroNfService {
             };
         }
 
-        return this.prisma.contaPagar.findMany({
-            where,
-            include: { fornecedor: true, categoria: true, caminhao: true },
-            orderBy: { vencimento: 'asc' },
+        const { page, pageSize, skip, take } = this.parsePaginacao(
+            filtros?.page,
+            filtros?.pageSize,
+        );
+
+        const [contas, total] = await Promise.all([
+            this.prisma.contaPagar.findMany({
+                where,
+                include: { fornecedor: true, categoria: true, caminhao: true, pagamentos: true },
+                orderBy: { vencimento: 'asc' },
+                skip,
+                take,
+            }),
+            this.prisma.contaPagar.count({ where }),
+        ]);
+
+        // Cada item já sai com valorPago/saldoDevedor calculados — evita a
+        // tela ter que somar os pagamentos toda vez que renderiza a lista.
+        const items = contas.map((conta) => {
+            const valorPago = conta.pagamentos.reduce((soma, p) => soma + p.valor, 0);
+            return { ...conta, valorPago, saldoDevedor: Math.max(0, conta.valor - valorPago) };
         });
+
+        return { items, total, page, pageSize };
     }
 
     async resumoContasPagar(empresaId: string, mes?: string) {
@@ -422,7 +456,7 @@ export class FinanceiroNfService {
             };
         }
 
-        const contas = await this.prisma.contaPagar.findMany({ where });
+        const contas = await this.prisma.contaPagar.findMany({ where, include: { pagamentos: true } });
 
         const hoje = new Date();
         hoje.setHours(0, 0, 0, 0);
@@ -441,13 +475,22 @@ export class FinanceiroNfService {
 
             if (conta.status === 'CANCELADA') continue;
 
+            // PARCIAL: a parte já quitada entra em totalPago, só o saldo
+            // devedor conta como aberto/vencido (evita contar a dívida em
+            // dobro no resumo).
+            const pago = conta.status === 'PARCIAL'
+                ? conta.pagamentos.reduce((soma, p) => soma + p.valor, 0)
+                : 0;
+            totalPago += pago;
+            const saldo = conta.valor - pago;
+
             const venceu = new Date(conta.vencimento) < hoje;
 
             if (venceu) {
-                totalVencido += conta.valor;
+                totalVencido += saldo;
                 quantidadeVencida++;
             } else {
-                totalAberto += conta.valor;
+                totalAberto += saldo;
                 quantidadeAberta++;
             }
         }
@@ -542,24 +585,170 @@ export class FinanceiroNfService {
         });
     }
 
+    // "Marcar como paga" continua existindo como o atalho de sempre (quita o
+    // saldo devedor inteiro de uma vez), mas por baixo dos panos agora só
+    // registra uma baixa igual a qualquer outra — mesmo caminho que a
+    // conciliação bancária e o botão de pagamento parcial usam.
     async marcarContaPagarPaga(
         id: string,
         empresaId: string,
         body: { pagoEm?: string; formaPagamento?: FormaPagamentoContaPagar },
     ) {
-        const existente = await this.prisma.contaPagar.findFirst({ where: { id, empresaId } });
+        const existente = await this.prisma.contaPagar.findFirst({
+            where: { id, empresaId },
+            include: { pagamentos: true },
+        });
         if (!existente) throw new NotFoundException('Conta a pagar não encontrada.');
+        if (existente.status === 'CANCELADA') {
+            throw new BadRequestException('Essa conta está cancelada.');
+        }
 
-        const pagoEm = body.pagoEm ? new Date(`${body.pagoEm}T12:00:00`) : new Date();
+        const totalPago = existente.pagamentos.reduce((soma, p) => soma + p.valor, 0);
+        const saldoDevedor = existente.valor - totalPago;
 
-        return this.prisma.contaPagar.update({
+        if (saldoDevedor > 0.01) {
+            await this.registrarPagamento(id, empresaId, {
+                valor: Number(saldoDevedor.toFixed(2)),
+                data: body.pagoEm,
+                formaPagamento: body.formaPagamento ?? existente.formaPagamento ?? undefined,
+            });
+        } else {
+            await this.recalcularStatusContaPagar(id);
+        }
+
+        return this.prisma.contaPagar.findFirst({
             where: { id },
+            include: { fornecedor: true, categoria: true, caminhao: true, pagamentos: { orderBy: { data: 'desc' } } },
+        });
+    }
+
+    // Recalcula status/pagoEm a partir da soma das baixas registradas —
+    // chamado depois de toda criação/remoção de PagamentoContaPagar, nunca
+    // seta status manualmente em outro lugar (fonte única de verdade).
+    private async recalcularStatusContaPagar(contaPagarId: string) {
+        const conta = await this.prisma.contaPagar.findUnique({
+            where: { id: contaPagarId },
+            include: { pagamentos: true },
+        });
+        if (!conta || conta.status === 'CANCELADA') return;
+
+        const totalPago = conta.pagamentos.reduce((soma, p) => soma + p.valor, 0);
+
+        if (totalPago <= 0.01) {
+            if (conta.status !== 'ABERTA') {
+                await this.prisma.contaPagar.update({
+                    where: { id: contaPagarId },
+                    data: { status: 'ABERTA', pagoEm: null },
+                });
+            }
+            return;
+        }
+
+        if (totalPago + 0.01 >= conta.valor) {
+            const ultimaData = conta.pagamentos.reduce<Date>(
+                (maisRecente, p) => (p.data > maisRecente ? p.data : maisRecente),
+                conta.pagamentos[0].data,
+            );
+
+            await this.prisma.contaPagar.update({
+                where: { id: contaPagarId },
+                data: { status: 'PAGA', pagoEm: ultimaData },
+            });
+            return;
+        }
+
+        await this.prisma.contaPagar.update({
+            where: { id: contaPagarId },
+            data: { status: 'PARCIAL', pagoEm: null },
+        });
+    }
+
+    // Registra uma baixa (total ou parcial) — ex: dívida de 5000, paga 3000
+    // agora e 2000 depois, em duas chamadas separadas. A ContaPagar nunca é
+    // duplicada, só o status/pagoEm são recalculados a partir da soma.
+    async registrarPagamento(
+        contaPagarId: string,
+        empresaId: string,
+        body: { valor: number; data?: string; formaPagamento?: FormaPagamentoContaPagar; observacao?: string },
+    ) {
+        const conta = await this.prisma.contaPagar.findFirst({
+            where: { id: contaPagarId, empresaId },
+            include: { pagamentos: true },
+        });
+        if (!conta) throw new NotFoundException('Conta a pagar não encontrada.');
+        if (conta.status === 'CANCELADA') throw new BadRequestException('Essa conta está cancelada.');
+        if (conta.status === 'PAGA') throw new BadRequestException('Essa conta já foi paga integralmente.');
+
+        if (!body.valor || body.valor <= 0) {
+            throw new BadRequestException('Informe um valor de pagamento válido.');
+        }
+
+        const totalPago = conta.pagamentos.reduce((soma, p) => soma + p.valor, 0);
+        const saldoDevedor = conta.valor - totalPago;
+
+        if (body.valor > saldoDevedor + 0.01) {
+            throw new BadRequestException(
+                `O valor informado (R$ ${body.valor.toFixed(2)}) é maior que o saldo devedor (R$ ${saldoDevedor.toFixed(2)}).`,
+            );
+        }
+
+        const data = body.data ? new Date(`${body.data}T12:00:00`) : new Date();
+
+        await this.prisma.pagamentoContaPagar.create({
             data: {
-                status: 'PAGA',
-                pagoEm,
-                formaPagamento: body.formaPagamento ?? existente.formaPagamento,
+                contaPagarId,
+                valor: body.valor,
+                data,
+                formaPagamento: body.formaPagamento,
+                observacao: body.observacao?.trim() || null,
             },
-            include: { fornecedor: true, categoria: true, caminhao: true },
+        });
+
+        await this.recalcularStatusContaPagar(contaPagarId);
+
+        return this.prisma.contaPagar.findFirst({
+            where: { id: contaPagarId },
+            include: { fornecedor: true, categoria: true, caminhao: true, pagamentos: { orderBy: { data: 'desc' } } },
+        });
+    }
+
+    async listarPagamentos(contaPagarId: string, empresaId: string) {
+        const conta = await this.prisma.contaPagar.findFirst({ where: { id: contaPagarId, empresaId } });
+        if (!conta) throw new NotFoundException('Conta a pagar não encontrada.');
+
+        return this.prisma.pagamentoContaPagar.findMany({
+            where: { contaPagarId },
+            orderBy: { data: 'desc' },
+        });
+    }
+
+    async excluirPagamento(pagamentoId: string, empresaId: string) {
+        const pagamento = await this.prisma.pagamentoContaPagar.findFirst({
+            where: { id: pagamentoId },
+            include: { contaPagar: true },
+        });
+        if (!pagamento || pagamento.contaPagar.empresaId !== empresaId) {
+            throw new NotFoundException('Pagamento não encontrado.');
+        }
+
+        await this.prisma.pagamentoContaPagar.delete({ where: { id: pagamentoId } });
+        await this.recalcularStatusContaPagar(pagamento.contaPagarId);
+
+        return { ok: true };
+    }
+
+    // ABERTA + PARCIAL juntas — usado pelo dropdown de conciliação bancária,
+    // já que uma conta parcialmente paga ainda pode receber outra baixa.
+    async listarContasPendentes(empresaId: string) {
+        const contas = await this.prisma.contaPagar.findMany({
+            where: { empresaId, status: { in: ['ABERTA', 'PARCIAL'] } },
+            include: { fornecedor: true, categoria: true, caminhao: true, pagamentos: true },
+            orderBy: { vencimento: 'asc' },
+        });
+
+        return contas.map((conta) => {
+            const valorPago = conta.pagamentos.reduce((soma, p) => soma + p.valor, 0);
+            return { ...conta, valorPago, saldoDevedor: Math.max(0, conta.valor - valorPago) };
         });
     }
 
@@ -596,7 +785,18 @@ export class FinanceiroNfService {
     // filtro por período e download em massa (aceitas ou não) já
     // funcionam sem precisar mexer aqui de novo.
 
-    private buildDateFilterNf(filtros?: { de?: string; ate?: string }) {
+    // Aceita tanto 'mes' (seletor único "YYYY-MM", tem prioridade) quanto
+    // 'de'/'ate' (intervalo livre) — mesmo padrão do filtro de mês já usado
+    // em listarContasPagar.
+    private buildDateFilterNf(filtros?: { de?: string; ate?: string; mes?: string }) {
+        if (filtros?.mes) {
+            const [ano, mesNum] = filtros.mes.split('-').map(Number);
+            return {
+                gte: new Date(ano, mesNum - 1, 1),
+                lt: new Date(ano, mesNum, 1),
+            };
+        }
+
         if (!filtros?.de && !filtros?.ate) return undefined;
 
         // Meio-dia/fim-do-dia no início/fim do intervalo — mesma regra de
@@ -607,32 +807,72 @@ export class FinanceiroNfService {
         };
     }
 
-    async listarNfEntrada(empresaId: string, filtros?: { de?: string; ate?: string }) {
-        const items = await this.prisma.nfEntrada.findMany({
-            where: {
-                empresaId,
-                ignorado: false,
-                dataEmissao: this.buildDateFilterNf(filtros),
-            },
-            include: { caminhao: true },
-            orderBy: { dataEmissao: { sort: 'desc', nulls: 'last' } },
-        });
+    async listarNfEntrada(
+        empresaId: string,
+        filtros?: { de?: string; ate?: string; mes?: string; page?: string; pageSize?: string },
+    ) {
+        const where = {
+            empresaId,
+            ignorado: false,
+            dataEmissao: this.buildDateFilterNf(filtros),
+        };
 
-        return items.map((item) => ({ ...item, nsu: item.nsu.toString() }));
+        const { page, pageSize, skip, take } = this.parsePaginacao(
+            filtros?.page,
+            filtros?.pageSize,
+        );
+
+        const [items, total] = await Promise.all([
+            this.prisma.nfEntrada.findMany({
+                where,
+                include: { caminhao: true },
+                orderBy: { dataEmissao: { sort: 'desc', nulls: 'last' } },
+                skip,
+                take,
+            }),
+            this.prisma.nfEntrada.count({ where }),
+        ]);
+
+        return {
+            items: items.map((item) => ({ ...item, nsu: item.nsu.toString() })),
+            total,
+            page,
+            pageSize,
+        };
     }
 
-    async listarNfServico(empresaId: string, filtros?: { de?: string; ate?: string }) {
-        const items = await this.prisma.nfServico.findMany({
-            where: {
-                empresaId,
-                ignorado: false,
-                dataEmissao: this.buildDateFilterNf(filtros),
-            },
-            include: { caminhao: true },
-            orderBy: { dataEmissao: { sort: 'desc', nulls: 'last' } },
-        });
+    async listarNfServico(
+        empresaId: string,
+        filtros?: { de?: string; ate?: string; mes?: string; page?: string; pageSize?: string },
+    ) {
+        const where = {
+            empresaId,
+            ignorado: false,
+            dataEmissao: this.buildDateFilterNf(filtros),
+        };
 
-        return items.map((item) => ({ ...item, nsu: item.nsu.toString() }));
+        const { page, pageSize, skip, take } = this.parsePaginacao(
+            filtros?.page,
+            filtros?.pageSize,
+        );
+
+        const [items, total] = await Promise.all([
+            this.prisma.nfServico.findMany({
+                where,
+                include: { caminhao: true },
+                orderBy: { dataEmissao: { sort: 'desc', nulls: 'last' } },
+                skip,
+                take,
+            }),
+            this.prisma.nfServico.count({ where }),
+        ]);
+
+        return {
+            items: items.map((item) => ({ ...item, nsu: item.nsu.toString() })),
+            total,
+            page,
+            pageSize,
+        };
     }
 
     // Traz TODAS as NFs com arquivo no período — aceitas, pendentes ou só
@@ -699,8 +939,8 @@ export class FinanceiroNfService {
     // Status "efetivo" calculado na hora — o campo status no banco não é
     // atualizado sozinho pra VENCIDA quando o dia passa, então recalcula
     // aqui pra não mostrar um número desatualizado no gráfico.
-    private statusEfetivo(conta: { status: string; vencimento: Date }, hoje: Date): 'ABERTA' | 'PAGA' | 'VENCIDA' | 'CANCELADA' {
-        if (conta.status === 'PAGA' || conta.status === 'CANCELADA') return conta.status;
+    private statusEfetivo(conta: { status: string; vencimento: Date }, hoje: Date): 'ABERTA' | 'PAGA' | 'VENCIDA' | 'CANCELADA' | 'PARCIAL' {
+        if (conta.status === 'PAGA' || conta.status === 'CANCELADA' || conta.status === 'PARCIAL') return conta.status;
         return new Date(conta.vencimento) < hoje ? 'VENCIDA' : 'ABERTA';
     }
 
@@ -724,6 +964,22 @@ export class FinanceiroNfService {
             quantidade: entradasNoMes.length,
             aceitas: entradasNoMes.filter((i) => i.aceita).length,
             pendentes: entradasNoMes.filter((i) => !i.aceita).length,
+        };
+
+        // ---- NF de Serviço recebidas no mês de referência (mesmo padrão de
+        // "Entradas" acima, mas pra NfServico) — mostra tudo que chegou no
+        // mês, independente de já ter virado conta a pagar/sido paga. É
+        // diferente de "Serviços Pagos" abaixo, que só olha o que já foi
+        // efetivamente quitado.
+        const servicosNoMes = await this.prisma.nfServico.findMany({
+            where: { empresaId, ignorado: false, dataEmissao: { gte: inicioMes, lt: fimMes } },
+        });
+
+        const servicos = {
+            total: servicosNoMes.reduce((soma, item) => soma + (item.valor || 0), 0),
+            quantidade: servicosNoMes.length,
+            aceitas: servicosNoMes.filter((i) => i.aceita).length,
+            pendentes: servicosNoMes.filter((i) => !i.aceita).length,
         };
 
         // ---- Serviços Pagos: Conta a Pagar PAGA no mês, vinda de NF de
@@ -836,11 +1092,12 @@ export class FinanceiroNfService {
             where: { empresaId, vencimento: { gte: inicioMes, lt: fimMes } },
         });
 
-        const statusContadores: Record<'ABERTA' | 'PAGA' | 'VENCIDA' | 'CANCELADA', { valor: number; quantidade: number }> = {
+        const statusContadores: Record<'ABERTA' | 'PAGA' | 'VENCIDA' | 'CANCELADA' | 'PARCIAL', { valor: number; quantidade: number }> = {
             ABERTA: { valor: 0, quantidade: 0 },
             PAGA: { valor: 0, quantidade: 0 },
             VENCIDA: { valor: 0, quantidade: 0 },
             CANCELADA: { valor: 0, quantidade: 0 },
+            PARCIAL: { valor: 0, quantidade: 0 },
         };
 
         for (const conta of contasDoMes) {
@@ -852,6 +1109,7 @@ export class FinanceiroNfService {
         const graficoStatus = (
             [
                 { status: 'Aberta', chave: 'ABERTA' },
+                { status: 'Parcial', chave: 'PARCIAL' },
                 { status: 'Paga', chave: 'PAGA' },
                 { status: 'Vencida', chave: 'VENCIDA' },
                 { status: 'Cancelada', chave: 'CANCELADA' },
@@ -863,6 +1121,7 @@ export class FinanceiroNfService {
         return {
             mesReferencia: mesRef,
             entradas,
+            servicos,
             servicosPagos,
             receitas: { disponivel: false },
             contasPagar,
@@ -994,6 +1253,17 @@ export class FinanceiroNfService {
             );
         }
 
+        // cUFAutor é obrigatório no schema do distDFeInt — sem a UF real da
+        // empresa a Sefaz rejeita com "Falha no esquema xml" (o código "91"
+        // usado antes como coringa não é um valor válido do schema).
+        if (!empresa.uf) {
+            throw new BadRequestException(
+                'Cadastre a UF da empresa em Cadastros → Empresa antes de buscar notas.',
+            );
+        }
+
+        const ufCode = ufToCode(empresa.uf);
+
         const certificadoRegistro = await this.prisma.certificadoDigitalEmpresa.findUnique({
             where: { empresaId },
         });
@@ -1027,6 +1297,7 @@ export class FinanceiroNfService {
         for (let lote = 0; lote < MAX_SYNC_BATCHES; lote++) {
             const resultado = await fetchGoodsDistribution(cert, {
                 cnpj: empresa.cnpj,
+                ufCode,
                 ultNsu: cursor,
                 tpAmb: 1,
             });

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../services/api';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -499,7 +500,17 @@ export function Proprietarios() {
                         >
                             <div className="mb-4">
                                 <h2 className="text-xl font-bold">
-                                    🚚 {item.caminhao?.placa}
+                                    🚚{' '}
+                                    {item.caminhao?.placa ? (
+                                        <Link
+                                            to={`/caminhoes/${encodeURIComponent(item.caminhao.placa)}`}
+                                            className="text-blue-600 dark:text-blue-400 hover:underline"
+                                        >
+                                            {item.caminhao.placa}
+                                        </Link>
+                                    ) : (
+                                        item.caminhao?.placa
+                                    )}
                                 </h2>
 
                                 <p className="text-sm text-gray-500">

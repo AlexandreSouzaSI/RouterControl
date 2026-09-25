@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Trash2 } from 'lucide-react';
 import { UploadBox } from '../components/UploadBox';
@@ -430,7 +431,18 @@ export function Viagens() {
                                 key={`${item.placa}-${item.mes}-${index}`}
                                 className="border-b border-gray-100 dark:border-gray-800"
                             >
-                                <td>{item.placa}</td>
+                                <td>
+                                    {item.placa ? (
+                                        <Link
+                                            to={`/caminhoes/${encodeURIComponent(item.placa)}`}
+                                            className="text-blue-600 dark:text-blue-400 hover:underline"
+                                        >
+                                            {item.placa}
+                                        </Link>
+                                    ) : (
+                                        item.placa
+                                    )}
+                                </td>
                                 <td>{item.mes}</td>
                                 <td>
                                     {item.totalViagens ??
@@ -489,7 +501,17 @@ export function Viagens() {
                                 className="flex justify-between py-2 border-b border-gray-200 dark:border-gray-800"
                             >
                                 <span>
-                                    {index + 1}º - {item.placa}
+                                    {index + 1}º -{' '}
+                                    {item.placa ? (
+                                        <Link
+                                            to={`/caminhoes/${encodeURIComponent(item.placa)}`}
+                                            className="text-blue-600 dark:text-blue-400 hover:underline"
+                                        >
+                                            {item.placa}
+                                        </Link>
+                                    ) : (
+                                        item.placa
+                                    )}
                                 </span>
 
                                 <span className="font-bold">

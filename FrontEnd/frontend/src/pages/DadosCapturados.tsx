@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
     Database,
     Truck,
@@ -329,7 +330,16 @@ export function DadosCapturados() {
                                     >
                                         <td className="py-2 px-2">{v.veiID}</td>
                                         <td className="py-2 px-2 font-semibold text-gray-900 dark:text-white">
-                                            {v.placa ?? '-'}
+                                            {v.placa ? (
+                                                <Link
+                                                    to={`/caminhoes/${encodeURIComponent(v.placa)}`}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    {v.placa}
+                                                </Link>
+                                            ) : (
+                                                '-'
+                                            )}
                                         </td>
                                         <td className="py-2 px-2">
                                             {v.equipamento != null
@@ -432,7 +442,16 @@ export function DadosCapturados() {
                                     >
                                         <td className="py-2 px-2">{p.mId}</td>
                                         <td className="py-2 px-2 font-semibold text-gray-900 dark:text-white">
-                                            {p.placa ?? '-'}
+                                            {p.placa ? (
+                                                <Link
+                                                    to={`/caminhoes/${encodeURIComponent(p.placa)}`}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    {p.placa}
+                                                </Link>
+                                            ) : (
+                                                '-'
+                                            )}
                                         </td>
                                         <td className="py-2 px-2 whitespace-nowrap">{p.dataHora}</td>
                                         <td className="py-2 px-2 whitespace-nowrap">
@@ -503,7 +522,16 @@ export function DadosCapturados() {
                                         className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300"
                                     >
                                         <td className="py-2 px-2 font-semibold text-gray-900 dark:text-white">
-                                            {v.placa ?? '-'}
+                                            {v.placa ? (
+                                                <Link
+                                                    to={`/caminhoes/${encodeURIComponent(v.placa)}`}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    {v.placa}
+                                                </Link>
+                                            ) : (
+                                                '-'
+                                            )}
                                         </td>
                                         <td className="py-2 px-2">
                                             {v.origemMunicipio}/{v.origemUf ?? '-'}
@@ -591,7 +619,12 @@ export function DadosCapturados() {
                                             className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300"
                                         >
                                             <td className="py-2 px-2 font-semibold text-gray-900 dark:text-white">
-                                                {item.placa}
+                                                <Link
+                                                    to={`/caminhoes/${encodeURIComponent(item.placa)}`}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    {item.placa}
+                                                </Link>
                                             </td>
                                             <td className="py-2 px-2">{item.diasParados}</td>
                                         </tr>

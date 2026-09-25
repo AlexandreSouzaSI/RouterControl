@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
     Truck,
@@ -656,7 +657,16 @@ export function Dashboard() {
                                     <div className="flex items-center justify-between gap-2">
                                         <div className="flex items-center gap-2 min-w-0">
                                             <span className="font-medium text-gray-900 dark:text-white truncate">
-                                                {v.placa || v.veiId}
+                                                {v.placa ? (
+                                                    <Link
+                                                        to={`/caminhoes/${encodeURIComponent(v.placa)}`}
+                                                        className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                    >
+                                                        {v.placa}
+                                                    </Link>
+                                                ) : (
+                                                    v.veiId
+                                                )}
                                             </span>
 
                                             {v.terceiro && (
@@ -771,7 +781,12 @@ export function Dashboard() {
                                             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-100 dark:border-gray-800/60 bg-gray-50 dark:bg-gray-900/40"
                                         >
                                             <span className="font-semibold text-gray-900 dark:text-white">
-                                                {item.placa}
+                                                <Link
+                                                    to={`/caminhoes/${encodeURIComponent(item.placa)}`}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    {item.placa}
+                                                </Link>
                                             </span>
                                             <span className="text-sm text-gray-500 dark:text-gray-400">
                                                 — {item.quantidade} viagem(ns) concluída(s)
@@ -795,7 +810,12 @@ export function Dashboard() {
                                             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-500/20 bg-purple-50 dark:bg-purple-500/5"
                                         >
                                             <span className="font-semibold text-gray-900 dark:text-white">
-                                                {item.placa}
+                                                <Link
+                                                    to={`/caminhoes/${encodeURIComponent(item.placa)}`}
+                                                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    {item.placa}
+                                                </Link>
                                             </span>
                                             <span className="text-sm text-gray-500 dark:text-gray-400">
                                                 — {item.quantidade} viagem(ns) concluída(s)

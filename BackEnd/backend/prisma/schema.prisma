@@ -176,6 +176,8 @@ model Empresa {
   categoriasFinanceiras          CategoriaFinanceira[]
   regrasClassificacaoFinanceira  RegraClassificacaoFinanceira[]
   configuracaoPagamentoMotorista ConfiguracaoPagamentoMotorista?
+
+  lancamentosCaminhao LancamentoCaminhao[]
 }
 
 // Perfil dentro da própria empresa (não confundir com isAdminMaster, que é
@@ -883,6 +885,12 @@ enum StatusContaPagar {
   PAGA
   VENCIDA
   CANCELADA
+
+  // Já recebeu alguma baixa (PagamentoContaPagar) mas a soma ainda não
+  // cobre o valor total — ex: dívida de 5000, pagou 3000, faltam 2000.
+  // Calculado/gravado junto com cada baixa (ver registrarPagamento no
+  // service); vira PAGA sozinho quando a soma das baixas alcança o valor.
+  PARCIAL
 }
 
 enum FormaPagamentoContaPagar {
@@ -949,12 +957,67 @@ model ContaPagar {
   nfEntradas NfEntrada[] @relation("NfEntradaContaPagar")
   nfServicos NfServico[] @relation("NfServicoContaPagar")
 
+  pagamentos PagamentoContaPagar[]
+
   @@index([empresaId])
   @@index([fornecedorId])
   @@index([categoriaId])
   @@index([caminhaoId])
   @@index([status])
   @@index([vencimento])
+}
+
+// Baixa (total ou parcial) de uma ContaPagar. Uma dívida de 5000 pode
+// receber duas baixas de 3000 e 2000 em dias diferentes — a ContaPagar
+// continua sendo UM registro só (mesmo vencimento/fornecedor/histórico),
+// só o status/pagoEm são recalculados a partir da soma das baixas (ver
+// recalcularStatusContaPagar no service). Isso evita duplicar a dívida em
+// duas contas separadas, o que quebraria relatórios por fornecedor/mês.
+model PagamentoContaPagar {
+  id String @id @default(uuid())
+
+  contaPagarId String
+  contaPagar   ContaPagar @relation(fields: [contaPagarId], references: [id], onDelete: Cascade)
+
+  valor          Float
+  data           DateTime
+  formaPagamento FormaPagamentoContaPagar?
+  observacao     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([contaPagarId])
+}
+
+enum TipoLancamentoCaminhao {
+  RECEITA
+  DESPESA
+}
+
+// Lançamento manual de receita/despesa por caminhão, pra tela de Caminhões
+// (comparativo receita x despesa). Guardado pela PLACA (texto), não por
+// caminhaoId — caminhões de terceiros não têm cadastro em Caminhao (só
+// existem como texto livre em ViagemGps.placa quando terceiro=true), então
+// amarrar pela placa deixa o lançamento funcionar pra frota própria e pra
+// terceiros sem exigir cadastro prévio do caminhão.
+model LancamentoCaminhao {
+  id String @id @default(uuid())
+
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  placa String
+
+  tipo      TipoLancamentoCaminhao
+  descricao String
+  valor     Decimal  @db.Decimal(10, 2)
+  data      DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([empresaId, placa])
+  @@index([tipo])
 }
 
 // Certificado digital (e-CNPJ) da empresa, usado pra autenticar via mTLS

@@ -25,6 +25,48 @@ export class CaminhaoController {
         return this.service.findAll(empresaId);
     }
 
+    // Rotas estáticas ('detalhe', 'lancamentos') precisam vir ANTES de
+    // ':id' — senão o Nest casa 'detalhe'/'lancamentos' como se fossem o
+    // parâmetro :id.
+    @Get('detalhe/:placa')
+    getDetalhePorPlaca(
+        @Param('placa') placa: string,
+        @EmpresaAtual() empresaId: string,
+    ) {
+        return this.service.getDetalhePorPlaca(placa, empresaId);
+    }
+
+    @Get('lancamentos/:placa')
+    listarLancamentos(
+        @Param('placa') placa: string,
+        @EmpresaAtual() empresaId: string,
+    ) {
+        return this.service.listarLancamentos(placa, empresaId);
+    }
+
+    @Post('lancamentos')
+    criarLancamento(
+        @Body()
+        body: {
+            placa: string;
+            tipo: 'RECEITA' | 'DESPESA';
+            descricao: string;
+            valor: number;
+            data?: string;
+        },
+        @EmpresaAtual() empresaId: string,
+    ) {
+        return this.service.criarLancamento(body, empresaId);
+    }
+
+    @Delete('lancamentos/:lancamentoId')
+    excluirLancamento(
+        @Param('lancamentoId') lancamentoId: string,
+        @EmpresaAtual() empresaId: string,
+    ) {
+        return this.service.excluirLancamento(lancamentoId, empresaId);
+    }
+
     @Get(':id/timeline')
     getTimeline(@Param('id') id: string, @EmpresaAtual() empresaId: string) {
         return this.service.getTimeline(id, empresaId);

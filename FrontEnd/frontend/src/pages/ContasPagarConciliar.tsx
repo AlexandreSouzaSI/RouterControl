@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Ban, CheckCircle2, FileUp, Landmark, Loader2 } from 'lucide-react';
 import { api } from '../services/api';
@@ -30,9 +30,11 @@ type ContaPagar = {
     descricao: string;
     valor: number;
     vencimento: string;
-    status: 'ABERTA' | 'PAGA' | 'VENCIDA' | 'CANCELADA';
+    status: 'ABERTA' | 'PAGA' | 'VENCIDA' | 'CANCELADA' | 'PARCIAL';
     fornecedor: Fornecedor | null;
     categoria: Categoria | null;
+    valorPago?: number;
+    saldoDevedor?: number;
 };
 
 type OfxTransaction = {
@@ -58,11 +60,17 @@ export function ContasPagarConciliar() {
     const [statusLinha, setStatusLinha] = useState<Record<string, RowStatus>>({});
     const [fitIdProcessando, setFitIdProcessando] = useState<string | null>(null);
     const [erro, setErro] = useState<string | null>(null);
+    // Guarda o saldo que ainda restou depois de cada baixa confirmada, pra
+    // avisar quando a conta ficou parcial (não some da lista, mas o valor
+    // aplicado não cobriu tudo).
+    const [saldoRestante, setSaldoRestante] = useState<Record<string, number>>({});
 
     async function carregarContasAbertas() {
         setCarregandoContas(true);
         try {
-            const res = await api.get('/financeiro-nf/contas-pagar', { params: { status: 'ABERTA' } });
+            // ABERTA + PARCIAL juntas — uma conta parcialmente paga ainda
+            // pode receber outra baixa de uma próxima transação do extrato.
+            const res = await api.get('/financeiro-nf/contas-pagar/pendentes');
             setContasAbertas(res.data ?? []);
         } catch {
             setErro('Erro ao carregar contas em aberto.');
@@ -75,21 +83,9 @@ export function ContasPagarConciliar() {
         carregarContasAbertas();
     }, []);
 
-    // Contas já usadas em alguma linha confirmada não devem aparecer como
-    // opção pras outras transações.
-    const idsUsados = useMemo(() => {
-        return new Set(
-            Object.entries(statusLinha)
-                .filter(([, status]) => status === 'CONFIRMED')
-                .map(([fitId]) => contaSelecionada[fitId])
-                .filter(Boolean),
-        );
-    }, [statusLinha, contaSelecionada]);
-
-    const contasDisponiveis = useMemo(
-        () => contasAbertas.filter((conta) => !idsUsados.has(conta.id)),
-        [contasAbertas, idsUsados],
-    );
+    // contasAbertas já é atualizada (saldo reduzido, ou removida se quitou)
+    // a cada confirmação — não precisa filtrar de novo aqui.
+    const contasDisponiveis = contasAbertas;
 
     async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
         const file = event.target.files?.[0];
@@ -120,8 +116,11 @@ export function ContasPagarConciliar() {
             const selecaoInicial: Record<string, string> = {};
 
             for (const transacao of debitos) {
+                // Compara com o saldo devedor (não o valor total) — assim
+                // uma conta já com baixa parcial também pode ser sugerida
+                // pro valor que falta.
                 const candidatas = contasAbertas.filter(
-                    (conta) => Math.abs(conta.valor - Math.abs(transacao.amount)) < 0.01,
+                    (conta) => Math.abs((conta.saldoDevedor ?? conta.valor) - Math.abs(transacao.amount)) < 0.01,
                 );
 
                 if (candidatas.length === 1) {
@@ -153,9 +152,31 @@ export function ContasPagarConciliar() {
         try {
             setFitIdProcessando(transacao.fitId);
 
-            await api.patch(`/financeiro-nf/contas-pagar/${contaId}/pagar`, {
-                pagoEm: transacao.postedAt,
+            const valorPago = Math.abs(transacao.amount);
+
+            // Registra uma baixa do valor da transação — se for menor que
+            // o saldo devedor, a conta vira/continua PARCIAL e segue
+            // disponível pra uma próxima transação cobrir o resto.
+            const res = await api.post(`/financeiro-nf/contas-pagar/${contaId}/pagamentos`, {
+                valor: valorPago,
+                data: transacao.postedAt,
             });
+
+            const contaAtualizada = res.data;
+            const restante = Math.max(0, (contaAtualizada?.valor ?? 0) - (
+                (contaAtualizada?.pagamentos ?? []).reduce((soma: number, p: any) => soma + p.valor, 0)
+            ));
+
+            setContasAbertas((atual) => {
+                if (restante <= 0.01) {
+                    return atual.filter((c) => c.id !== contaId);
+                }
+                return atual.map((c) => (c.id === contaId ? { ...c, saldoDevedor: restante } : c));
+            });
+
+            if (restante > 0.01) {
+                setSaldoRestante((atual) => ({ ...atual, [transacao.fitId]: restante }));
+            }
 
             setStatusLinha((atual) => ({ ...atual, [transacao.fitId]: 'CONFIRMED' }));
         } catch (e: any) {
@@ -268,10 +289,17 @@ export function ContasPagarConciliar() {
                                         </div>
 
                                         {status === 'CONFIRMED' ? (
-                                            <span className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-100 dark:bg-green-500/10 text-sm font-medium text-green-700 dark:text-green-400">
-                                                <CheckCircle2 size={16} />
-                                                Conciliada
-                                            </span>
+                                            <div className="flex flex-col items-start gap-1 sm:items-end">
+                                                <span className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-100 dark:bg-green-500/10 text-sm font-medium text-green-700 dark:text-green-400">
+                                                    <CheckCircle2 size={16} />
+                                                    Conciliada
+                                                </span>
+                                                {saldoRestante[transacao.fitId] > 0.01 && (
+                                                    <span className="text-xs text-amber-600 dark:text-amber-400">
+                                                        Baixa parcial — ainda falta {formatCurrency(saldoRestante[transacao.fitId])} dessa conta.
+                                                    </span>
+                                                )}
+                                            </div>
                                         ) : status === 'IGNORED' ? (
                                             <span className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-sm text-gray-500 dark:text-gray-400">
                                                 <Ban size={16} />
@@ -294,7 +322,10 @@ export function ContasPagarConciliar() {
                                                         <option key={conta.id} value={conta.id}>
                                                             {conta.descricao}
                                                             {conta.fornecedor ? ` • ${conta.fornecedor.nome}` : ''} •{' '}
-                                                            {formatCurrency(conta.valor)} • vence{' '}
+                                                            {conta.status === 'PARCIAL'
+                                                                ? `falta ${formatCurrency(conta.saldoDevedor)} de ${formatCurrency(conta.valor)}`
+                                                                : formatCurrency(conta.valor)}
+                                                            {' '}• vence{' '}
                                                             {formatDate(conta.vencimento.slice(0, 10))}
                                                         </option>
                                                     ))}

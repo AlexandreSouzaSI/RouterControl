@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../services/api';
 
 type ResultadoPagamento = {
@@ -232,7 +233,13 @@ export function Pagamentos() {
                             <div className="p-5 flex justify-between items-start border-b border-gray-200 dark:border-gray-800">
                                 <div>
                                     <h2 className="text-xl font-bold">
-                                        🚚 {item.placa}
+                                        🚚{' '}
+                                        <Link
+                                            to={`/caminhoes/${encodeURIComponent(item.placa)}`}
+                                            className="text-blue-600 dark:text-blue-400 hover:underline"
+                                        >
+                                            {item.placa}
+                                        </Link>
                                     </h2>
 
                                     <p className="text-sm text-gray-500">

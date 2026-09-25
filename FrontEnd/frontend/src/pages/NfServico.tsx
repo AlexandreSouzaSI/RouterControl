@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Info, Download, Loader2, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
+import { Pagination } from '../components/Pagination';
 
 // =============================================================================
 // NF de Serviço — página própria (grupo Financeiro no menu).
@@ -58,24 +60,50 @@ async function extrairMensagemErro(erro: any, padrao: string) {
 export function NfServico() {
     const [de, setDe] = useState('');
     const [ate, setAte] = useState('');
+    const [mes, setMes] = useState('');
     const [items, setItems] = useState<NfServicoItem[]>([]);
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(20);
     const [loading, setLoading] = useState(false);
     const [baixando, setBaixando] = useState(false);
     const [buscando, setBuscando] = useState(false);
     const [ultimoLog, setUltimoLog] = useState<SefazSyncLog | null>(null);
 
-    async function carregar() {
+    async function carregar(pageAlvo = page, pageSizeAlvo = pageSize) {
         setLoading(true);
         try {
             const res = await api.get('/financeiro-nf/nf-servico', {
-                params: { de: de || undefined, ate: ate || undefined },
+                params: {
+                    de: mes ? undefined : de || undefined,
+                    ate: mes ? undefined : ate || undefined,
+                    mes: mes || undefined,
+                    page: pageAlvo,
+                    pageSize: pageSizeAlvo,
+                },
             });
-            setItems(res.data ?? []);
+            setItems(res.data?.items ?? []);
+            setTotal(res.data?.total ?? 0);
+            setPage(res.data?.page ?? pageAlvo);
+            setPageSize(res.data?.pageSize ?? pageSizeAlvo);
         } catch {
             setItems([]);
+            setTotal(0);
         } finally {
             setLoading(false);
         }
+    }
+
+    function filtrar() {
+        carregar(1, pageSize);
+    }
+
+    function mudarPagina(novaPagina: number) {
+        carregar(novaPagina, pageSize);
+    }
+
+    function mudarPageSize(novoTamanho: number) {
+        carregar(1, novoTamanho);
     }
 
     async function carregarUltimoLog() {
@@ -104,7 +132,7 @@ export function NfServico() {
                     ? `${totalNovas} documento(s) novo(s) encontrado(s).`
                     : 'Busca concluída, nenhum documento novo.',
             );
-            await carregar();
+            await carregar(1, pageSize);
             await carregarUltimoLog();
         } catch (e) {
             toast.error(await extrairMensagemErro(e, 'Não foi possível buscar as NFs agora.'));
@@ -179,15 +207,46 @@ export function NfServico() {
 
             <div className="flex flex-wrap items-end gap-3">
                 <div>
+                    <label className={labelClasse}>Mês</label>
+                    <input
+                        type="month"
+                        value={mes}
+                        onChange={(e) => {
+                            setMes(e.target.value);
+                            if (e.target.value) {
+                                setDe('');
+                                setAte('');
+                            }
+                        }}
+                        className={campoClasse}
+                    />
+                </div>
+                <div>
                     <label className={labelClasse}>De</label>
-                    <input type="date" value={de} onChange={(e) => setDe(e.target.value)} className={campoClasse} />
+                    <input
+                        type="date"
+                        value={de}
+                        onChange={(e) => {
+                            setDe(e.target.value);
+                            if (e.target.value) setMes('');
+                        }}
+                        className={campoClasse}
+                    />
                 </div>
                 <div>
                     <label className={labelClasse}>Até</label>
-                    <input type="date" value={ate} onChange={(e) => setAte(e.target.value)} className={campoClasse} />
+                    <input
+                        type="date"
+                        value={ate}
+                        onChange={(e) => {
+                            setAte(e.target.value);
+                            if (e.target.value) setMes('');
+                        }}
+                        className={campoClasse}
+                    />
                 </div>
                 <button
-                    onClick={carregar}
+                    onClick={filtrar}
                     className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
                 >
                     Filtrar
@@ -218,6 +277,7 @@ export function NfServico() {
                                     <th className="py-2.5 px-4 font-medium">Nº NF</th>
                                     <th className="py-2.5 px-4 font-medium">Emissão</th>
                                     <th className="py-2.5 px-4 font-medium">Valor</th>
+                                    <th className="py-2.5 px-4 font-medium">Caminhão</th>
                                     <th className="py-2.5 px-4 font-medium">Status</th>
                                 </tr>
                             </thead>
@@ -234,6 +294,18 @@ export function NfServico() {
                                         </td>
                                         <td className="py-2.5 px-4 font-semibold text-gray-900 dark:text-white">{formatCurrency(item.valor)}</td>
                                         <td className="py-2.5 px-4">
+                                            {item.caminhao ? (
+                                                <Link
+                                                    to={`/caminhoes/${encodeURIComponent(item.caminhao.placa)}`}
+                                                    className="font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    🚚 {item.caminhao.placa}
+                                                </Link>
+                                            ) : (
+                                                '-'
+                                            )}
+                                        </td>
+                                        <td className="py-2.5 px-4">
                                             <span
                                                 className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${item.aceita
                                                     ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400'
@@ -247,6 +319,13 @@ export function NfServico() {
                                 ))}
                             </tbody>
                         </table>
+                        <Pagination
+                            page={page}
+                            pageSize={pageSize}
+                            total={total}
+                            onPageChange={mudarPagina}
+                            onPageSizeChange={mudarPageSize}
+                        />
                     </div>
                 )}
             </div>

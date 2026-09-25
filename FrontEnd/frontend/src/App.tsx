@@ -6,6 +6,7 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Viagens } from './pages/Viagens';
 import { Caminhoes } from './pages/Caminhoes';
+import { CaminhaoDetalhe } from './pages/CaminhaoDetalhe';
 import { Relatorios } from './pages/Relatorios';
 import { Pagamentos } from './pages/Pagamentos';
 import { Proprietarios } from './pages/Proprietarios';
@@ -39,6 +40,7 @@ export default function App() {
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/viagens" element={<Viagens />} />
                     <Route path="/caminhoes" element={<Caminhoes />} />
+                    <Route path="/caminhoes/:placa" element={<CaminhaoDetalhe />} />
                     <Route path="/relatorios" element={<Relatorios />} />
                     <Route path="/pagamentos" element={<Pagamentos />} />
                     <Route path="/proprietarios" element={<Proprietarios />} />
