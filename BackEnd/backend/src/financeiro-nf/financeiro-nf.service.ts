@@ -1261,8 +1261,10 @@ export class FinanceiroNfService {
         const { inicio: inicioMes, fim: fimMes } = this.mesParaIntervalo(mesRef);
 
         // ---- Entradas (NF de Entrada) do mês de referência ----
+        // ehCarga:false pra não contar NF de Transporte (essas ficam na
+        // página própria, não são compra de mercadoria da empresa).
         const entradasNoMes = await this.prisma.nfEntrada.findMany({
-            where: { empresaId, ignorado: false, dataEmissao: { gte: inicioMes, lt: fimMes } },
+            where: { empresaId, ignorado: false, ehCarga: false, dataEmissao: { gte: inicioMes, lt: fimMes } },
         });
 
         const entradas = {
@@ -1351,7 +1353,7 @@ export class FinanceiroNfService {
 
         const [entradasJanela, contasJanela] = await Promise.all([
             this.prisma.nfEntrada.findMany({
-                where: { empresaId, ignorado: false, dataEmissao: { gte: inicioJanela, lt: fimJanela } },
+                where: { empresaId, ignorado: false, ehCarga: false, dataEmissao: { gte: inicioJanela, lt: fimJanela } },
             }),
             this.prisma.contaPagar.findMany({
                 where: { empresaId, vencimento: { gte: inicioJanela, lt: fimJanela } },
