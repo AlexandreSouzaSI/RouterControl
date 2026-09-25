@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Info, Download, Eye, Loader2, RefreshCw, Search } from 'lucide-react';
+import { Info, Download, Eye, Loader2, RefreshCw, Search, Truck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { Pagination } from '../components/Pagination';
@@ -72,6 +72,7 @@ export function NfEntrada() {
     const [loading, setLoading] = useState(false);
     const [baixando, setBaixando] = useState(false);
     const [buscando, setBuscando] = useState(false);
+    const [reclassificando, setReclassificando] = useState(false);
     const [ultimoLog, setUltimoLog] = useState<SefazSyncLog | null>(null);
     const [visualizandoId, setVisualizandoId] = useState<string | null>(null);
 
@@ -147,6 +148,26 @@ export function NfEntrada() {
         }
     }
 
+    async function reclassificarCarga() {
+        setReclassificando(true);
+        try {
+            const res = await api.post('/financeiro-nf/nf-entrada/reclassificar-carga');
+            const { reclassificadas, viraramCarga, totalCandidatas } = res.data ?? {};
+            if (!totalCandidatas) {
+                toast.success('Nenhuma NF antiga pra reclassificar — já está tudo em dia.');
+            } else {
+                toast.success(
+                    `${viraramCarga ?? 0} NF movida(s) pra Transporte (${reclassificadas ?? 0} conferida(s) no total).`,
+                );
+            }
+            await carregar(1, pageSize);
+        } catch (e) {
+            toast.error(await extrairMensagemErro(e, 'Não foi possível reclassificar as NFs.'));
+        } finally {
+            setReclassificando(false);
+        }
+    }
+
     async function baixarZip() {
         setBaixando(true);
         try {
@@ -201,14 +222,25 @@ export function NfEntrada() {
                         </p>
                     )}
                 </div>
-                <button
-                    onClick={buscarAgora}
-                    disabled={buscando}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition shrink-0"
-                >
-                    {buscando ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                    Buscar agora
-                </button>
+                <div className="flex flex-col gap-2 shrink-0">
+                    <button
+                        onClick={buscarAgora}
+                        disabled={buscando}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
+                    >
+                        {buscando ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                        Buscar agora
+                    </button>
+                    <button
+                        onClick={reclassificarCarga}
+                        disabled={reclassificando}
+                        title="Reclassifica NFs antigas de Transporte que ficaram aqui em Entrada (relê o XML já salvo, sem gastar consulta na Sefaz)"
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-200 text-sm font-medium border border-gray-300 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-50 transition"
+                    >
+                        {reclassificando ? <Loader2 size={16} className="animate-spin" /> : <Truck size={16} />}
+                        Mover NF de Transporte
+                    </button>
+                </div>
             </div>
 
             <div className="flex flex-wrap items-end gap-3">

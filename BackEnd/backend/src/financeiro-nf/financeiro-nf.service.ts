@@ -1009,6 +1009,80 @@ export class FinanceiroNfService {
         return { source: 'xml' as const, resumo: null, nf: parsed };
     }
 
+    /**
+     * Backfill pra NF-e de entrada baixadas ANTES da classificação de
+     * "carga de terceiro" existir (numeroNf/destinatarioCnpj/ehCarga —
+     * ver comentário no schema.prisma). Reclassifica sem consultar a
+     * Sefaz de novo: relê o XML completo já salvo em disco
+     * (nf.arquivoUrl) e roda a mesma lógica usada no sync normal. Só
+     * mexe em registros com XML completo (tipoDocumento=procNFe) que
+     * nunca passaram pela classificação (destinatarioCnpj ainda nulo) —
+     * não reprocessa quem já foi classificado certo.
+     */
+    async reclassificarCargaNfEntrada(empresaId: string) {
+        const empresa = await this.prisma.empresa.findUnique({ where: { id: empresaId } });
+        if (!empresa) throw new NotFoundException('Empresa não encontrada.');
+
+        const empresaCnpjNormalizado = (empresa.cnpj || '').replace(/\D/g, '');
+
+        const candidatas = await this.prisma.nfEntrada.findMany({
+            where: {
+                empresaId,
+                tipoDocumento: { startsWith: 'procNFe' },
+                destinatarioCnpj: null,
+                arquivoUrl: { not: null },
+            },
+        });
+
+        let reclassificadas = 0;
+        let viraramCarga = 0;
+        let semArquivo = 0;
+        let comErro = 0;
+
+        for (const nf of candidatas) {
+            const filePath = join(process.cwd(), (nf.arquivoUrl as string).replace(/^\/+/, ''));
+
+            if (!existsSync(filePath)) {
+                semArquivo += 1;
+                continue;
+            }
+
+            try {
+                const parsedFull = parseFullNfeXml(readFileSync(filePath, 'utf-8')) as ParsedFullNfe;
+                const destCnpjNormalizado = (parsedFull.recipientCnpj || '').replace(/\D/g, '');
+
+                const ehCarga =
+                    parsedFull.recipientIsForeign ||
+                    (!!destCnpjNormalizado &&
+                        !!empresaCnpjNormalizado &&
+                        destCnpjNormalizado !== empresaCnpjNormalizado);
+
+                await this.prisma.nfEntrada.update({
+                    where: { id: nf.id },
+                    data: {
+                        numeroNf: parsedFull.numeroNf,
+                        destinatarioCnpj: parsedFull.recipientCnpj,
+                        destinatarioNome: parsedFull.recipientName,
+                        ehCarga,
+                    },
+                });
+
+                reclassificadas += 1;
+                if (ehCarga) viraramCarga += 1;
+            } catch {
+                comErro += 1;
+            }
+        }
+
+        return {
+            totalCandidatas: candidatas.length,
+            reclassificadas,
+            viraramCarga,
+            semArquivo,
+            comErro,
+        };
+    }
+
     async downloadNfEntradaDanfe(id: string, empresaId: string): Promise<Buffer> {
         const view = await this.viewNfEntrada(id, empresaId);
         return buildDanfePdf('NF-e de Entrada', view);

@@ -515,6 +515,14 @@ export class FinanceiroNfController {
         return this.service.buscarNfServicoManual(empresaId);
     }
 
+    // Backfill pra NF de Entrada baixadas antes da classificação de "NF
+    // de Transporte" existir — relê o XML já salvo em disco e reclassifica
+    // sem gastar consulta nova na Sefaz (não sofre o bloqueio de 1h).
+    @Post('nf-entrada/reclassificar-carga')
+    reclassificarCargaNfEntrada(@EmpresaAtual() empresaId: string) {
+        return this.service.reclassificarCargaNfEntrada(empresaId);
+    }
+
     // Histórico das últimas tentativas de busca (manuais e automáticas) —
     // mesmo painel que o Controle NF mostra na aba Lojas.
     @Get('sefaz-logs')
