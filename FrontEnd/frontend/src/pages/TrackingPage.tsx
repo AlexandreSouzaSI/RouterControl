@@ -14,6 +14,7 @@ import {
     Droplet,
     Percent,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { TruckMap } from '../components/TruckMap';
 import { api } from '../services/api';
 
@@ -201,6 +202,8 @@ export function TrackingPage() {
     // corrigidos, km/L, autonomia e abastecimentos detectados.
     const [telemetriaResumo, setTelemetriaResumo] = useState<TelemetriaResumoConsumo | null>(null);
     const [loadingTelemetriaResumo, setLoadingTelemetriaResumo] = useState(false);
+    const [capacidadeInput, setCapacidadeInput] = useState('');
+    const [salvandoCapacidade, setSalvandoCapacidade] = useState(false);
 
     async function carregarVeiculos() {
         try {
@@ -335,8 +338,44 @@ export function TrackingPage() {
         carregarHistorico();
         carregarConsumo();
         carregarTelemetriaResumo();
+        setCapacidadeInput('');
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [veiculoSelecionado]);
+
+    // Cadastra a capacidade do tanque direto daqui — evita mandar o
+    // usuário pra Cadastros → Caminhões só pra preencher um campo. Busca
+    // o id do Caminhao pela placa (não temos ele à mão nessa tela) e usa
+    // o mesmo PATCH /caminhoes/:id que a tela de Cadastros usa.
+    async function salvarCapacidadeTanque() {
+        if (!veiculoAtual?.placa) return;
+
+        const valor = Number(capacidadeInput.replace(',', '.'));
+        if (!capacidadeInput || Number.isNaN(valor) || valor <= 0) {
+            toast.error('Informe uma capacidade válida, em litros.');
+            return;
+        }
+
+        try {
+            setSalvandoCapacidade(true);
+            const detalhe = await api.get(`/caminhoes/detalhe/${encodeURIComponent(veiculoAtual.placa)}`);
+            const caminhaoId = detalhe.data?.id;
+
+            if (!caminhaoId) {
+                toast.error('Esse caminhão ainda não está cadastrado em Cadastros → Caminhões.');
+                return;
+            }
+
+            await api.patch(`/caminhoes/${caminhaoId}`, { capacidadeTanqueLitros: valor });
+            toast.success('Capacidade do tanque salva.');
+            setCapacidadeInput('');
+            await carregarTelemetriaResumo();
+        } catch (err) {
+            console.error(err);
+            toast.error('Não foi possível salvar a capacidade do tanque.');
+        } finally {
+            setSalvandoCapacidade(false);
+        }
+    }
 
     const localizacaoPorVeiculo = useMemo(() => {
         const map = new Map<number, CaminhaoLocalizacao>();
@@ -796,10 +835,30 @@ export function TrackingPage() {
                                     </p>
 
                                     {telemetriaResumo.capacidadeTanqueLitros == null && (
-                                        <p className="text-xs text-amber-700 dark:text-amber-400 mt-1.5">
-                                            Autonomia não calculada — cadastre a capacidade do tanque
-                                            (litros) desse caminhão em Cadastros → Caminhões.
-                                        </p>
+                                        <div className="mt-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20">
+                                            <p className="text-xs text-amber-700 dark:text-amber-400 mb-2">
+                                                Autonomia não calculada — falta a capacidade do tanque (litros) desse caminhão.
+                                            </p>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    inputMode="decimal"
+                                                    min={1}
+                                                    value={capacidadeInput}
+                                                    onChange={(e) => setCapacidadeInput(e.target.value)}
+                                                    placeholder="Ex.: 600"
+                                                    className="w-28 px-2 py-1.5 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-amber-300 dark:border-amber-500/30"
+                                                />
+                                                <span className="text-xs text-gray-500 dark:text-gray-400">litros</span>
+                                                <button
+                                                    onClick={salvarCapacidadeTanque}
+                                                    disabled={salvandoCapacidade}
+                                                    className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 disabled:opacity-50 transition"
+                                                >
+                                                    {salvandoCapacidade ? 'Salvando...' : 'Salvar'}
+                                                </button>
+                                            </div>
+                                        </div>
                                     )}
 
                                     {telemetriaResumo.abastecimentos.length > 0 && (
