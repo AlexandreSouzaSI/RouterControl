@@ -28,6 +28,7 @@ import {
     TipoChavePix,
     TipoContaPagar,
 } from '@prisma/client';
+import { sendWhatsappText } from '../common/whatsapp-sender';
 
 // Pausa entre consultas à Sefaz/ADN — as duas exigem espaçamento entre
 // chamadas pra não estourar o limite de consultas/hora por certificado
@@ -104,8 +105,11 @@ export class FinanceiroNfService {
                 id: true,
                 nome: true,
                 email: true,
+                tipoPessoa: true,
                 cnpj: true,
+                cpf: true,
                 telefone: true,
+                telefoneAvisoDiario: true,
                 uf: true,
                 logradouro: true,
                 numero: true,
@@ -127,7 +131,9 @@ export class FinanceiroNfService {
         body: Partial<{
             nome: string;
             cnpj: string;
+            cpf: string;
             telefone: string;
+            telefoneAvisoDiario: string;
             uf: string;
             logradouro: string;
             numero: string;
@@ -149,7 +155,9 @@ export class FinanceiroNfService {
 
         const camposTexto: (keyof typeof body)[] = [
             'cnpj',
+            'cpf',
             'telefone',
+            'telefoneAvisoDiario',
             'logradouro',
             'numero',
             'complemento',
@@ -181,8 +189,11 @@ export class FinanceiroNfService {
                 id: true,
                 nome: true,
                 email: true,
+                tipoPessoa: true,
                 cnpj: true,
+                cpf: true,
                 telefone: true,
+                telefoneAvisoDiario: true,
                 uf: true,
                 logradouro: true,
                 numero: true,
@@ -774,6 +785,284 @@ export class FinanceiroNfService {
         if (!existente) throw new NotFoundException('Conta a pagar não encontrada.');
         await this.prisma.contaPagar.delete({ where: { id } });
         return { ok: true };
+    }
+
+    // -----------------------------------------------------------------
+    // "Incluir hoje" — botão individual e em massa pras vencidas, mesmo
+    // padrão do Bill.queuedForPaymentAt no Controle NF: não muda o
+    // vencimento real (a conta continua Vencida), só marca pra também
+    // aparecer na lista/relatório de "Hoje" do Dashboard.
+    // -----------------------------------------------------------------
+
+    async toggleIncluirHoje(id: string, empresaId: string) {
+        const conta = await this.prisma.contaPagar.findFirst({
+            where: { id, empresaId },
+            select: { queuedForPaymentAt: true },
+        });
+        if (!conta) throw new NotFoundException('Conta a pagar não encontrada.');
+
+        return this.prisma.contaPagar.update({
+            where: { id },
+            data: {
+                queuedForPaymentAt: conta.queuedForPaymentAt ? null : new Date(),
+            },
+            include: { fornecedor: true, categoria: true, caminhao: true },
+        });
+    }
+
+    // Botão "Colocar atrasadas pra hoje" — marca de uma vez só toda conta
+    // vencida (ABERTA/PARCIAL com vencimento < hoje) que ainda não estava
+    // marcada.
+    async incluirTodasAtrasadasHoje(empresaId: string) {
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+
+        const resultado = await this.prisma.contaPagar.updateMany({
+            where: {
+                empresaId,
+                status: { in: ['ABERTA', 'PARCIAL'] },
+                vencimento: { lt: hoje },
+                queuedForPaymentAt: null,
+            },
+            data: { queuedForPaymentAt: new Date() },
+        });
+
+        return { marcadas: resultado.count };
+    }
+
+    // -----------------------------------------------------------------
+    // Conta a Pagar recorrente — "receita" (ContaPagarRecorrencia) que
+    // gera ocorrências concretas (linhas normais de ContaPagar) sempre 12
+    // meses à frente. Editar/excluir uma ocorrência já gerada não afeta a
+    // receita nem as demais.
+    // -----------------------------------------------------------------
+
+    private readonly MESES_GERACAO_RECORRENCIA = 12;
+
+    async criarContaPagarRecorrente(
+        empresaId: string,
+        body: {
+            descricao: string;
+            valor: number;
+            formaPagamento?: FormaPagamentoContaPagar;
+            tipoRecorrencia: 'MENSAL' | 'SEMANAL';
+            diaMes?: number;
+            diaSemana?: 'SEGUNDA' | 'TERCA' | 'QUARTA' | 'QUINTA' | 'SEXTA';
+            observacao?: string;
+        },
+    ) {
+        if (!body.descricao?.trim()) {
+            throw new BadRequestException('Informe a descrição da conta recorrente.');
+        }
+        if (!body.valor || body.valor <= 0) {
+            throw new BadRequestException('Informe um valor válido.');
+        }
+
+        if (body.tipoRecorrencia === 'MENSAL') {
+            if (!body.diaMes || body.diaMes < 1 || body.diaMes > 30) {
+                throw new BadRequestException('Escolha um dia do mês entre 1 e 30.');
+            }
+        } else if (body.tipoRecorrencia === 'SEMANAL') {
+            if (!body.diaSemana) {
+                throw new BadRequestException('Escolha o dia da semana (segunda a sexta).');
+            }
+        } else {
+            throw new BadRequestException('Tipo de recorrência inválido.');
+        }
+
+        const recorrencia = await this.prisma.contaPagarRecorrencia.create({
+            data: {
+                empresaId,
+                descricao: body.descricao.trim(),
+                valor: body.valor,
+                formaPagamento: body.formaPagamento,
+                tipoRecorrencia: body.tipoRecorrencia,
+                diaMes: body.tipoRecorrencia === 'MENSAL' ? body.diaMes : null,
+                diaSemana: body.tipoRecorrencia === 'SEMANAL' ? body.diaSemana : null,
+                observacao: body.observacao?.trim() || null,
+            },
+        });
+
+        // Já gera as ocorrências na hora, sem esperar o cron da meia-noite
+        // — senão a conta recorrente cadastrada agora só apareceria na
+        // grade no dia seguinte.
+        await this.gerarOcorrenciasRecorrencia(recorrencia.id);
+
+        return this.prisma.contaPagarRecorrencia.findUnique({ where: { id: recorrencia.id } });
+    }
+
+    async listarContasPagarRecorrentes(empresaId: string) {
+        return this.prisma.contaPagarRecorrencia.findMany({
+            where: { empresaId, ativa: true },
+            orderBy: { descricao: 'asc' },
+        });
+    }
+
+    // "Excluir" uma recorrência só desativa a receita (não gera mais
+    // ocorrências novas) — as ocorrências já geradas continuam existindo
+    // como ContaPagar normais, o usuário exclui cada uma à parte se quiser.
+    async desativarContaPagarRecorrente(id: string, empresaId: string) {
+        const existente = await this.prisma.contaPagarRecorrencia.findFirst({ where: { id, empresaId } });
+        if (!existente) throw new NotFoundException('Conta recorrente não encontrada.');
+        await this.prisma.contaPagarRecorrencia.update({ where: { id }, data: { ativa: false } });
+        return { ok: true };
+    }
+
+    // Último dia válido de um mês — usado quando diaMes (1-30) cai num mês
+    // mais curto (fevereiro, por exemplo, nunca tem dia 30 nem 31).
+    private ultimoDiaDoMes(ano: number, mesIndex: number): number {
+        return new Date(ano, mesIndex + 1, 0).getDate();
+    }
+
+    private readonly DIA_SEMANA_PARA_INDICE: Record<string, number> = {
+        SEGUNDA: 1,
+        TERCA: 2,
+        QUARTA: 3,
+        QUINTA: 4,
+        SEXTA: 5,
+    };
+
+    // Gera as ocorrências concretas (ContaPagar) de uma recorrência, desde
+    // o que já foi gerado (geradoAte) até MESES_GERACAO_RECORRENCIA meses
+    // a partir de hoje — idempotente: o @@unique([recorrenciaId,
+    // vencimento]) garante que rodar duas vezes não duplica nada.
+    private async gerarOcorrenciasRecorrencia(recorrenciaId: string) {
+        const recorrencia = await this.prisma.contaPagarRecorrencia.findUnique({ where: { id: recorrenciaId } });
+        if (!recorrencia || !recorrencia.ativa) return { geradas: 0 };
+
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+
+        const limite = new Date(hoje);
+        limite.setMonth(limite.getMonth() + this.MESES_GERACAO_RECORRENCIA);
+
+        const vencimentos: Date[] = [];
+
+        if (recorrencia.tipoRecorrencia === 'MENSAL' && recorrencia.diaMes) {
+            let cursor = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+            while (cursor <= limite) {
+                const dia = Math.min(recorrencia.diaMes, this.ultimoDiaDoMes(cursor.getFullYear(), cursor.getMonth()));
+                const vencimento = new Date(cursor.getFullYear(), cursor.getMonth(), dia, 12, 0, 0);
+                if (vencimento >= hoje) vencimentos.push(vencimento);
+                cursor.setMonth(cursor.getMonth() + 1);
+            }
+        } else if (recorrencia.tipoRecorrencia === 'SEMANAL' && recorrencia.diaSemana) {
+            const indiceAlvo = this.DIA_SEMANA_PARA_INDICE[recorrencia.diaSemana];
+            const cursor = new Date(hoje);
+            while (cursor <= limite) {
+                if (cursor.getDay() === indiceAlvo) {
+                    vencimentos.push(new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), 12, 0, 0));
+                }
+                cursor.setDate(cursor.getDate() + 1);
+            }
+        }
+
+        let geradas = 0;
+        for (const vencimento of vencimentos) {
+            try {
+                await this.prisma.contaPagar.create({
+                    data: {
+                        empresaId: recorrencia.empresaId,
+                        descricao: recorrencia.descricao,
+                        valor: recorrencia.valor,
+                        formaPagamento: recorrencia.formaPagamento,
+                        vencimento,
+                        observacao: recorrencia.observacao,
+                        recorrenciaId: recorrencia.id,
+                    },
+                });
+                geradas++;
+            } catch {
+                // Já existe ocorrência pra essa data (unique constraint) —
+                // esperado quando o cron roda de novo sem nada novo pra
+                // gerar, não é erro real.
+            }
+        }
+
+        await this.prisma.contaPagarRecorrencia.update({
+            where: { id: recorrencia.id },
+            data: { geradoAte: limite },
+        });
+
+        return { geradas };
+    }
+
+    // Cron diário (madrugada) — garante que toda recorrência ativa sempre
+    // tem ~12 meses de ocorrências futuras geradas, sem depender do
+    // usuário abrir a tela.
+    @Cron(CronExpression.EVERY_DAY_AT_1AM)
+    async estenderOcorrenciasRecorrentes() {
+        const recorrencias = await this.prisma.contaPagarRecorrencia.findMany({
+            where: { ativa: true },
+        });
+
+        for (const recorrencia of recorrencias) {
+            try {
+                await this.gerarOcorrenciasRecorrencia(recorrencia.id);
+            } catch (error) {
+                // Uma recorrência com erro não deve travar as outras.
+                console.error(`Erro ao estender recorrência ${recorrencia.id}:`, error);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Aviso diário por WhatsApp — contas que vencem hoje, por empresa.
+    // -----------------------------------------------------------------
+
+    private formatarMoeda(valor: number): string {
+        return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    // Roda todo dia às 9h (horário de Brasília) — mesmo horário usado pro
+    // WhatsApp automático do Controle NF (não mandar fora do expediente).
+    // Servidor em UTC: 9h BRT = 12h UTC.
+    @Cron('0 12 * * *')
+    async enviarAvisoDiarioContasPagar() {
+        const empresas = await this.prisma.empresa.findMany({
+            where: {
+                ativo: true,
+                modulosHabilitados: { has: 'FINANCEIRO_NF' },
+                telefoneAvisoDiario: { not: null },
+            },
+        });
+
+        for (const empresa of empresas) {
+            try {
+                await this.enviarAvisoDiarioParaEmpresa(empresa.id, empresa.nome, empresa.telefoneAvisoDiario!);
+            } catch (error) {
+                console.error(`Erro ao enviar aviso diário pra empresa ${empresa.id}:`, error);
+            }
+        }
+    }
+
+    private async enviarAvisoDiarioParaEmpresa(empresaId: string, nomeEmpresa: string, telefone: string) {
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        const fimHoje = new Date(hoje);
+        fimHoje.setHours(23, 59, 59, 999);
+
+        const contasHoje = await this.prisma.contaPagar.findMany({
+            where: {
+                empresaId,
+                status: { in: ['ABERTA', 'PARCIAL'] },
+                vencimento: { gte: hoje, lte: fimHoje },
+            },
+            orderBy: { valor: 'desc' },
+        });
+
+        if (contasHoje.length === 0) return;
+
+        const total = contasHoje.reduce((soma, c) => soma + c.valor, 0);
+        const linhas = contasHoje
+            .map((c) => `• ${c.descricao} — ${this.formatarMoeda(c.valor)}`)
+            .join('\n');
+
+        const texto =
+            `*Contas a pagar hoje — ${nomeEmpresa}*\n\n${linhas}\n\n` +
+            `Total: ${this.formatarMoeda(total)} (${contasHoje.length} conta${contasHoje.length > 1 ? 's' : ''})`;
+
+        await sendWhatsappText(telefone, texto);
     }
 
     // Lê o extrato OFX só pra devolver as movimentações — não salva o

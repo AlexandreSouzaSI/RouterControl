@@ -26,6 +26,7 @@ import {
     ClipboardList,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 // =============================================================================
 // Dashboard Financeiro — visão executiva do módulo Financeiro/NF: KPIs de
@@ -166,6 +167,8 @@ function PeriodoCard({
 }
 
 export function DashboardFinanceiro() {
+    const { usuario } = useAuth();
+    const ehFisica = usuario?.empresaTipoPessoa === 'FISICA';
     const [mes, setMes] = useState(mesAtual());
     const [dados, setDados] = useState<DashboardData | null>(null);
     const [loading, setLoading] = useState(false);
@@ -200,7 +203,9 @@ export function DashboardFinanceiro() {
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard Financeiro</h1>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Visão geral de entradas, serviços, receitas e contas a pagar.
+                        {ehFisica
+                            ? 'Visão geral das suas contas a pagar.'
+                            : 'Visão geral de entradas, serviços, receitas e contas a pagar.'}
                     </p>
                 </div>
 
@@ -221,7 +226,7 @@ export function DashboardFinanceiro() {
                 <p className="text-sm text-gray-400 py-12 text-center">Não foi possível carregar o dashboard.</p>
             ) : (
                 <>
-                    {(dados.entradas.quantidade === 0 && dados.servicos.quantidade === 0 && dados.servicosPagos.quantidade === 0) && (
+                    {!ehFisica && (dados.entradas.quantidade === 0 && dados.servicos.quantidade === 0 && dados.servicosPagos.quantidade === 0) && (
                         <div className="flex items-start gap-3 p-4 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
                             <Info size={16} className="text-amber-500 shrink-0 mt-0.5" />
                             <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -232,38 +237,53 @@ export function DashboardFinanceiro() {
                         </div>
                     )}
 
-                    {/* KPIs principais */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-                        <KpiCard
-                            titulo="Entradas (NF)"
-                            valor={formatCurrency(dados.entradas.total)}
-                            subtitulo={`${dados.entradas.quantidade} NF · ${dados.entradas.aceitas} aceitas`}
-                            icone={FileText}
-                            cor="#3b82f6"
-                        />
-                        <KpiCard
-                            titulo="NF de Serviço"
-                            valor={formatCurrency(dados.servicos.total)}
-                            subtitulo={`${dados.servicos.quantidade} NF · ${dados.servicos.aceitas} aceitas`}
-                            icone={ClipboardList}
-                            cor="#0ea5e9"
-                        />
-                        <KpiCard
-                            titulo="Serviços Pagos"
-                            valor={formatCurrency(dados.servicosPagos.total)}
-                            subtitulo={`${dados.servicosPagos.quantidade} pagamento${dados.servicosPagos.quantidade === 1 ? '' : 's'}`}
-                            icone={HandCoins}
-                            cor="#22c55e"
-                        />
-                        <KpiCard titulo="Receitas" valor="" icone={TrendingUp} cor="#a855f7" indisponivel />
-                        <KpiCard
-                            titulo="Contas a Pagar (aberto)"
-                            valor={formatCurrency(dados.contasPagar.totalAberto.total)}
-                            subtitulo={`${dados.contasPagar.totalAberto.quantidade} conta${dados.contasPagar.totalAberto.quantidade === 1 ? '' : 's'} em aberto`}
-                            icone={Wallet}
-                            cor="#f59e0b"
-                        />
-                    </div>
+                    {/* KPIs principais — Pessoa Física só usa Contas a Pagar, o resto
+                        (Entradas/Serviços/Receitas) não se aplica a esse tipo de empresa. */}
+                    {!ehFisica && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+                            <KpiCard
+                                titulo="Entradas (NF)"
+                                valor={formatCurrency(dados.entradas.total)}
+                                subtitulo={`${dados.entradas.quantidade} NF · ${dados.entradas.aceitas} aceitas`}
+                                icone={FileText}
+                                cor="#3b82f6"
+                            />
+                            <KpiCard
+                                titulo="NF de Serviço"
+                                valor={formatCurrency(dados.servicos.total)}
+                                subtitulo={`${dados.servicos.quantidade} NF · ${dados.servicos.aceitas} aceitas`}
+                                icone={ClipboardList}
+                                cor="#0ea5e9"
+                            />
+                            <KpiCard
+                                titulo="Serviços Pagos"
+                                valor={formatCurrency(dados.servicosPagos.total)}
+                                subtitulo={`${dados.servicosPagos.quantidade} pagamento${dados.servicosPagos.quantidade === 1 ? '' : 's'}`}
+                                icone={HandCoins}
+                                cor="#22c55e"
+                            />
+                            <KpiCard titulo="Receitas" valor="" icone={TrendingUp} cor="#a855f7" indisponivel />
+                            <KpiCard
+                                titulo="Contas a Pagar (aberto)"
+                                valor={formatCurrency(dados.contasPagar.totalAberto.total)}
+                                subtitulo={`${dados.contasPagar.totalAberto.quantidade} conta${dados.contasPagar.totalAberto.quantidade === 1 ? '' : 's'} em aberto`}
+                                icone={Wallet}
+                                cor="#f59e0b"
+                            />
+                        </div>
+                    )}
+
+                    {ehFisica && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <KpiCard
+                                titulo="Contas a Pagar (aberto)"
+                                valor={formatCurrency(dados.contasPagar.totalAberto.total)}
+                                subtitulo={`${dados.contasPagar.totalAberto.quantidade} conta${dados.contasPagar.totalAberto.quantidade === 1 ? '' : 's'} em aberto`}
+                                icone={Wallet}
+                                cor="#f59e0b"
+                            />
+                        </div>
+                    )}
 
                     {/* Contas a Pagar por período */}
                     <div>
@@ -276,10 +296,13 @@ export function DashboardFinanceiro() {
                         </div>
                     </div>
 
-                    {/* Gráfico de tendência mensal */}
+                    {/* Gráfico de tendência mensal — pouco útil pra Física, que não
+                        tem Entradas (NF); fica só com as Contas Pagas/Abertas. */}
                     <div className="p-5 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
                         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">
-                            Entradas x Contas Pagas x Contas em aberto — últimos 6 meses
+                            {ehFisica
+                                ? 'Contas Pagas x Contas em aberto — últimos 6 meses'
+                                : 'Entradas x Contas Pagas x Contas em aberto — últimos 6 meses'}
                         </h2>
 
                         <div className="w-full h-[300px]">
@@ -308,7 +331,7 @@ export function DashboardFinanceiro() {
                                         formatter={(value: any) => formatCurrency(Number(value))}
                                     />
                                     <Legend wrapperStyle={{ fontSize: 12, color: corEixo }} iconType="circle" iconSize={8} />
-                                    <Bar dataKey="entradas" name="Entradas" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                                    {!ehFisica && <Bar dataKey="entradas" name="Entradas" fill="#3b82f6" radius={[6, 6, 0, 0]} />}
                                     <Bar dataKey="contasPagas" name="Contas Pagas" fill="#22c55e" radius={[6, 6, 0, 0]} />
                                     <Bar dataKey="contasAbertas" name="Contas em aberto" fill="#f59e0b" radius={[6, 6, 0, 0]} />
                                 </BarChart>
@@ -316,8 +339,9 @@ export function DashboardFinanceiro() {
                         </div>
                     </div>
 
-                    {/* Status + Categoria */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Status + Categoria — Física não categoriza as contas, então
+                        o gráfico de categorias não se aplica a ela. */}
+                    <div className={`grid grid-cols-1 gap-6 ${ehFisica ? '' : 'lg:grid-cols-2'}`}>
                         <div className="p-5 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
                             <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">
                                 Status das contas — {dados.mesReferencia}
@@ -361,6 +385,7 @@ export function DashboardFinanceiro() {
                             )}
                         </div>
 
+                        {!ehFisica && (
                         <div className="p-5 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
                             <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">
                                 Top categorias de gasto (contas em aberto)
@@ -415,6 +440,7 @@ export function DashboardFinanceiro() {
                                 </div>
                             )}
                         </div>
+                        )}
                     </div>
                 </>
             )}

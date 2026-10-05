@@ -109,20 +109,44 @@ enum EmpresaModulo {
   FINANCEIRO_NF
 }
 
+// Pessoa Jurídica (empresa de verdade, com CNPJ, pode usar Rastreador/
+// Fiscal/Financeiro completo) ou Pessoa Física (alguém controlando as
+// próprias contas pessoais — só o módulo Financeiro/NF, versão
+// simplificada: sem Fornecedor/Categoria/NF, só Conta a Pagar + Dashboard).
+enum TipoPessoaEmpresa {
+  JURIDICA
+  FISICA
+}
+
 model Empresa {
   id        String   @id @default(uuid())
   nome      String
   email     String   @unique
   createdAt DateTime @default(now())
 
+  // Pessoa Jurídica (padrão, como sempre foi) ou Pessoa Física — decidido
+  // na criação (Quadro do Administrador). Física vem sempre com
+  // modulosHabilitados=[FINANCEIRO_NF] e usa cpf em vez de cnpj.
+  tipoPessoa TipoPessoaEmpresa @default(JURIDICA)
+
   // CNPJ da empresa — usado pra identificar o destinatário nas consultas
   // de distribuição da Sefaz/ADN (NF-e de compra e NFS-e de serviço) e
   // pra futuras validações no módulo Financeiro/NF.
   cnpj String?
 
+  // CPF — só preenchido quando tipoPessoa=FISICA. Não precisa das
+  // consultas Sefaz/ADN (pessoa física não emite/recebe NF-e própria),
+  // é só identificação.
+  cpf String?
+
   // Telefone de contato da empresa — não existia antes; útil pra suporte e
   // pra eventuais avisos, sem relação com o CNPJ/dados fiscais abaixo.
   telefone String?
+
+  // Telefone que recebe o aviso diário (WhatsApp) com as contas a pagar
+  // que vencem hoje — separado do telefone de contato acima porque pode
+  // ser uma pessoa diferente (ex: quem realmente paga as contas).
+  telefoneAvisoDiario String?
 
   // Endereço estruturado + Inscrição Estadual — exigido pra emitir/consultar
   // NF-e própria e pra distribuição via Sefaz (cUFAutor depende da UF real
@@ -156,11 +180,12 @@ model Empresa {
 
   caminhoes Caminhao[]
 
-  fornecedores         Fornecedor[]
-  categoriasContaPagar CategoriaContaPagar[]
-  contasPagar          ContaPagar[]
-  nfEntradas           NfEntrada[]
-  nfServicos           NfServico[]
+  fornecedores           Fornecedor[]
+  categoriasContaPagar   CategoriaContaPagar[]
+  contasPagar            ContaPagar[]
+  contasPagarRecorrencia ContaPagarRecorrencia[]
+  nfEntradas             NfEntrada[]
+  nfServicos             NfServico[]
 
   certificadoDigital     CertificadoDigitalEmpresa?
   sefazSincronizacaoLogs SefazSincronizacaoLog[]
@@ -1032,6 +1057,19 @@ model ContaPagar {
   caminhaoId String?
   caminhao   Caminhao? @relation(fields: [caminhaoId], references: [id])
 
+  // Ocorrência gerada a partir de uma conta recorrente (ver
+  // ContaPagarRecorrencia abaixo) — null quando é um lançamento manual
+  // comum, sem recorrência.
+  recorrenciaId String?
+  recorrencia   ContaPagarRecorrencia? @relation(fields: [recorrenciaId], references: [id])
+
+  // Preenchido quando alguém marca manualmente uma conta vencida como
+  // "incluir nos pagamentos de hoje" — não muda o vencimento nem o status
+  // (continua aparecendo como Vencida), só faz ela entrar também na lista
+  // "Hoje" do Dashboard. Fica null de novo quando a conta é paga. Mesmo
+  // padrão do Bill.queuedForPaymentAt no Controle NF.
+  queuedForPaymentAt DateTime?
+
   arquivoUrl              String?
   comprovantePagamentoUrl String?
   observacao              String?
@@ -1044,12 +1082,74 @@ model ContaPagar {
 
   pagamentos PagamentoContaPagar[]
 
+  // Evita gerar a mesma ocorrência duas vezes pra uma recorrência no
+  // mesmo vencimento (geração idempotente).
+  @@unique([recorrenciaId, vencimento])
   @@index([empresaId])
   @@index([fornecedorId])
   @@index([categoriaId])
   @@index([caminhaoId])
+  @@index([recorrenciaId])
   @@index([status])
   @@index([vencimento])
+  @@index([queuedForPaymentAt])
+}
+
+enum TipoRecorrenciaContaPagar {
+  MENSAL
+  SEMANAL
+}
+
+// Segunda a sexta — recorrência semanal não cobre fim de semana (pedido
+// do usuário: "de segunda a sexta").
+enum DiaSemanaUtil {
+  SEGUNDA
+  TERCA
+  QUARTA
+  QUINTA
+  SEXTA
+}
+
+// "Receita" de uma conta recorrente (todo dia X do mês, ou toda
+// segunda/terça/.../sexta) — o motor (gerarOcorrencias no service + cron
+// diário) materializa as ocorrências concretas como linhas normais de
+// ContaPagar, sempre 12 meses à frente, pra aparecerem na grade de A
+// Vencer/Mensal/Semanal igual a qualquer outra conta. Editar/excluir uma
+// ocorrência gerada não afeta a receita nem as demais ocorrências.
+model ContaPagarRecorrencia {
+  id String @id @default(uuid())
+
+  descricao      String
+  valor          Float
+  formaPagamento FormaPagamentoContaPagar @default(BOLETO)
+  observacao     String?
+
+  tipoRecorrencia TipoRecorrenciaContaPagar
+
+  // Preenchido quando tipoRecorrencia=MENSAL — dia 1 a 30 (nunca 31, pra
+  // sempre existir em todo mês incluindo fevereiro/meses de 30 dias; se o
+  // mês tiver menos dias que o escolhido, cai no último dia do mês).
+  diaMes Int?
+
+  // Preenchido quando tipoRecorrencia=SEMANAL.
+  diaSemana DiaSemanaUtil?
+
+  ativa Boolean @default(true)
+
+  // Cursor: até que data já foram geradas ocorrências concretas — o cron
+  // diário usa isso pra saber até onde completar (sempre mantendo ~12
+  // meses de ocorrências futuras).
+  geradoAte DateTime?
+
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contas ContaPagar[]
+
+  @@index([empresaId])
 }
 
 // Baixa (total ou parcial) de uma ContaPagar. Uma dívida de 5000 pode

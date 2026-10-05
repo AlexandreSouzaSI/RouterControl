@@ -106,12 +106,24 @@ function Marca() {
 
 function Navegacao({ onNavigate }: { onNavigate?: () => void }) {
     const { usuario } = useAuth();
+    const ehFisica = usuario?.empresaTipoPessoa === 'FISICA';
 
     const gruposComModulo = usuario?.isAdminMaster
         ? grupos
         : grupos.filter((g) => !g.modulo || usuario?.modulosHabilitados?.includes(g.modulo));
 
-    const gruposVisiveis = usuario?.isAdminMaster ? [...gruposComModulo, grupoAdmin] : gruposComModulo;
+    // Pessoa Física só usa Dashboard + Contas a Pagar — não faz sentido
+    // mostrar NF de Entrada/Transporte/Serviço (fluxo fiscal de carga) pra
+    // alguém controlando contas pessoais.
+    const gruposFiltrados = ehFisica
+        ? gruposComModulo.map((g) =>
+            g.titulo === 'Financeiro'
+                ? { ...g, itens: g.itens.filter((i) => i.name === 'Dashboard' || i.name === 'Contas a Pagar') }
+                : g,
+        )
+        : gruposComModulo;
+
+    const gruposVisiveis = usuario?.isAdminMaster ? [...gruposFiltrados, grupoAdmin] : gruposFiltrados;
 
     return (
         <nav className="flex flex-col gap-5">

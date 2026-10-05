@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Plus, Loader2, CheckCircle2, Trash2, Pencil, Landmark, X, History } from 'lucide-react';
+import { Plus, Loader2, CheckCircle2, Trash2, Pencil, Landmark, X, History, Repeat, Clock, ArrowUpCircle } from 'lucide-react';
 import { api } from '../services/api';
 import { Pagination } from '../components/Pagination';
+import { useAuth } from '../context/AuthContext';
 
 // =============================================================================
 // Contas a Pagar — página própria (grupo Financeiro no menu). Lançamento
@@ -47,6 +48,7 @@ type ContaPagar = {
     observacao: string | null;
     valorPago?: number;
     saldoDevedor?: number;
+    queuedForPaymentAt?: string | null;
 };
 
 type Pagamento = {
@@ -65,6 +67,26 @@ type Resumo = {
     quantidadeVencida: number;
     quantidadeTotal: number;
 };
+
+type ContaPagarRecorrente = {
+    id: string;
+    descricao: string;
+    valor: number;
+    formaPagamento: string;
+    observacao: string | null;
+    tipoRecorrencia: 'MENSAL' | 'SEMANAL';
+    diaMes: number | null;
+    diaSemana: 'SEGUNDA' | 'TERCA' | 'QUARTA' | 'QUINTA' | 'SEXTA' | null;
+    ativa: boolean;
+};
+
+const DIAS_SEMANA = [
+    { value: 'SEGUNDA', label: 'Segunda' },
+    { value: 'TERCA', label: 'Terça' },
+    { value: 'QUARTA', label: 'Quarta' },
+    { value: 'QUINTA', label: 'Quinta' },
+    { value: 'SEXTA', label: 'Sexta' },
+];
 
 const TIPOS_CONTA = [
     { value: 'BOLETO', label: 'Boleto' },
@@ -85,6 +107,9 @@ const FORMAS_PAGAMENTO = [
 
 export function ContasPagar() {
     const navigate = useNavigate();
+    const { usuario } = useAuth();
+    const ehFisica = usuario?.empresaTipoPessoa === 'FISICA';
+
     const [mesFiltro, setMesFiltro] = useState(mesAtual());
     const [contas, setContas] = useState<ContaPagar[]>([]);
     const [total, setTotal] = useState(0);
@@ -109,6 +134,20 @@ export function ContasPagar() {
     const [categoriaNome, setCategoriaNome] = useState('');
     const [caminhaoId, setCaminhaoId] = useState('');
     const [observacao, setObservacao] = useState('');
+
+    // Recorrência (todo dia X do mês, ou todo dia da semana seg-sex) — só
+    // disponível pra conta nova (não dá pra "virar" uma conta já existente
+    // em recorrente ao editar).
+    const [recorrente, setRecorrente] = useState(false);
+    const [tipoRecorrencia, setTipoRecorrencia] = useState<'MENSAL' | 'SEMANAL'>('MENSAL');
+    const [diaMes, setDiaMes] = useState('5');
+    const [diaSemana, setDiaSemana] = useState<'SEGUNDA' | 'TERCA' | 'QUARTA' | 'QUINTA' | 'SEXTA'>('SEGUNDA');
+    const [salvandoRecorrente, setSalvandoRecorrente] = useState(false);
+
+    const [recorrencias, setRecorrencias] = useState<ContaPagarRecorrente[]>([]);
+    const [mostrarRecorrencias, setMostrarRecorrencias] = useState(false);
+
+    const [colocandoAtrasadasHoje, setColocandoAtrasadasHoje] = useState(false);
 
     // Registrar pagamento (total ou parcial)
     const [contaPagamento, setContaPagamento] = useState<ContaPagar | null>(null);
@@ -152,6 +191,7 @@ export function ContasPagar() {
     }
 
     async function carregarCadastros() {
+        if (ehFisica) return; // Pessoa Física não usa fornecedor/categoria/caminhão
         try {
             const [resForn, resCat, resCam] = await Promise.all([
                 api.get('/financeiro-nf/fornecedores'),
@@ -167,6 +207,15 @@ export function ContasPagar() {
         }
     }
 
+    async function carregarRecorrencias() {
+        try {
+            const res = await api.get('/financeiro-nf/contas-pagar-recorrentes');
+            setRecorrencias(res.data ?? []);
+        } catch {
+            setRecorrencias([]);
+        }
+    }
+
     useEffect(() => {
         carregar(1, pageSize);
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -174,6 +223,8 @@ export function ContasPagar() {
 
     useEffect(() => {
         carregarCadastros();
+        carregarRecorrencias();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     function limparForm() {
@@ -187,6 +238,10 @@ export function ContasPagar() {
         setCaminhaoId('');
         setObservacao('');
         setEditandoId(null);
+        setRecorrente(false);
+        setTipoRecorrencia('MENSAL');
+        setDiaMes('5');
+        setDiaSemana('SEGUNDA');
     }
 
     function editar(conta: ContaPagar) {
@@ -204,18 +259,27 @@ export function ContasPagar() {
     }
 
     async function salvar() {
-        if (!descricao.trim() || !valor || !vencimento) return;
+        if (!descricao.trim() || !valor) return;
+
+        // Conta recorrente é um cadastro separado (ContaPagarRecorrencia) —
+        // só disponível criando uma conta nova, não editando.
+        if (recorrente && !editandoId) {
+            await salvarRecorrente();
+            return;
+        }
+
+        if (!vencimento) return;
         setSalvando(true);
         try {
             let fornecedorId: string | undefined;
             let categoriaId: string | undefined;
 
-            if (fornecedorNome.trim()) {
+            if (!ehFisica && fornecedorNome.trim()) {
                 const res = await api.post('/financeiro-nf/fornecedores/encontrar-ou-criar', { nome: fornecedorNome.trim() });
                 fornecedorId = res.data?.id;
             }
 
-            if (categoriaNome.trim()) {
+            if (!ehFisica && categoriaNome.trim()) {
                 const res = await api.post('/financeiro-nf/categorias/encontrar-ou-criar', { nome: categoriaNome.trim() });
                 categoriaId = res.data?.id;
             }
@@ -228,7 +292,7 @@ export function ContasPagar() {
                 formaPagamento,
                 fornecedorId,
                 categoriaId,
-                caminhaoId: caminhaoId || undefined,
+                caminhaoId: !ehFisica ? (caminhaoId || undefined) : undefined,
                 observacao: observacao || undefined,
             };
 
@@ -246,6 +310,60 @@ export function ContasPagar() {
             alert(e?.response?.data?.message || 'Não foi possível salvar a conta.');
         } finally {
             setSalvando(false);
+        }
+    }
+
+    async function salvarRecorrente() {
+        setSalvandoRecorrente(true);
+        try {
+            await api.post('/financeiro-nf/contas-pagar-recorrentes', {
+                descricao,
+                valor: Number(valor),
+                formaPagamento,
+                observacao: observacao || undefined,
+                tipoRecorrencia,
+                diaMes: tipoRecorrencia === 'MENSAL' ? Number(diaMes) : undefined,
+                diaSemana: tipoRecorrencia === 'SEMANAL' ? diaSemana : undefined,
+            });
+            limparForm();
+            setFormAberto(false);
+            carregar();
+            carregarRecorrencias();
+        } catch (e: any) {
+            alert(e?.response?.data?.message || 'Não foi possível criar a conta recorrente.');
+        } finally {
+            setSalvandoRecorrente(false);
+        }
+    }
+
+    async function desativarRecorrencia(id: string) {
+        if (!confirm('Desativar essa recorrência? As contas já geradas continuam, só para de gerar novas.')) return;
+        try {
+            await api.delete(`/financeiro-nf/contas-pagar-recorrentes/${id}`);
+            carregarRecorrencias();
+        } catch {
+            alert('Não foi possível desativar a recorrência.');
+        }
+    }
+
+    async function incluirHoje(conta: ContaPagar) {
+        try {
+            await api.patch(`/financeiro-nf/contas-pagar/${conta.id}/incluir-hoje`);
+            carregar();
+        } catch {
+            alert('Não foi possível incluir essa conta em hoje.');
+        }
+    }
+
+    async function colocarAtrasadasHoje() {
+        setColocandoAtrasadasHoje(true);
+        try {
+            await api.patch('/financeiro-nf/contas-pagar/incluir-hoje/atrasadas');
+            carregar();
+        } catch {
+            alert('Não foi possível colocar as atrasadas em hoje.');
+        } finally {
+            setColocandoAtrasadasHoje(false);
         }
     }
 
@@ -350,14 +468,27 @@ export function ContasPagar() {
                     <input type="month" value={mesFiltro} onChange={(e) => setMesFiltro(e.target.value)} className={campoClasse} />
                 </div>
 
-                <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => navigate('/financeiro-nf/contas-pagar/conciliar')}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-                    >
-                        <Landmark size={16} />
-                        Conciliar com banco
-                    </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                    {resumo && resumo.quantidadeVencida > 0 && (
+                        <button
+                            onClick={colocarAtrasadasHoje}
+                            disabled={colocandoAtrasadasHoje}
+                            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-300 dark:border-red-700 text-sm font-medium text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50 transition"
+                        >
+                            {colocandoAtrasadasHoje ? <Loader2 size={16} className="animate-spin" /> : <ArrowUpCircle size={16} />}
+                            Colocar atrasadas pra hoje
+                        </button>
+                    )}
+
+                    {!ehFisica && (
+                        <button
+                            onClick={() => navigate('/financeiro-nf/contas-pagar/conciliar')}
+                            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                        >
+                            <Landmark size={16} />
+                            Conciliar com banco
+                        </button>
+                    )}
 
                     <button
                         onClick={() => { limparForm(); setFormAberto((v) => !v); }}
@@ -410,16 +541,20 @@ export function ContasPagar() {
                     </div>
 
                     <div className="grid sm:grid-cols-3 gap-3">
-                        <div>
-                            <label className={labelClasse}>Vencimento *</label>
-                            <input type="date" value={vencimento} onChange={(e) => setVencimento(e.target.value)} className={campoClasse} />
-                        </div>
-                        <div>
-                            <label className={labelClasse}>Tipo</label>
-                            <select value={tipo} onChange={(e) => setTipo(e.target.value)} className={campoClasse}>
-                                {TIPOS_CONTA.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                            </select>
-                        </div>
+                        {!recorrente && (
+                            <div>
+                                <label className={labelClasse}>Vencimento *</label>
+                                <input type="date" value={vencimento} onChange={(e) => setVencimento(e.target.value)} className={campoClasse} />
+                            </div>
+                        )}
+                        {!ehFisica && (
+                            <div>
+                                <label className={labelClasse}>Tipo</label>
+                                <select value={tipo} onChange={(e) => setTipo(e.target.value)} className={campoClasse}>
+                                    {TIPOS_CONTA.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                </select>
+                            </div>
+                        )}
                         <div>
                             <label className={labelClasse}>Forma de pagamento</label>
                             <select value={formaPagamento} onChange={(e) => setFormaPagamento(e.target.value)} className={campoClasse}>
@@ -428,46 +563,96 @@ export function ContasPagar() {
                         </div>
                     </div>
 
-                    <div className="grid sm:grid-cols-3 gap-3">
-                        <div>
-                            <label className={labelClasse}>Fornecedor</label>
-                            <input
-                                list="fornecedores-lista"
-                                value={fornecedorNome}
-                                onChange={(e) => setFornecedorNome(e.target.value)}
-                                className={campoClasse}
-                                placeholder="Digite ou escolha"
-                            />
-                            <datalist id="fornecedores-lista">
-                                {fornecedores.map((f) => <option key={f.id} value={f.nome} />)}
-                            </datalist>
+                    {!ehFisica && (
+                        <div className="grid sm:grid-cols-3 gap-3">
+                            <div>
+                                <label className={labelClasse}>Fornecedor</label>
+                                <input
+                                    list="fornecedores-lista"
+                                    value={fornecedorNome}
+                                    onChange={(e) => setFornecedorNome(e.target.value)}
+                                    className={campoClasse}
+                                    placeholder="Digite ou escolha"
+                                />
+                                <datalist id="fornecedores-lista">
+                                    {fornecedores.map((f) => <option key={f.id} value={f.nome} />)}
+                                </datalist>
+                            </div>
+                            <div>
+                                <label className={labelClasse}>Categoria</label>
+                                <input
+                                    list="categorias-lista"
+                                    value={categoriaNome}
+                                    onChange={(e) => setCategoriaNome(e.target.value)}
+                                    className={campoClasse}
+                                    placeholder="Digite ou escolha"
+                                />
+                                <datalist id="categorias-lista">
+                                    {categorias.map((c) => <option key={c.id} value={c.nome} />)}
+                                </datalist>
+                            </div>
+                            <div>
+                                <label className={labelClasse}>Caminhão</label>
+                                <select value={caminhaoId} onChange={(e) => setCaminhaoId(e.target.value)} className={campoClasse}>
+                                    <option value="">Não vinculado</option>
+                                    {caminhoes.map((c) => <option key={c.id} value={c.id}>{c.placa}</option>)}
+                                </select>
+                            </div>
                         </div>
-                        <div>
-                            <label className={labelClasse}>Categoria</label>
-                            <input
-                                list="categorias-lista"
-                                value={categoriaNome}
-                                onChange={(e) => setCategoriaNome(e.target.value)}
-                                className={campoClasse}
-                                placeholder="Digite ou escolha"
-                            />
-                            <datalist id="categorias-lista">
-                                {categorias.map((c) => <option key={c.id} value={c.nome} />)}
-                            </datalist>
-                        </div>
-                        <div>
-                            <label className={labelClasse}>Caminhão</label>
-                            <select value={caminhaoId} onChange={(e) => setCaminhaoId(e.target.value)} className={campoClasse}>
-                                <option value="">Não vinculado</option>
-                                {caminhoes.map((c) => <option key={c.id} value={c.id}>{c.placa}</option>)}
-                            </select>
-                        </div>
-                    </div>
+                    )}
 
                     <div>
                         <label className={labelClasse}>Observação</label>
                         <textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} className={campoClasse} rows={2} />
                     </div>
+
+                    {!editandoId && (
+                        <div className="pt-3 border-t border-gray-100 dark:border-gray-800 space-y-3">
+                            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={recorrente}
+                                    onChange={(e) => setRecorrente(e.target.checked)}
+                                    className="rounded border-gray-300 dark:border-gray-700"
+                                />
+                                <Repeat size={14} />
+                                Conta recorrente (gera automaticamente os próximos 12 meses)
+                            </label>
+
+                            {recorrente && (
+                                <div className="grid sm:grid-cols-2 gap-3 pl-1">
+                                    <div>
+                                        <label className={labelClasse}>Repetir</label>
+                                        <select
+                                            value={tipoRecorrencia}
+                                            onChange={(e) => setTipoRecorrencia(e.target.value as 'MENSAL' | 'SEMANAL')}
+                                            className={campoClasse}
+                                        >
+                                            <option value="MENSAL">Todo dia X do mês</option>
+                                            <option value="SEMANAL">Todo dia da semana (seg-sex)</option>
+                                        </select>
+                                    </div>
+                                    {tipoRecorrencia === 'MENSAL' ? (
+                                        <div>
+                                            <label className={labelClasse}>Dia do mês</label>
+                                            <select value={diaMes} onChange={(e) => setDiaMes(e.target.value)} className={campoClasse}>
+                                                {Array.from({ length: 30 }, (_, i) => i + 1).map((d) => (
+                                                    <option key={d} value={d}>{d}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <label className={labelClasse}>Dia da semana</label>
+                                            <select value={diaSemana} onChange={(e) => setDiaSemana(e.target.value as any)} className={campoClasse}>
+                                                {DIAS_SEMANA.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+                                            </select>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     <div className="flex justify-end gap-2">
                         <button onClick={() => { setFormAberto(false); limparForm(); }} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
@@ -475,13 +660,45 @@ export function ContasPagar() {
                         </button>
                         <button
                             onClick={salvar}
-                            disabled={salvando || !descricao.trim() || !valor || !vencimento}
+                            disabled={salvando || salvandoRecorrente || !descricao.trim() || !valor || (!recorrente && !vencimento)}
                             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
                         >
-                            {salvando && <Loader2 size={14} className="animate-spin" />}
+                            {(salvando || salvandoRecorrente) && <Loader2 size={14} className="animate-spin" />}
                             Salvar
                         </button>
                     </div>
+                </div>
+            )}
+
+            {recorrencias.length > 0 && (
+                <div className="bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl p-4">
+                    <button
+                        onClick={() => setMostrarRecorrencias((v) => !v)}
+                        className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                        <Repeat size={14} />
+                        Contas recorrentes ativas ({recorrencias.length})
+                    </button>
+
+                    {mostrarRecorrencias && (
+                        <div className="mt-3 space-y-1.5">
+                            {recorrencias.map((r) => (
+                                <div key={r.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-900/40 text-sm">
+                                    <div>
+                                        <p className="text-gray-900 dark:text-white">{r.descricao} — {formatCurrency(r.valor)}</p>
+                                        <p className="text-xs text-gray-400">
+                                            {r.tipoRecorrencia === 'MENSAL'
+                                                ? `Todo dia ${r.diaMes} do mês`
+                                                : `Toda ${DIAS_SEMANA.find((d) => d.value === r.diaSemana)?.label ?? r.diaSemana}`}
+                                        </p>
+                                    </div>
+                                    <button onClick={() => desativarRecorrencia(r.id)} title="Desativar recorrência" className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition">
+                                        <Trash2 size={15} />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -537,6 +754,18 @@ export function ContasPagar() {
                                             </td>
                                             <td className="py-2.5 px-4">
                                                 <div className="flex items-center gap-2">
+                                                    {c.status === 'VENCIDA' && (
+                                                        <button
+                                                            onClick={() => incluirHoje(c)}
+                                                            title={c.queuedForPaymentAt ? 'Remover de hoje' : 'Incluir em hoje'}
+                                                            className={`p-1.5 rounded-lg transition ${c.queuedForPaymentAt
+                                                                ? 'text-amber-600 bg-amber-50 dark:bg-amber-500/10'
+                                                                : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                                                }`}
+                                                        >
+                                                            <Clock size={16} />
+                                                        </button>
+                                                    )}
                                                     {c.status !== 'PAGA' && c.status !== 'CANCELADA' && (
                                                         <button onClick={() => abrirPagamento(c)} title="Registrar pagamento" className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 dark:hover:bg-green-500/10 transition">
                                                             <CheckCircle2 size={16} />

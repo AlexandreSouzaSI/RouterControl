@@ -19,12 +19,17 @@ const labelClasse = 'text-xs font-medium text-gray-500 dark:text-gray-400 block 
 // e NFS-e da própria empresa junto à Sefaz/ADN)
 // =============================================================================
 
+type TipoPessoaEmpresa = 'JURIDICA' | 'FISICA';
+
 type DadosFiscaisEmpresa = {
     id: string;
     nome: string;
     email: string;
+    tipoPessoa: TipoPessoaEmpresa;
     cnpj: string | null;
+    cpf: string | null;
     telefone: string | null;
+    telefoneAvisoDiario: string | null;
     uf: string | null;
     logradouro: string | null;
     numero: string | null;
@@ -39,7 +44,9 @@ type DadosFiscaisEmpresa = {
 const formVazioEmpresa = {
     nome: '',
     cnpj: '',
+    cpf: '',
     telefone: '',
+    telefoneAvisoDiario: '',
     uf: '',
     logradouro: '',
     numero: '',
@@ -69,7 +76,9 @@ function EmpresaTab() {
             setForm({
                 nome: dados.nome || '',
                 cnpj: dados.cnpj || '',
+                cpf: dados.cpf || '',
                 telefone: dados.telefone || '',
+                telefoneAvisoDiario: dados.telefoneAvisoDiario || '',
                 uf: dados.uf || '',
                 logradouro: dados.logradouro || '',
                 numero: dados.numero || '',
@@ -144,20 +153,41 @@ function EmpresaTab() {
                         <label className={labelClasse}>Nome *</label>
                         <input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} className={campoClasse} />
                     </div>
-                    <div>
-                        <label className={labelClasse}>CNPJ</label>
-                        <input value={form.cnpj} onChange={(e) => setForm({ ...form, cnpj: e.target.value })} className={campoClasse} placeholder="Só números" />
-                    </div>
+                    {empresa?.tipoPessoa === 'FISICA' ? (
+                        <div>
+                            <label className={labelClasse}>CPF</label>
+                            <input value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} className={campoClasse} placeholder="Só números" />
+                        </div>
+                    ) : (
+                        <div>
+                            <label className={labelClasse}>CNPJ</label>
+                            <input value={form.cnpj} onChange={(e) => setForm({ ...form, cnpj: e.target.value })} className={campoClasse} placeholder="Só números" />
+                        </div>
+                    )}
                     <div>
                         <label className={labelClasse}>Telefone</label>
                         <input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} className={campoClasse} />
                     </div>
                     <div>
-                        <label className={labelClasse}>Inscrição Estadual</label>
-                        <input value={form.inscricaoEstadual} onChange={(e) => setForm({ ...form, inscricaoEstadual: e.target.value })} className={campoClasse} placeholder="Ou deixe em branco se isento" />
+                        <label className={labelClasse}>
+                            Telefone pra aviso diário de contas (WhatsApp)
+                        </label>
+                        <input
+                            value={form.telefoneAvisoDiario}
+                            onChange={(e) => setForm({ ...form, telefoneAvisoDiario: e.target.value })}
+                            className={campoClasse}
+                            placeholder="Ex.: (31) 99999-8888 — opcional"
+                        />
                     </div>
+                    {empresa?.tipoPessoa !== 'FISICA' && (
+                        <div>
+                            <label className={labelClasse}>Inscrição Estadual</label>
+                            <input value={form.inscricaoEstadual} onChange={(e) => setForm({ ...form, inscricaoEstadual: e.target.value })} className={campoClasse} placeholder="Ou deixe em branco se isento" />
+                        </div>
+                    )}
                 </div>
 
+                {empresa?.tipoPessoa !== 'FISICA' && (
                 <div className="pt-3 border-t border-gray-100 dark:border-gray-800 space-y-3">
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Endereço</h3>
 
@@ -208,6 +238,7 @@ function EmpresaTab() {
                         </div>
                     </div>
                 </div>
+                )}
 
                 {erro && <p className="text-sm text-red-600 dark:text-red-400">{erro}</p>}
 

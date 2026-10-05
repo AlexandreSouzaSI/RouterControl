@@ -242,6 +242,34 @@ export class FinanceiroNfController {
         return this.service.removerContaPagar(id, empresaId);
     }
 
+    // "Incluir hoje" — botão individual (toggle) e em massa pras vencidas.
+    @Patch('contas-pagar/:id/incluir-hoje')
+    toggleIncluirHoje(@Param('id') id: string, @EmpresaAtual() empresaId: string) {
+        return this.service.toggleIncluirHoje(id, empresaId);
+    }
+
+    @Patch('contas-pagar/incluir-hoje/atrasadas')
+    incluirTodasAtrasadasHoje(@EmpresaAtual() empresaId: string) {
+        return this.service.incluirTodasAtrasadasHoje(empresaId);
+    }
+
+    // ---------------- Conta a Pagar recorrente ----------------
+
+    @Get('contas-pagar-recorrentes')
+    listarContasPagarRecorrentes(@EmpresaAtual() empresaId: string) {
+        return this.service.listarContasPagarRecorrentes(empresaId);
+    }
+
+    @Post('contas-pagar-recorrentes')
+    criarContaPagarRecorrente(@EmpresaAtual() empresaId: string, @Body() body: Record<string, any>) {
+        return this.service.criarContaPagarRecorrente(empresaId, body as any);
+    }
+
+    @Delete('contas-pagar-recorrentes/:id')
+    desativarContaPagarRecorrente(@Param('id') id: string, @EmpresaAtual() empresaId: string) {
+        return this.service.desativarContaPagarRecorrente(id, empresaId);
+    }
+
     // Lê o extrato OFX só pra devolver as movimentações — não salva o
     // arquivo nem grava nada no banco (mesmo padrão do Controle NF).
     @Post('contas-pagar/reconcile/import')

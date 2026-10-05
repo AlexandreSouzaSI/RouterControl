@@ -1,7 +1,7 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Viagens } from './pages/Viagens';
@@ -25,6 +25,18 @@ import { ContasPagarConciliar } from './pages/ContasPagarConciliar';
 import { Cadastros } from './pages/Cadastros';
 import { Admin } from './pages/Admin';
 
+// Pessoa Física não tem o Dashboard de Rastreador (módulo nem habilitado
+// pra ela) — manda direto pro Dashboard Financeiro, que é o único que ela usa.
+function RaizRedirecionada() {
+  const { usuario } = useAuth();
+
+  if (usuario?.empresaTipoPessoa === 'FISICA') {
+    return <Navigate to="/financeiro-nf/dashboard" replace />;
+  }
+
+  return <Dashboard />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -38,7 +50,7 @@ export default function App() {
               <ProtectedRoute>
                 <Layout>
                   <Routes>
-                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/" element={<RaizRedirecionada />} />
                     <Route path="/viagens" element={<Viagens />} />
                     <Route path="/caminhoes" element={<Caminhoes />} />
                     <Route path="/caminhoes/:placa" element={<CaminhaoDetalhe />} />

@@ -13,7 +13,7 @@ export class AuthService {
     async login(email: string, senha: string) {
         const usuario = await this.prisma.usuario.findUnique({
             where: { email },
-            include: { empresa: { select: { nome: true, ativo: true, modulosHabilitados: true } } },
+            include: { empresa: { select: { nome: true, ativo: true, modulosHabilitados: true, tipoPessoa: true } } },
         });
 
         // Mensagem genérica de propósito — não dizer se foi o e-mail ou a
@@ -50,6 +50,7 @@ export class AuthService {
                 perfil: usuario.perfil,
                 modulosHabilitados: usuario.empresa.modulosHabilitados,
                 empresaNome: usuario.empresa.nome,
+                empresaTipoPessoa: usuario.empresa.tipoPessoa,
             },
         };
     }
@@ -64,7 +65,7 @@ export class AuthService {
                 empresaId: true,
                 isAdminMaster: true,
                 perfil: true,
-                empresa: { select: { nome: true, modulosHabilitados: true } },
+                empresa: { select: { nome: true, modulosHabilitados: true, tipoPessoa: true } },
             },
         });
 
@@ -74,6 +75,11 @@ export class AuthService {
 
         const { empresa, ...resto } = usuario;
 
-        return { ...resto, modulosHabilitados: empresa.modulosHabilitados, empresaNome: empresa.nome };
+        return {
+            ...resto,
+            modulosHabilitados: empresa.modulosHabilitados,
+            empresaNome: empresa.nome,
+            empresaTipoPessoa: empresa.tipoPessoa,
+        };
     }
 }

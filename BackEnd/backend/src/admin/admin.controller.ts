@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { EmpresaModulo, PerfilUsuario } from '@prisma/client';
+import { EmpresaModulo, PerfilUsuario, TipoPessoaEmpresa } from '@prisma/client';
 import { AdminMasterGuard } from '../auth/admin-master.guard';
 import { AdminService } from './admin.service';
 
@@ -22,7 +22,10 @@ export class AdminController {
         body: {
             nome: string;
             email: string;
+            tipoPessoa?: TipoPessoaEmpresa;
             cnpj?: string;
+            cpf?: string;
+            telefoneAvisoDiario?: string;
             modulosHabilitados?: EmpresaModulo[];
         },
     ) {
@@ -36,6 +39,8 @@ export class AdminController {
         body: {
             nome?: string;
             cnpj?: string;
+            cpf?: string;
+            telefoneAvisoDiario?: string;
             ativo?: boolean;
             pagamentoEmDia?: boolean;
             observacoesAdmin?: string;

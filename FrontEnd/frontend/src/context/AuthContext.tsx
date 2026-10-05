@@ -9,6 +9,7 @@ import {
 import { api, getToken, limparToken, setToken as salvarToken } from '../services/api';
 
 type EmpresaModulo = 'RASTREADOR' | 'FISCAL' | 'FINANCEIRO_NF';
+type TipoPessoaEmpresa = 'JURIDICA' | 'FISICA';
 
 type Usuario = {
     id: string;
@@ -18,6 +19,7 @@ type Usuario = {
     perfil?: 'ADMIN' | 'PROPRIETARIO' | 'FUNCIONARIO';
     modulosHabilitados?: EmpresaModulo[];
     empresaNome?: string | null;
+    empresaTipoPessoa?: TipoPessoaEmpresa;
 };
 
 type AuthContextValue = {

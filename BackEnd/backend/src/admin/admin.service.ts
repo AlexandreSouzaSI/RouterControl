@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { EmpresaModulo, PerfilUsuario } from '@prisma/client';
+import { EmpresaModulo, PerfilUsuario, TipoPessoaEmpresa } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -17,7 +17,10 @@ export class AdminService {
                 id: true,
                 nome: true,
                 email: true,
+                tipoPessoa: true,
                 cnpj: true,
+                cpf: true,
+                telefoneAvisoDiario: true,
                 ativo: true,
                 pagamentoEmDia: true,
                 observacoesAdmin: true,
@@ -37,7 +40,10 @@ export class AdminService {
     async criarEmpresa(dto: {
         nome: string;
         email: string;
+        tipoPessoa?: TipoPessoaEmpresa;
         cnpj?: string;
+        cpf?: string;
+        telefoneAvisoDiario?: string;
         modulosHabilitados?: EmpresaModulo[];
     }) {
         const nome = dto.nome?.trim();
@@ -53,14 +59,30 @@ export class AdminService {
             throw new ConflictException('Já existe uma empresa com esse e-mail.');
         }
 
+        const tipoPessoa = dto.tipoPessoa === TipoPessoaEmpresa.FISICA
+            ? TipoPessoaEmpresa.FISICA
+            : TipoPessoaEmpresa.JURIDICA;
+
+        // Pessoa Física só usa Conta a Pagar + Dashboard (módulo
+        // Financeiro/NF, versão simplificada) — nunca Rastreador/Fiscal,
+        // que não fazem sentido pra alguém controlando contas pessoais.
+        // Isso é forçado aqui (ignora o que vier em modulosHabilitados
+        // pra FISICA), não só um padrão sugerido.
+        const modulosHabilitados = tipoPessoa === TipoPessoaEmpresa.FISICA
+            ? [EmpresaModulo.FINANCEIRO_NF]
+            : dto.modulosHabilitados?.length
+                ? dto.modulosHabilitados
+                : [EmpresaModulo.RASTREADOR, EmpresaModulo.FISCAL, EmpresaModulo.FINANCEIRO_NF];
+
         return this.prisma.empresa.create({
             data: {
                 nome,
                 email,
-                cnpj: dto.cnpj?.trim() || null,
-                modulosHabilitados: dto.modulosHabilitados?.length
-                    ? dto.modulosHabilitados
-                    : [EmpresaModulo.RASTREADOR, EmpresaModulo.FISCAL, EmpresaModulo.FINANCEIRO_NF],
+                tipoPessoa,
+                cnpj: tipoPessoa === TipoPessoaEmpresa.JURIDICA ? dto.cnpj?.trim() || null : null,
+                cpf: tipoPessoa === TipoPessoaEmpresa.FISICA ? dto.cpf?.trim() || null : null,
+                telefoneAvisoDiario: dto.telefoneAvisoDiario?.trim() || null,
+                modulosHabilitados,
             },
         });
     }
@@ -68,6 +90,8 @@ export class AdminService {
     async atualizarEmpresa(id: string, dto: {
         nome?: string;
         cnpj?: string;
+        cpf?: string;
+        telefoneAvisoDiario?: string;
         ativo?: boolean;
         pagamentoEmDia?: boolean;
         observacoesAdmin?: string;
@@ -83,6 +107,8 @@ export class AdminService {
 
         if (dto.nome !== undefined) data.nome = dto.nome.trim();
         if (dto.cnpj !== undefined) data.cnpj = dto.cnpj.trim() || null;
+        if (dto.cpf !== undefined) data.cpf = dto.cpf.trim() || null;
+        if (dto.telefoneAvisoDiario !== undefined) data.telefoneAvisoDiario = dto.telefoneAvisoDiario.trim() || null;
         if (dto.ativo !== undefined) data.ativo = dto.ativo;
         if (dto.pagamentoEmDia !== undefined) data.pagamentoEmDia = dto.pagamentoEmDia;
         if (dto.observacoesAdmin !== undefined) data.observacoesAdmin = dto.observacoesAdmin.trim() || null;

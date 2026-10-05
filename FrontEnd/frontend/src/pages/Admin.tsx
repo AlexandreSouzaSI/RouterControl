@@ -17,6 +17,7 @@ import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 type EmpresaModulo = 'RASTREADOR' | 'FISCAL' | 'FINANCEIRO_NF';
+type TipoPessoaEmpresa = 'JURIDICA' | 'FISICA';
 
 const TODOS_MODULOS: { valor: EmpresaModulo; nome: string }[] = [
     { valor: 'RASTREADOR', nome: 'Rastreador (Dashboard/Viagens/Rotas)' },
@@ -28,7 +29,10 @@ type Empresa = {
     id: string;
     nome: string;
     email: string;
+    tipoPessoa: TipoPessoaEmpresa;
     cnpj: string | null;
+    cpf: string | null;
+    telefoneAvisoDiario: string | null;
     ativo: boolean;
     pagamentoEmDia: boolean;
     observacoesAdmin: string | null;
@@ -82,10 +86,15 @@ function Toggle({
 function NovaEmpresaModal({ onClose, onCriada }: { onClose: () => void; onCriada: () => void }) {
     const [nome, setNome] = useState('');
     const [email, setEmail] = useState('');
+    const [tipoPessoa, setTipoPessoa] = useState<TipoPessoaEmpresa>('JURIDICA');
     const [cnpj, setCnpj] = useState('');
+    const [cpf, setCpf] = useState('');
+    const [telefoneAvisoDiario, setTelefoneAvisoDiario] = useState('');
     const [modulos, setModulos] = useState<EmpresaModulo[]>(['RASTREADOR', 'FISCAL', 'FINANCEIRO_NF']);
     const [salvando, setSalvando] = useState(false);
     const [erro, setErro] = useState<string | null>(null);
+
+    const ehFisica = tipoPessoa === 'FISICA';
 
     function alternarModulo(m: EmpresaModulo) {
         setModulos((atual) => (atual.includes(m) ? atual.filter((x) => x !== m) : [...atual, m]));
@@ -103,8 +112,14 @@ function NovaEmpresaModal({ onClose, onCriada }: { onClose: () => void; onCriada
             await api.post('/admin/empresas', {
                 nome: nome.trim(),
                 email: email.trim(),
-                cnpj: cnpj.trim() || undefined,
-                modulosHabilitados: modulos,
+                tipoPessoa,
+                cnpj: !ehFisica ? (cnpj.trim() || undefined) : undefined,
+                cpf: ehFisica ? (cpf.trim() || undefined) : undefined,
+                telefoneAvisoDiario: telefoneAvisoDiario.trim() || undefined,
+                // Pessoa Física é forçada pro módulo Financeiro/NF no
+                // backend mesmo que mande outra coisa aqui — mas já manda
+                // certo pra não confundir quem olhar a chamada.
+                modulosHabilitados: ehFisica ? ['FINANCEIRO_NF'] : modulos,
             });
             onCriada();
             onClose();
@@ -133,8 +148,39 @@ function NovaEmpresaModal({ onClose, onCriada }: { onClose: () => void; onCriada
 
                 <div className="space-y-4">
                     <div>
+                        <label className={labelClasse}>Tipo *</label>
+                        <div className="grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setTipoPessoa('JURIDICA')}
+                                className={`px-3 py-2 rounded-lg text-sm font-medium border transition ${!ehFisica
+                                    ? 'border-[#E30613] bg-[#E30613]/10 text-[#E30613]'
+                                    : 'border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400'
+                                    }`}
+                            >
+                                CNPJ (Pessoa Jurídica)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setTipoPessoa('FISICA')}
+                                className={`px-3 py-2 rounded-lg text-sm font-medium border transition ${ehFisica
+                                    ? 'border-[#E30613] bg-[#E30613]/10 text-[#E30613]'
+                                    : 'border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400'
+                                    }`}
+                            >
+                                Pessoa Física
+                            </button>
+                        </div>
+                        {ehFisica && (
+                            <p className="text-xs text-gray-400 mt-1.5">
+                                Pessoa Física só terá acesso ao Dashboard e Contas a Pagar.
+                            </p>
+                        )}
+                    </div>
+
+                    <div>
                         <label className={labelClasse}>Nome *</label>
-                        <input type="text" value={nome} onChange={(e) => setNome(e.target.value)} className={campoClasse} placeholder="Ex.: Via Minas Transportes" />
+                        <input type="text" value={nome} onChange={(e) => setNome(e.target.value)} className={campoClasse} placeholder={ehFisica ? 'Ex.: João da Silva' : 'Ex.: Via Minas Transportes'} />
                     </div>
 
                     <div>
@@ -142,27 +188,47 @@ function NovaEmpresaModal({ onClose, onCriada }: { onClose: () => void; onCriada
                         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={campoClasse} placeholder="contato@empresa.com" />
                     </div>
 
-                    <div>
-                        <label className={labelClasse}>CNPJ</label>
-                        <input type="text" value={cnpj} onChange={(e) => setCnpj(e.target.value)} className={campoClasse} placeholder="Opcional" />
-                    </div>
+                    {ehFisica ? (
+                        <div>
+                            <label className={labelClasse}>CPF</label>
+                            <input type="text" value={cpf} onChange={(e) => setCpf(e.target.value)} className={campoClasse} placeholder="Opcional" />
+                        </div>
+                    ) : (
+                        <div>
+                            <label className={labelClasse}>CNPJ</label>
+                            <input type="text" value={cnpj} onChange={(e) => setCnpj(e.target.value)} className={campoClasse} placeholder="Opcional" />
+                        </div>
+                    )}
 
                     <div>
-                        <label className={labelClasse}>Módulos habilitados</label>
-                        <div className="space-y-1.5">
-                            {TODOS_MODULOS.map((m) => (
-                                <label key={m.valor} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={modulos.includes(m.valor)}
-                                        onChange={() => alternarModulo(m.valor)}
-                                        className="rounded border-gray-300 dark:border-gray-700"
-                                    />
-                                    {m.nome}
-                                </label>
-                            ))}
-                        </div>
+                        <label className={labelClasse}>Telefone pra aviso diário de contas (WhatsApp)</label>
+                        <input
+                            type="text"
+                            value={telefoneAvisoDiario}
+                            onChange={(e) => setTelefoneAvisoDiario(e.target.value)}
+                            className={campoClasse}
+                            placeholder="Ex.: (31) 99999-8888 — opcional"
+                        />
                     </div>
+
+                    {!ehFisica && (
+                        <div>
+                            <label className={labelClasse}>Módulos habilitados</label>
+                            <div className="space-y-1.5">
+                                {TODOS_MODULOS.map((m) => (
+                                    <label key={m.valor} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={modulos.includes(m.valor)}
+                                            onChange={() => alternarModulo(m.valor)}
+                                            className="rounded border-gray-300 dark:border-gray-700"
+                                        />
+                                        {m.nome}
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {erro && <p className="text-sm text-red-600 dark:text-red-400">{erro}</p>}
 
@@ -352,6 +418,11 @@ function EmpresaCard({ empresa, onMudou }: { empresa: Empresa; onMudou: () => vo
                         <Building2 size={18} />
                     </div>
                     <div className="min-w-0 flex-1">
+                        {empresa.tipoPessoa === 'FISICA' && (
+                            <span className="inline-block mb-1 text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400">
+                                Pessoa Física
+                            </span>
+                        )}
                         {editandoNome ? (
                             <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                                 <input
@@ -424,6 +495,11 @@ function EmpresaCard({ empresa, onMudou }: { empresa: Empresa; onMudou: () => vo
                         />
                     </div>
 
+                    {empresa.tipoPessoa === 'FISICA' ? (
+                        <p className="text-xs text-gray-400">
+                            Pessoa Física — acesso fixo a Dashboard e Contas a Pagar, não editável aqui.
+                        </p>
+                    ) : (
                     <div>
                         <p className={labelClasse}>Módulos habilitados</p>
                         <div className="flex flex-wrap gap-2">
@@ -465,6 +541,7 @@ function EmpresaCard({ empresa, onMudou }: { empresa: Empresa; onMudou: () => vo
                             </div>
                         )}
                     </div>
+                    )}
 
                     <div>
                         <p className={`${labelClasse} flex items-center gap-1.5`}>
