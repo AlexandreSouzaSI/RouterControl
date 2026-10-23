@@ -431,13 +431,54 @@ export class FinanceiroNfService {
         };
     }
 
+    // Janelas de data usadas pelo dashboard e pelo filtro "periodo".
+    private janelasContasPagar() {
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        const amanha = new Date(hoje);
+        amanha.setDate(amanha.getDate() + 1);
+
+        // Semana de segunda a domingo.
+        const diaSemana = (hoje.getDay() + 6) % 7;
+        const inicioSemana = new Date(hoje);
+        inicioSemana.setDate(hoje.getDate() - diaSemana);
+        const fimSemana = new Date(inicioSemana);
+        fimSemana.setDate(inicioSemana.getDate() + 7);
+
+        const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        const fimMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1);
+
+        return { hoje, amanha, inicioSemana, fimSemana, inicioMes, fimMes };
+    }
+
+    private static readonly STATUS_PENDENTES: StatusContaPagar[] = ['ABERTA', 'VENCIDA', 'PARCIAL'] as StatusContaPagar[];
+
     async listarContasPagar(
         empresaId: string,
-        filtros?: { status?: StatusContaPagar; mes?: string; page?: string; pageSize?: string },
+        filtros?: {
+            status?: StatusContaPagar;
+            mes?: string;
+            de?: string;
+            ate?: string;
+            busca?: string;
+            valorMin?: string;
+            valorMax?: string;
+            periodo?: string; // hoje | semana | mes | vencidas
+            situacao?: string; // pendentes | pagas | todas
+            page?: string;
+            pageSize?: string;
+        },
     ) {
         const where: any = { empresaId };
+        const and: any[] = [];
 
         if (filtros?.status) where.status = filtros.status;
+
+        if (filtros?.situacao === 'pendentes') {
+            where.status = { in: FinanceiroNfService.STATUS_PENDENTES };
+        } else if (filtros?.situacao === 'pagas') {
+            where.status = 'PAGA';
+        }
 
         if (filtros?.mes) {
             const [ano, mesNum] = filtros.mes.split('-').map(Number);
@@ -446,6 +487,63 @@ export class FinanceiroNfService {
                 lt: new Date(ano, mesNum, 1),
             };
         }
+
+        // Faixa de datas livre (dia único: de = ate).
+        if (filtros?.de || filtros?.ate) {
+            const faixa: any = {};
+            if (filtros.de) faixa.gte = new Date(`${filtros.de}T00:00:00`);
+            if (filtros.ate) {
+                const fim = new Date(`${filtros.ate}T00:00:00`);
+                fim.setDate(fim.getDate() + 1);
+                faixa.lt = fim;
+            }
+            where.vencimento = faixa;
+        }
+
+        // Atalhos do dashboard — sempre só contas ainda não quitadas.
+        if (filtros?.periodo) {
+            const j = this.janelasContasPagar();
+            where.status = { in: FinanceiroNfService.STATUS_PENDENTES };
+
+            if (filtros.periodo === 'vencidas') {
+                where.vencimento = { lt: j.hoje };
+            } else if (filtros.periodo === 'hoje') {
+                // Vence hoje OU foi mandada pra hoje (atrasadas incluídas).
+                and.push({
+                    OR: [
+                        { vencimento: { gte: j.hoje, lt: j.amanha } },
+                        { queuedForPaymentAt: { not: null } },
+                    ],
+                });
+            } else if (filtros.periodo === 'semana') {
+                where.vencimento = { gte: j.inicioSemana, lt: j.fimSemana };
+            } else if (filtros.periodo === 'mes') {
+                where.vencimento = { gte: j.inicioMes, lt: j.fimMes };
+            }
+        }
+
+        if (filtros?.busca?.trim()) {
+            const termo = filtros.busca.trim();
+            and.push({
+                OR: [
+                    { descricao: { contains: termo, mode: 'insensitive' } },
+                    { observacao: { contains: termo, mode: 'insensitive' } },
+                    { fornecedor: { nome: { contains: termo, mode: 'insensitive' } } },
+                    { categoria: { nome: { contains: termo, mode: 'insensitive' } } },
+                    { caminhao: { placa: { contains: termo, mode: 'insensitive' } } },
+                ],
+            });
+        }
+
+        const min = filtros?.valorMin ? Number(filtros.valorMin.replace(',', '.')) : NaN;
+        const max = filtros?.valorMax ? Number(filtros.valorMax.replace(',', '.')) : NaN;
+        if (!Number.isNaN(min) || !Number.isNaN(max)) {
+            where.valor = {};
+            if (!Number.isNaN(min)) where.valor.gte = min;
+            if (!Number.isNaN(max)) where.valor.lte = max;
+        }
+
+        if (and.length) where.AND = and;
 
         const { page, pageSize, skip, take } = this.parsePaginacao(
             filtros?.page,
@@ -456,7 +554,7 @@ export class FinanceiroNfService {
             this.prisma.contaPagar.findMany({
                 where,
                 include: { fornecedor: true, categoria: true, caminhao: true, pagamentos: true },
-                orderBy: { vencimento: 'asc' },
+                orderBy: [{ vencimento: 'asc' }, { valor: 'desc' }],
                 skip,
                 take,
             }),
@@ -471,6 +569,37 @@ export class FinanceiroNfService {
         });
 
         return { items, total, page, pageSize };
+    }
+
+    // Cards do dashboard: quanto (saldo devedor) e quantas contas pendentes
+    // vencem hoje, na semana, no mês e quantas estão vencidas.
+    async dashboardContasPagar(empresaId: string) {
+        const j = this.janelasContasPagar();
+
+        const contas = await this.prisma.contaPagar.findMany({
+            where: { empresaId, status: { in: FinanceiroNfService.STATUS_PENDENTES } },
+            include: { pagamentos: true },
+        });
+
+        const vazio = () => ({ quantidade: 0, valor: 0 });
+        const r = { hoje: vazio(), semana: vazio(), mes: vazio(), vencidas: vazio() };
+        const somar = (alvo: { quantidade: number; valor: number }, saldo: number) => {
+            alvo.quantidade++;
+            alvo.valor += saldo;
+        };
+
+        for (const c of contas) {
+            const pago = c.pagamentos.reduce((s, p) => s + p.valor, 0);
+            const saldo = Math.max(0, c.valor - pago);
+            const venc = new Date(c.vencimento);
+
+            if (venc < j.hoje) somar(r.vencidas, saldo);
+            if ((venc >= j.hoje && venc < j.amanha) || c.queuedForPaymentAt) somar(r.hoje, saldo);
+            if (venc >= j.inicioSemana && venc < j.fimSemana) somar(r.semana, saldo);
+            if (venc >= j.inicioMes && venc < j.fimMes) somar(r.mes, saldo);
+        }
+
+        return r;
     }
 
     async resumoContasPagar(empresaId: string, mes?: string) {

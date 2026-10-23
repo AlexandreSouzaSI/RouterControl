@@ -24,10 +24,8 @@ function hojeISO() {
     return new Date().toISOString().slice(0, 10);
 }
 
-function mesAtual() {
-    const agora = new Date();
-    return `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
-}
+type DashBloco = { quantidade: number; valor: number };
+type DashContas = { hoje: DashBloco; semana: DashBloco; mes: DashBloco; vencidas: DashBloco };
 
 type Fornecedor = { id: string; nome: string };
 type Categoria = { id: string; nome: string };
@@ -57,15 +55,6 @@ type Pagamento = {
     data: string;
     formaPagamento: string | null;
     observacao: string | null;
-};
-
-type Resumo = {
-    totalAberto: number;
-    totalPago: number;
-    totalVencido: number;
-    quantidadeAberta: number;
-    quantidadeVencida: number;
-    quantidadeTotal: number;
 };
 
 type ContaPagarRecorrente = {
@@ -110,12 +99,22 @@ export function ContasPagar() {
     const { usuario } = useAuth();
     const ehFisica = usuario?.empresaTipoPessoa === 'FISICA';
 
-    const [mesFiltro, setMesFiltro] = useState(mesAtual());
+    // Filtros da lista (a lista sempre sai ordenada por vencimento, do mais próximo pro mais distante)
+    const [periodo, setPeriodo] = useState<'' | 'hoje' | 'semana' | 'mes' | 'vencidas'>('');
+    const [situacao, setSituacao] = useState<'pendentes' | 'pagas' | 'todas'>('pendentes');
+    const [busca, setBusca] = useState('');
+    const [filtroDe, setFiltroDe] = useState('');
+    const [filtroAte, setFiltroAte] = useState('');
+    const [valorMin, setValorMin] = useState('');
+    const [valorMax, setValorMax] = useState('');
+    const [dash, setDash] = useState<DashContas | null>(null);
+    const [detalhe, setDetalhe] = useState<ContaPagar | null>(null);
+    const [detalhePagamentos, setDetalhePagamentos] = useState<Pagamento[]>([]);
+
     const [contas, setContas] = useState<ContaPagar[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(20);
-    const [resumo, setResumo] = useState<Resumo | null>(null);
     const [loading, setLoading] = useState(false);
     const [formAberto, setFormAberto] = useState(false);
     const [salvando, setSalvando] = useState(false);
@@ -164,17 +163,27 @@ export function ContasPagar() {
     async function carregar(pageAlvo = page, pageSizeAlvo = pageSize) {
         setLoading(true);
         try {
-            const [resContas, resResumo] = await Promise.all([
+            const [resContas, resDash] = await Promise.all([
                 api.get('/financeiro-nf/contas-pagar', {
-                    params: { mes: mesFiltro || undefined, page: pageAlvo, pageSize: pageSizeAlvo },
+                    params: {
+                        periodo: periodo || undefined,
+                        situacao: periodo ? undefined : situacao,
+                        busca: busca.trim() || undefined,
+                        de: filtroDe || undefined,
+                        ate: filtroAte || undefined,
+                        valorMin: valorMin || undefined,
+                        valorMax: valorMax || undefined,
+                        page: pageAlvo,
+                        pageSize: pageSizeAlvo,
+                    },
                 }),
-                api.get('/financeiro-nf/contas-pagar/resumo', { params: { mes: mesFiltro || undefined } }),
+                api.get('/financeiro-nf/contas-pagar/dashboard'),
             ]);
             setContas(resContas.data?.items ?? []);
             setTotal(resContas.data?.total ?? 0);
             setPage(resContas.data?.page ?? pageAlvo);
             setPageSize(resContas.data?.pageSize ?? pageSizeAlvo);
-            setResumo(resResumo.data ?? null);
+            setDash(resDash.data ?? null);
         } catch {
             // segue com lista vazia
         } finally {
@@ -216,10 +225,65 @@ export function ContasPagar() {
         }
     }
 
+    // Recarrega ao mudar qualquer filtro (a busca por texto espera o usuário parar de digitar).
     useEffect(() => {
-        carregar(1, pageSize);
+        const t = setTimeout(() => carregar(1, pageSize), busca ? 350 : 0);
+        return () => clearTimeout(t);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [mesFiltro]);
+    }, [periodo, situacao, busca, filtroDe, filtroAte, valorMin, valorMax]);
+
+    // Carrega as baixas da conta aberta no painel de detalhes.
+    useEffect(() => {
+        if (!detalhe) { setDetalhePagamentos([]); return; }
+        let ativo = true;
+        api.get(`/financeiro-nf/contas-pagar/${detalhe.id}/pagamentos`)
+            .then((res) => { if (ativo) setDetalhePagamentos(res.data ?? []); })
+            .catch(() => { if (ativo) setDetalhePagamentos([]); });
+        return () => { ativo = false; };
+    }, [detalhe]);
+
+    function limparFiltros() {
+        setPeriodo('');
+        setSituacao('pendentes');
+        setBusca('');
+        setFiltroDe('');
+        setFiltroAte('');
+        setValorMin('');
+        setValorMax('');
+    }
+
+    function escolherPeriodo(p: typeof periodo) {
+        setBusca('');
+        setFiltroDe('');
+        setFiltroAte('');
+        setValorMin('');
+        setValorMax('');
+        setPeriodo((atual) => (atual === p ? '' : p));
+    }
+
+    // Dia único ou intervalo: limpa o atalho do dashboard pra não conflitar.
+    function mudarDatas(de: string, ate: string) {
+        setPeriodo('');
+        setFiltroDe(de);
+        setFiltroAte(ate);
+    }
+
+    function diasAte(vencimento: string) {
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        const v = new Date(vencimento);
+        v.setHours(0, 0, 0, 0);
+        return Math.round((v.getTime() - hoje.getTime()) / 86400000);
+    }
+
+    function rotuloPrazo(c: ContaPagar) {
+        if (c.status === 'PAGA') return { texto: 'Paga', tom: 'text-green-600 dark:text-green-400' };
+        const d = diasAte(c.vencimento);
+        if (d < 0) return { texto: `Vencida há ${-d} dia${d === -1 ? '' : 's'}`, tom: 'text-red-600 dark:text-red-400' };
+        if (d === 0) return { texto: 'Vence hoje', tom: 'text-amber-600 dark:text-amber-400' };
+        if (d === 1) return { texto: 'Vence amanhã', tom: 'text-amber-600 dark:text-amber-400' };
+        return { texto: `Em ${d} dias`, tom: 'text-gray-500 dark:text-gray-400' };
+    }
 
     useEffect(() => {
         carregarCadastros();
@@ -458,28 +522,117 @@ export function ContasPagar() {
             <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Contas a Pagar</h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Lançamentos manuais de contas da empresa.
+                    Organizadas por vencimento. Clique em um card para filtrar e em uma conta para ver os detalhes.
                 </p>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <label className={labelClasse}>Mês</label>
-                    <input type="month" value={mesFiltro} onChange={(e) => setMesFiltro(e.target.value)} className={campoClasse} />
+            {dash && (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {([
+                        { chave: 'hoje', titulo: 'Hoje', tom: 'text-amber-600 dark:text-amber-400', borda: 'border-amber-400' },
+                        { chave: 'semana', titulo: 'Esta semana', tom: 'text-blue-600 dark:text-blue-400', borda: 'border-blue-500' },
+                        { chave: 'mes', titulo: 'Este mês', tom: 'text-gray-900 dark:text-white', borda: 'border-gray-500' },
+                        { chave: 'vencidas', titulo: 'Vencidas', tom: 'text-red-600 dark:text-red-400', borda: 'border-red-500' },
+                    ] as const).map((b) => {
+                        const bloco = dash[b.chave];
+                        const ativo = periodo === b.chave;
+                        return (
+                            <div
+                                key={b.chave}
+                                className={`p-4 rounded-xl bg-white dark:bg-[#111827] border text-left transition ${ativo
+                                    ? `${b.borda} ring-2 ring-offset-0 ring-current/20`
+                                    : 'border-gray-200 dark:border-gray-800'
+                                    }`}
+                            >
+                                <button type="button" onClick={() => escolherPeriodo(b.chave)} className="w-full text-left">
+                                    <p className="text-xs text-gray-400">{b.titulo}</p>
+                                    <p className={`text-lg font-bold ${b.tom}`}>{formatCurrency(bloco.valor)}</p>
+                                    <p className="text-xs text-gray-400">
+                                        {bloco.quantidade} conta{bloco.quantidade === 1 ? '' : 's'}
+                                    </p>
+                                </button>
+                                {b.chave === 'vencidas' && bloco.quantidade > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={colocarAtrasadasHoje}
+                                        disabled={colocandoAtrasadasHoje}
+                                        className="mt-2 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 disabled:opacity-50 transition"
+                                    >
+                                        {colocandoAtrasadasHoje ? <Loader2 size={13} className="animate-spin" /> : <ArrowUpCircle size={13} />}
+                                        Mandar todas pra hoje
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 space-y-3">
+                <div className="grid sm:grid-cols-2 lg:grid-cols-6 gap-3">
+                    <div className="lg:col-span-2">
+                        <label className={labelClasse}>Buscar (nome, fornecedor, categoria, placa)</label>
+                        <input
+                            value={busca}
+                            onChange={(e) => { setPeriodo(''); setBusca(e.target.value); }}
+                            className={campoClasse}
+                            placeholder="Ex: energia, posto, QPM..."
+                        />
+                    </div>
+                    <div>
+                        <label className={labelClasse}>Vencimento de</label>
+                        <input type="date" value={filtroDe} onChange={(e) => mudarDatas(e.target.value, filtroAte)} className={campoClasse} />
+                    </div>
+                    <div>
+                        <label className={labelClasse}>até</label>
+                        <input type="date" value={filtroAte} onChange={(e) => mudarDatas(filtroDe, e.target.value)} className={campoClasse} />
+                    </div>
+                    <div>
+                        <label className={labelClasse}>Valor mín. (R$)</label>
+                        <input type="number" min="0" step="0.01" value={valorMin} onChange={(e) => { setPeriodo(''); setValorMin(e.target.value); }} className={campoClasse} />
+                    </div>
+                    <div>
+                        <label className={labelClasse}>Valor máx. (R$)</label>
+                        <input type="number" min="0" step="0.01" value={valorMax} onChange={(e) => { setPeriodo(''); setValorMax(e.target.value); }} className={campoClasse} />
+                    </div>
                 </div>
 
-                <div className="flex items-center gap-2 flex-wrap">
-                    {resumo && resumo.quantidadeVencida > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                    {(['pendentes', 'pagas', 'todas'] as const).map((s) => (
                         <button
-                            onClick={colocarAtrasadasHoje}
-                            disabled={colocandoAtrasadasHoje}
-                            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-300 dark:border-red-700 text-sm font-medium text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50 transition"
+                            key={s}
+                            type="button"
+                            onClick={() => { setPeriodo(''); setSituacao(s); }}
+                            className={`px-3 py-1 rounded-full text-xs font-medium transition ${!periodo && situacao === s
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                                }`}
                         >
-                            {colocandoAtrasadasHoje ? <Loader2 size={16} className="animate-spin" /> : <ArrowUpCircle size={16} />}
-                            Colocar atrasadas pra hoje
+                            {s === 'pendentes' ? 'Em aberto' : s === 'pagas' ? 'Pagas' : 'Todas'}
+                        </button>
+                    ))}
+                    <button
+                        type="button"
+                        onClick={() => { const h = hojeISO(); mudarDatas(h, h); }}
+                        className="px-3 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+                    >
+                        Só o dia de hoje
+                    </button>
+                    {(periodo || busca || filtroDe || filtroAte || valorMin || valorMax || situacao !== 'pendentes') && (
+                        <button type="button" onClick={limparFiltros} className="px-3 py-1 rounded-full text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition">
+                            Limpar filtros
                         </button>
                     )}
+                    {periodo && (
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                            Mostrando: {{ hoje: 'a pagar hoje', semana: 'desta semana', mes: 'deste mês', vencidas: 'vencidas' }[periodo]}
+                        </span>
+                    )}
+                </div>
+            </div>
 
+            <div className="flex flex-wrap items-center justify-end gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
                     {!ehFisica && (
                         <button
                             onClick={() => navigate('/financeiro-nf/contas-pagar/conciliar')}
@@ -499,29 +652,6 @@ export function ContasPagar() {
                     </button>
                 </div>
             </div>
-
-            {resumo && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="p-4 rounded-xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
-                        <p className="text-xs text-gray-400">Em aberto</p>
-                        <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(resumo.totalAberto)}</p>
-                        <p className="text-xs text-gray-400">{resumo.quantidadeAberta} conta{resumo.quantidadeAberta === 1 ? '' : 's'}</p>
-                    </div>
-                    <div className="p-4 rounded-xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
-                        <p className="text-xs text-gray-400">Vencidas</p>
-                        <p className="text-lg font-bold text-red-600 dark:text-red-400">{formatCurrency(resumo.totalVencido)}</p>
-                        <p className="text-xs text-gray-400">{resumo.quantidadeVencida} conta{resumo.quantidadeVencida === 1 ? '' : 's'}</p>
-                    </div>
-                    <div className="p-4 rounded-xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
-                        <p className="text-xs text-gray-400">Pago no mês</p>
-                        <p className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(resumo.totalPago)}</p>
-                    </div>
-                    <div className="p-4 rounded-xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
-                        <p className="text-xs text-gray-400">Total de contas</p>
-                        <p className="text-lg font-bold text-gray-900 dark:text-white">{resumo.quantidadeTotal}</p>
-                    </div>
-                </div>
-            )}
 
             {formAberto && (
                 <div className="p-5 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 space-y-4">
@@ -706,7 +836,7 @@ export function ContasPagar() {
                 {loading ? (
                     <p className="text-sm text-gray-400 py-8 text-center">Carregando...</p>
                 ) : contas.length === 0 ? (
-                    <p className="text-sm text-gray-400 py-8 text-center">Nenhuma conta nesse mês.</p>
+                    <p className="text-sm text-gray-400 py-8 text-center">Nenhuma conta encontrada com esses filtros.</p>
                 ) : (
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
@@ -724,7 +854,10 @@ export function ContasPagar() {
                             <tbody>
                                 {contas.map((c) => (
                                     <Fragment key={c.id}>
-                                        <tr className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300">
+                                        <tr
+                                            onClick={() => setDetalhe(c)}
+                                            className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/40"
+                                        >
                                             <td className="py-2.5 px-4">
                                                 <p className="font-semibold text-gray-900 dark:text-white">{c.descricao}</p>
                                                 {c.caminhao && (
@@ -738,7 +871,10 @@ export function ContasPagar() {
                                             </td>
                                             <td className="py-2.5 px-4">{c.fornecedor?.nome ?? '-'}</td>
                                             <td className="py-2.5 px-4">{c.categoria?.nome ?? '-'}</td>
-                                            <td className="py-2.5 px-4 whitespace-nowrap">{new Date(c.vencimento).toLocaleDateString('pt-BR')}</td>
+                                            <td className="py-2.5 px-4 whitespace-nowrap">
+                                                <p>{new Date(c.vencimento).toLocaleDateString('pt-BR')}</p>
+                                                <p className={`text-xs ${rotuloPrazo(c).tom}`}>{rotuloPrazo(c).texto}</p>
+                                            </td>
                                             <td className="py-2.5 px-4">
                                                 <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(c.valor)}</p>
                                                 {c.status === 'PARCIAL' && (
@@ -752,9 +888,9 @@ export function ContasPagar() {
                                                     {traduzStatus[c.status]}
                                                 </span>
                                             </td>
-                                            <td className="py-2.5 px-4">
+                                            <td className="py-2.5 px-4" onClick={(e) => e.stopPropagation()}>
                                                 <div className="flex items-center gap-2">
-                                                    {c.status === 'VENCIDA' && (
+                                                    {c.status !== 'PAGA' && c.status !== 'CANCELADA' && diasAte(c.vencimento) < 0 && (
                                                         <button
                                                             onClick={() => incluirHoje(c)}
                                                             title={c.queuedForPaymentAt ? 'Remover de hoje' : 'Incluir em hoje'}
@@ -828,6 +964,93 @@ export function ContasPagar() {
                     </div>
                 )}
             </div>
+
+            {detalhe && (
+                <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setDetalhe(null)}>
+                    <div className="w-full max-w-lg bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <h3 className="font-semibold text-gray-900 dark:text-white">{detalhe.descricao}</h3>
+                                <p className={`text-xs mt-0.5 ${rotuloPrazo(detalhe).tom}`}>{rotuloPrazo(detalhe).texto}</p>
+                            </div>
+                            <button onClick={() => setDetalhe(null)} className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                            {[
+                                ['Valor', formatCurrency(detalhe.valor)],
+                                ['Saldo a pagar', formatCurrency(detalhe.saldoDevedor ?? detalhe.valor)],
+                                ['Vencimento', new Date(detalhe.vencimento).toLocaleDateString('pt-BR')],
+                                ['Status', traduzStatus[detalhe.status]],
+                                ['Fornecedor', detalhe.fornecedor?.nome ?? '-'],
+                                ['Categoria', detalhe.categoria?.nome ?? '-'],
+                                ['Forma de pagamento', FORMAS_PAGAMENTO.find((f) => f.value === detalhe.formaPagamento)?.label ?? detalhe.formaPagamento],
+                                ['Tipo', TIPOS_CONTA.find((t) => t.value === detalhe.tipo)?.label ?? detalhe.tipo],
+                                ['Caminhão', detalhe.caminhao?.placa ?? '-'],
+                                ['Pago em', detalhe.pagoEm ? new Date(detalhe.pagoEm).toLocaleDateString('pt-BR') : '-'],
+                            ].map(([rotulo, valor]) => (
+                                <div key={rotulo}>
+                                    <dt className="text-xs text-gray-400">{rotulo}</dt>
+                                    <dd className="text-gray-900 dark:text-white font-medium">{valor}</dd>
+                                </div>
+                            ))}
+                        </dl>
+
+                        {detalhe.observacao && (
+                            <div>
+                                <p className="text-xs text-gray-400">Observação</p>
+                                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{detalhe.observacao}</p>
+                            </div>
+                        )}
+
+                        <div>
+                            <p className="text-xs text-gray-400 mb-1.5">Baixas (pagamentos)</p>
+                            {detalhePagamentos.length === 0 ? (
+                                <p className="text-xs text-gray-400">Nenhuma baixa registrada.</p>
+                            ) : (
+                                <div className="space-y-1.5">
+                                    {detalhePagamentos.map((p) => (
+                                        <div key={p.id} className="text-xs bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-800 rounded-lg px-3 py-1.5 text-gray-700 dark:text-gray-300">
+                                            {new Date(p.data).toLocaleDateString('pt-BR')} — {formatCurrency(p.valor)}
+                                            {p.formaPagamento ? ` · ${p.formaPagamento}` : ''}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex flex-wrap justify-end gap-2 pt-1">
+                            {detalhe.status !== 'PAGA' && detalhe.status !== 'CANCELADA' && (
+                                <>
+                                    <button
+                                        onClick={() => { const c = detalhe; setDetalhe(null); incluirHoje(c); }}
+                                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                                    >
+                                        <Clock size={14} />
+                                        {detalhe.queuedForPaymentAt ? 'Tirar de hoje' : 'Pagar hoje'}
+                                    </button>
+                                    <button
+                                        onClick={() => { const c = detalhe; setDetalhe(null); abrirPagamento(c); }}
+                                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition"
+                                    >
+                                        <CheckCircle2 size={14} />
+                                        Registrar pagamento
+                                    </button>
+                                </>
+                            )}
+                            <button
+                                onClick={() => { const c = detalhe; setDetalhe(null); editar(c); }}
+                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                            >
+                                <Pencil size={14} />
+                                Editar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {contaPagamento && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
