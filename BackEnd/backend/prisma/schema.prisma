@@ -211,6 +211,11 @@ model Empresa {
   configuracaoPagamentoMotorista ConfiguracaoPagamentoMotorista?
 
   lancamentosCaminhao LancamentoCaminhao[]
+
+  pagamentosAvisados PagamentoAvisado[]
+
+  // Link secreto (sem login) pra o proprietário só enviar avisos de pagamento.
+  tokenAvisoPagamento String? @unique
 }
 
 // Perfil dentro da própria empresa (não confundir com isAdminMaster, que é
@@ -1070,6 +1075,12 @@ model ContaPagar {
   // padrão do Bill.queuedForPaymentAt no Controle NF.
   queuedForPaymentAt DateTime?
 
+  // Separa o "quadro" da conta: FORNECEDORES (urgentes, padrão), IMPOSTOS
+  // (dá pra parcelar/dividir com calma) e SOCIOS (só controle). Só
+  // FORNECEDORES entra no Contas a Pagar principal, no "mandar atrasadas
+  // pra hoje" e no aviso diário de WhatsApp.
+  grupo GrupoContaPagar @default(FORNECEDORES)
+
   arquivoUrl              String?
   comprovantePagamentoUrl String?
   observacao              String?
@@ -1093,6 +1104,13 @@ model ContaPagar {
   @@index([status])
   @@index([vencimento])
   @@index([queuedForPaymentAt])
+  @@index([empresaId, grupo])
+}
+
+enum GrupoContaPagar {
+  FORNECEDORES
+  IMPOSTOS
+  SOCIOS
 }
 
 enum TipoRecorrenciaContaPagar {
@@ -1393,4 +1411,46 @@ model FiscalPreparoItem {
   updatedAt DateTime @updatedAt
 
   @@unique([tipo, chave])
+}
+
+
+// Pagamento "avisado" por quem pagou (ex: proprietário) pra o financeiro
+// conciliar depois. Pode ter só valor + fornecedor, ou o comprovante
+// (foto/PDF, guardado no próprio banco pra sobreviver a rebuild do container).
+enum StatusPagamentoAvisado {
+  PENDENTE
+  CONCILIADO
+  DESCARTADO
+}
+
+model PagamentoAvisado {
+  id        String   @id @default(uuid())
+  empresaId String
+  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  fornecedor String
+  valor      Float
+  dataPagamento DateTime
+  descricao  String?
+
+  comprovante     Bytes?
+  comprovanteNome String?
+  comprovanteMime String?
+
+  avisadoPorId    String?
+  avisadoPorNome  String?
+
+  // ID da transação Pix lido do comprovante — evita enviar o mesmo duas vezes.
+  idTransacao     String?
+
+  status          StatusPagamentoAvisado @default(PENDENTE)
+  conciliadoEm    DateTime?
+  conciliadoPor   String?
+  contaPagarId    String?
+  observacaoFinanceiro String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([empresaId, idTransacao])
+  @@index([empresaId, status])
 }

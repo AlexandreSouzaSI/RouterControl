@@ -4,6 +4,7 @@ import { Plus, Loader2, CheckCircle2, Trash2, Pencil, Landmark, X, History, Repe
 import { api } from '../services/api';
 import { Pagination } from '../components/Pagination';
 import { useAuth } from '../context/AuthContext';
+import { AbasContas } from '../components/AbasContas';
 
 // =============================================================================
 // Contas a Pagar — página própria (grupo Financeiro no menu). Lançamento
@@ -47,7 +48,17 @@ type ContaPagar = {
     valorPago?: number;
     saldoDevedor?: number;
     queuedForPaymentAt?: string | null;
+    grupo?: Grupo;
 };
+
+type Grupo = 'FORNECEDORES' | 'IMPOSTOS' | 'SOCIOS' | 'TODOS';
+
+const GRUPOS: Array<{ value: Grupo; label: string; descricao: string }> = [
+    { value: 'TODOS', label: 'Todas (classificar)', descricao: 'Visão de todos os quadros juntos — use o lápis para mover cada conta para Fornecedores, Impostos ou Sócios.' },
+    { value: 'FORNECEDORES', label: 'Fornecedores', descricao: 'Contas urgentes com fornecedores. Organizadas por vencimento.' },
+    { value: 'IMPOSTOS', label: 'Impostos', descricao: 'Guias e tributos — separados das contas urgentes, para dividir/pagar com calma.' },
+    { value: 'SOCIOS', label: 'Sócios', descricao: 'Retiradas, pró-labore e empréstimos — apenas controle, fora das contas urgentes.' },
+];
 
 type Pagamento = {
     id: string;
@@ -98,6 +109,10 @@ export function ContasPagar() {
     const navigate = useNavigate();
     const { usuario } = useAuth();
     const ehFisica = usuario?.empresaTipoPessoa === 'FISICA';
+
+    // Quadro atual (Fornecedores / Impostos / Sócios) e grupo escolhido no formulário
+    const [grupo, setGrupo] = useState<Grupo>('FORNECEDORES');
+    const [formGrupo, setFormGrupo] = useState<Grupo>('FORNECEDORES');
 
     // Filtros da lista (a lista sempre sai ordenada por vencimento, do mais próximo pro mais distante)
     const [periodo, setPeriodo] = useState<'' | 'hoje' | 'semana' | 'mes' | 'vencidas'>('');
@@ -166,6 +181,7 @@ export function ContasPagar() {
             const [resContas, resDash] = await Promise.all([
                 api.get('/financeiro-nf/contas-pagar', {
                     params: {
+                        grupo,
                         periodo: periodo || undefined,
                         situacao: periodo ? undefined : situacao,
                         busca: busca.trim() || undefined,
@@ -177,7 +193,7 @@ export function ContasPagar() {
                         pageSize: pageSizeAlvo,
                     },
                 }),
-                api.get('/financeiro-nf/contas-pagar/dashboard'),
+                api.get('/financeiro-nf/contas-pagar/dashboard', { params: { grupo } }),
             ]);
             setContas(resContas.data?.items ?? []);
             setTotal(resContas.data?.total ?? 0);
@@ -230,7 +246,7 @@ export function ContasPagar() {
         const t = setTimeout(() => carregar(1, pageSize), busca ? 350 : 0);
         return () => clearTimeout(t);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [periodo, situacao, busca, filtroDe, filtroAte, valorMin, valorMax]);
+    }, [grupo, periodo, situacao, busca, filtroDe, filtroAte, valorMin, valorMax]);
 
     // Carrega as baixas da conta aberta no painel de detalhes.
     useEffect(() => {
@@ -301,6 +317,7 @@ export function ContasPagar() {
         setCategoriaNome('');
         setCaminhaoId('');
         setObservacao('');
+        setFormGrupo(grupo === 'TODOS' ? 'FORNECEDORES' : grupo);
         setEditandoId(null);
         setRecorrente(false);
         setTipoRecorrencia('MENSAL');
@@ -319,6 +336,7 @@ export function ContasPagar() {
         setCategoriaNome(conta.categoria?.nome ?? '');
         setCaminhaoId(conta.caminhao?.id ?? '');
         setObservacao(conta.observacao ?? '');
+        setFormGrupo(conta.grupo ?? 'FORNECEDORES');
         setFormAberto(true);
     }
 
@@ -358,6 +376,7 @@ export function ContasPagar() {
                 categoriaId,
                 caminhaoId: !ehFisica ? (caminhaoId || undefined) : undefined,
                 observacao: observacao || undefined,
+                grupo: formGrupo,
             };
 
             if (editandoId) {
@@ -519,11 +538,28 @@ export function ContasPagar() {
 
     return (
         <div className="space-y-6">
+            <AbasContas ativa="pagar" />
             <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Contas a Pagar</h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Organizadas por vencimento. Clique em um card para filtrar e em uma conta para ver os detalhes.
+                    {GRUPOS.find((g) => g.value === grupo)?.descricao} Clique em um card para filtrar e em uma conta para ver os detalhes.
                 </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+                {GRUPOS.map((g) => (
+                    <button
+                        key={g.value}
+                        type="button"
+                        onClick={() => { setPeriodo(''); setGrupo(g.value); setPage(1); }}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition ${grupo === g.value
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                            }`}
+                    >
+                        {g.label}
+                    </button>
+                ))}
             </div>
 
             {dash && (
@@ -551,7 +587,7 @@ export function ContasPagar() {
                                         {bloco.quantidade} conta{bloco.quantidade === 1 ? '' : 's'}
                                     </p>
                                 </button>
-                                {b.chave === 'vencidas' && bloco.quantidade > 0 && (
+                                {b.chave === 'vencidas' && bloco.quantidade > 0 && grupo === 'FORNECEDORES' && (
                                     <button
                                         type="button"
                                         onClick={colocarAtrasadasHoje}
@@ -671,6 +707,16 @@ export function ContasPagar() {
                     </div>
 
                     <div className="grid sm:grid-cols-3 gap-3">
+                        <div>
+                            <label className={labelClasse}>Quadro</label>
+                            <select
+                                value={formGrupo}
+                                onChange={(e) => { setFormGrupo(e.target.value as Grupo); if (e.target.value !== 'FORNECEDORES') setRecorrente(false); }}
+                                className={campoClasse}
+                            >
+                                {GRUPOS.filter((g) => g.value !== 'TODOS').map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+                            </select>
+                        </div>
                         {!recorrente && (
                             <div>
                                 <label className={labelClasse}>Vencimento *</label>
@@ -736,7 +782,7 @@ export function ContasPagar() {
                         <textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} className={campoClasse} rows={2} />
                     </div>
 
-                    {!editandoId && (
+                    {!editandoId && formGrupo === 'FORNECEDORES' && (
                         <div className="pt-3 border-t border-gray-100 dark:border-gray-800 space-y-3">
                             <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
                                 <input
@@ -870,7 +916,12 @@ export function ContasPagar() {
                                                 )}
                                             </td>
                                             <td className="py-2.5 px-4">{c.fornecedor?.nome ?? '-'}</td>
-                                            <td className="py-2.5 px-4">{c.categoria?.nome ?? '-'}</td>
+                                            <td className="py-2.5 px-4">
+                                                {c.categoria?.nome ?? '-'}
+                                                {grupo === 'TODOS' && (
+                                                    <p className="text-[10px] uppercase text-gray-400">{c.grupo ?? 'FORNECEDORES'}</p>
+                                                )}
+                                            </td>
                                             <td className="py-2.5 px-4 whitespace-nowrap">
                                                 <p>{new Date(c.vencimento).toLocaleDateString('pt-BR')}</p>
                                                 <p className={`text-xs ${rotuloPrazo(c).tom}`}>{rotuloPrazo(c).texto}</p>
@@ -890,7 +941,7 @@ export function ContasPagar() {
                                             </td>
                                             <td className="py-2.5 px-4" onClick={(e) => e.stopPropagation()}>
                                                 <div className="flex items-center gap-2">
-                                                    {c.status !== 'PAGA' && c.status !== 'CANCELADA' && diasAte(c.vencimento) < 0 && (
+                                                    {grupo === 'FORNECEDORES' && c.status !== 'PAGA' && c.status !== 'CANCELADA' && diasAte(c.vencimento) < 0 && (
                                                         <button
                                                             onClick={() => incluirHoje(c)}
                                                             title={c.queuedForPaymentAt ? 'Remover de hoje' : 'Incluir em hoje'}
@@ -1024,6 +1075,7 @@ export function ContasPagar() {
                         <div className="flex flex-wrap justify-end gap-2 pt-1">
                             {detalhe.status !== 'PAGA' && detalhe.status !== 'CANCELADA' && (
                                 <>
+                                    {(detalhe.grupo ?? 'FORNECEDORES') === 'FORNECEDORES' && (
                                     <button
                                         onClick={() => { const c = detalhe; setDetalhe(null); incluirHoje(c); }}
                                         className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
@@ -1031,6 +1083,7 @@ export function ContasPagar() {
                                         <Clock size={14} />
                                         {detalhe.queuedForPaymentAt ? 'Tirar de hoje' : 'Pagar hoje'}
                                     </button>
+                                    )}
                                     <button
                                         onClick={() => { const c = detalhe; setDetalhe(null); abrirPagamento(c); }}
                                         className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition"

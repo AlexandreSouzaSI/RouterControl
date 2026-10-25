@@ -453,6 +453,14 @@ export class FinanceiroNfService {
 
     private static readonly STATUS_PENDENTES: StatusContaPagar[] = ['ABERTA', 'VENCIDA', 'PARCIAL'] as StatusContaPagar[];
 
+    // Sem grupo informado = FORNECEDORES, pra o Contas a Pagar principal
+    // nunca misturar impostos/sócios sem querer.
+    private normalizarGrupo(grupo?: string): 'FORNECEDORES' | 'IMPOSTOS' | 'SOCIOS' | 'TODOS' {
+        const g = (grupo ?? '').toUpperCase();
+        if (g === 'IMPOSTOS' || g === 'SOCIOS' || g === 'TODOS') return g;
+        return 'FORNECEDORES';
+    }
+
     async listarContasPagar(
         empresaId: string,
         filtros?: {
@@ -465,12 +473,16 @@ export class FinanceiroNfService {
             valorMax?: string;
             periodo?: string; // hoje | semana | mes | vencidas
             situacao?: string; // pendentes | pagas | todas
+            grupo?: string; // FORNECEDORES (padrão) | IMPOSTOS | SOCIOS | TODOS
             page?: string;
             pageSize?: string;
         },
     ) {
         const where: any = { empresaId };
         const and: any[] = [];
+
+        const grupo = this.normalizarGrupo(filtros?.grupo);
+        if (grupo !== 'TODOS') where.grupo = grupo;
 
         if (filtros?.status) where.status = filtros.status;
 
@@ -516,9 +528,9 @@ export class FinanceiroNfService {
                     ],
                 });
             } else if (filtros.periodo === 'semana') {
-                where.vencimento = { gte: j.inicioSemana, lt: j.fimSemana };
+                where.vencimento = { gte: j.amanha, lt: j.fimSemana };
             } else if (filtros.periodo === 'mes') {
-                where.vencimento = { gte: j.inicioMes, lt: j.fimMes };
+                where.vencimento = { gte: j.amanha, lt: j.fimMes };
             }
         }
 
@@ -573,11 +585,16 @@ export class FinanceiroNfService {
 
     // Cards do dashboard: quanto (saldo devedor) e quantas contas pendentes
     // vencem hoje, na semana, no mês e quantas estão vencidas.
-    async dashboardContasPagar(empresaId: string) {
+    async dashboardContasPagar(empresaId: string, grupoParam?: string) {
         const j = this.janelasContasPagar();
+        const grupo = this.normalizarGrupo(grupoParam);
 
         const contas = await this.prisma.contaPagar.findMany({
-            where: { empresaId, status: { in: FinanceiroNfService.STATUS_PENDENTES } },
+            where: {
+                empresaId,
+                status: { in: FinanceiroNfService.STATUS_PENDENTES },
+                ...(grupo !== 'TODOS' ? { grupo } : {}),
+            },
             include: { pagamentos: true },
         });
 
@@ -595,8 +612,9 @@ export class FinanceiroNfService {
 
             if (venc < j.hoje) somar(r.vencidas, saldo);
             if ((venc >= j.hoje && venc < j.amanha) || c.queuedForPaymentAt) somar(r.hoje, saldo);
-            if (venc >= j.inicioSemana && venc < j.fimSemana) somar(r.semana, saldo);
-            if (venc >= j.inicioMes && venc < j.fimMes) somar(r.mes, saldo);
+            // Semana/Mês: só o que AINDA vai vencer (depois de hoje); atrasadas ficam em Vencidas.
+            if (venc >= j.amanha && venc < j.fimSemana) somar(r.semana, saldo);
+            if (venc >= j.amanha && venc < j.fimMes) somar(r.mes, saldo);
         }
 
         return r;
@@ -677,6 +695,7 @@ export class FinanceiroNfService {
             pixChave?: string;
             pixTipoChave?: TipoChavePix;
             observacao?: string;
+            grupo?: string;
         },
     ) {
         if (!body.descricao?.trim()) {
@@ -710,6 +729,7 @@ export class FinanceiroNfService {
                 pixChave: body.pixChave?.trim() || null,
                 pixTipoChave: body.pixTipoChave,
                 observacao: body.observacao?.trim() || null,
+                grupo: (this.normalizarGrupo(body.grupo) === 'TODOS' ? 'FORNECEDORES' : this.normalizarGrupo(body.grupo)) as any,
             },
             include: { fornecedor: true, categoria: true, caminhao: true },
         });
@@ -734,6 +754,12 @@ export class FinanceiroNfService {
         if (body.pixTipoChave !== undefined) data.pixTipoChave = body.pixTipoChave;
         if (body.observacao !== undefined) data.observacao = body.observacao?.trim() || null;
         if (body.status !== undefined) data.status = body.status;
+        if (body.grupo !== undefined) {
+            const g = this.normalizarGrupo(body.grupo);
+            data.grupo = g === 'TODOS' ? 'FORNECEDORES' : g;
+            // Quem sai de Fornecedores não deve ficar na fila "pagar hoje".
+            if (data.grupo !== 'FORNECEDORES') data.queuedForPaymentAt = null;
+        }
 
         return this.prisma.contaPagar.update({
             where: { id },
@@ -952,6 +978,8 @@ export class FinanceiroNfService {
                 status: { in: ['ABERTA', 'PARCIAL'] },
                 vencimento: { lt: hoje },
                 queuedForPaymentAt: null,
+                // Impostos e sócios nunca entram no "tudo pra hoje".
+                grupo: 'FORNECEDORES',
             },
             data: { queuedForPaymentAt: new Date() },
         });
@@ -1176,6 +1204,7 @@ export class FinanceiroNfService {
                 empresaId,
                 status: { in: ['ABERTA', 'PARCIAL'] },
                 vencimento: { gte: hoje, lte: fimHoje },
+                grupo: 'FORNECEDORES',
             },
             orderBy: { valor: 'desc' },
         });

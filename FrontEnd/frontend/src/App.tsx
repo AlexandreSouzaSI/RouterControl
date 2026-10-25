@@ -22,6 +22,8 @@ import { NfTransporte } from './pages/NfTransporte';
 import { NfServico } from './pages/NfServico';
 import { ContasPagar } from './pages/ContasPagar';
 import { ContasPagarConciliar } from './pages/ContasPagarConciliar';
+import { ContaPaga } from './pages/ContaPaga';
+import { AvisarPagamento } from './pages/AvisarPagamento';
 import { Cadastros } from './pages/Cadastros';
 import { Admin } from './pages/Admin';
 
@@ -43,6 +45,7 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/avisar/:token" element={<AvisarPagamento />} />
 
           <Route
             path="*"
@@ -69,6 +72,7 @@ export default function App() {
                     <Route path="/financeiro-nf/servico" element={<NfServico />} />
                     <Route path="/financeiro-nf/contas-pagar" element={<ContasPagar />} />
                     <Route path="/financeiro-nf/contas-pagar/conciliar" element={<ContasPagarConciliar />} />
+                    <Route path="/financeiro-nf/conta-paga" element={<ContaPaga />} />
                     <Route path="/cadastros" element={<Cadastros />} />
                     <Route path="/admin" element={<Admin />} />
                   </Routes>

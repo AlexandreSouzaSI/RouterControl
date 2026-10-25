@@ -111,6 +111,17 @@ function traduzForma(texto: string): string {
     return 'BOLETO';
 }
 
+// Separa o "quadro" da conta pela categoria: impostos e sócios ficam fora do
+// Contas a Pagar urgente (fornecedores).
+function grupoDaConta(categoria: string, descricao: string): 'FORNECEDORES' | 'IMPOSTOS' | 'SOCIOS' {
+    const c = normalizar(categoria);
+    const d = normalizar(descricao);
+    if (/^imposto|^gnre|^tributo/.test(c) || /\b(darf|das|gfd|fgts|icms|issqn|irrf|ipva)\b/.test(d)) return 'IMPOSTOS';
+    if (/pro-?labore|retirada socio|alimentacao socio|emprestimo|distribuicao de lucro/.test(c)) return 'SOCIOS';
+    if (/distribuicao de lucro|pro-?labore/.test(d)) return 'SOCIOS';
+    return 'FORNECEDORES';
+}
+
 function tipoDaForma(forma: string): string {
     if (forma === 'PIX') return 'PIX';
     if (forma === 'BOLETO') return 'BOLETO';
@@ -282,6 +293,7 @@ async function main() {
                     fornecedorId: fornecedorNome ? (await fornecedorId(fornecedorNome)) || null : null,
                     categoriaId: categoriaNome ? (await categoriaId(categoriaNome)) || null : null,
                     caminhaoId: caminhao?.id ?? null,
+                    grupo: grupoDaConta(categoriaNome, descricao),
                 } as any,
             });
 

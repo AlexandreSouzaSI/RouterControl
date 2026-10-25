@@ -184,15 +184,16 @@ export class FinanceiroNfController {
         @Query('valorMax') valorMax?: string,
         @Query('periodo') periodo?: string,
         @Query('situacao') situacao?: string,
+        @Query('grupo') grupo?: string,
     ) {
         return this.service.listarContasPagar(empresaId, {
-            status, mes, page, pageSize, de, ate, busca, valorMin, valorMax, periodo, situacao,
+            status, mes, page, pageSize, de, ate, busca, valorMin, valorMax, periodo, situacao, grupo,
         });
     }
 
     @Get('contas-pagar/dashboard')
-    dashboardContasPagar(@EmpresaAtual() empresaId: string) {
-        return this.service.dashboardContasPagar(empresaId);
+    dashboardContasPagar(@EmpresaAtual() empresaId: string, @Query('grupo') grupo?: string) {
+        return this.service.dashboardContasPagar(empresaId, grupo);
     }
 
     @Get('contas-pagar/resumo')
