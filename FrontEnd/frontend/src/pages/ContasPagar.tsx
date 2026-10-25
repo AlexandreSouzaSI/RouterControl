@@ -960,7 +960,18 @@ export function ContasPagar() {
                                                 <input type="checkbox" checked={selecionadas.has(c.id)} onChange={() => alternarSelecao(c.id)} />
                                             </td>
                                             <td className="py-2.5 px-4">
-                                                <p className="font-semibold text-gray-900 dark:text-white">{c.descricao}</p>
+                                                <p className="font-semibold text-gray-900 dark:text-white">
+                                                    <span className={`inline-block mr-2 px-2 py-0.5 rounded text-[10px] font-bold uppercase align-middle ${
+                                                        (c.grupo ?? 'FORNECEDORES') === 'IMPOSTOS'
+                                                            ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300'
+                                                            : (c.grupo ?? 'FORNECEDORES') === 'SOCIOS'
+                                                                ? 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300'
+                                                                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'
+                                                    }`}>
+                                                        {{ FORNECEDORES: 'Fornecedor', IMPOSTOS: 'Imposto', SOCIOS: 'Sócio' }[(c.grupo ?? 'FORNECEDORES') as 'FORNECEDORES' | 'IMPOSTOS' | 'SOCIOS']}
+                                                    </span>
+                                                    {c.descricao}
+                                                </p>
                                                 {c.caminhao && (
                                                     <Link
                                                         to={`/caminhoes/${encodeURIComponent(c.caminhao.placa)}`}
@@ -973,9 +984,6 @@ export function ContasPagar() {
                                             <td className="py-2.5 px-4">{c.fornecedor?.nome ?? '-'}</td>
                                             <td className="py-2.5 px-4">
                                                 {c.categoria?.nome ?? '-'}
-                                                {grupo === 'TODOS' && (
-                                                    <p className="text-[10px] uppercase text-gray-400">{c.grupo ?? 'FORNECEDORES'}</p>
-                                                )}
                                             </td>
                                             <td className="py-2.5 px-4 whitespace-nowrap">
                                                 <p>{new Date(c.vencimento).toLocaleDateString('pt-BR')}</p>
