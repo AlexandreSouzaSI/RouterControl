@@ -127,6 +127,37 @@ export function ContasPagar() {
     const [detalhePagamentos, setDetalhePagamentos] = useState<Pagamento[]>([]);
 
     const [contas, setContas] = useState<ContaPagar[]>([]);
+    const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
+    const [movendo, setMovendo] = useState(false);
+
+    function alternarSelecao(id: string) {
+        setSelecionadas((atual) => {
+            const novo = new Set(atual);
+            if (novo.has(id)) novo.delete(id); else novo.add(id);
+            return novo;
+        });
+    }
+
+    function alternarTodas() {
+        setSelecionadas((atual) =>
+            atual.size === contas.length ? new Set() : new Set(contas.map((c) => c.id)),
+        );
+    }
+
+    async function moverSelecionadas(destino: 'FORNECEDORES' | 'IMPOSTOS' | 'SOCIOS') {
+        if (selecionadas.size === 0) return;
+        setMovendo(true);
+        try {
+            await api.patch('/financeiro-nf/contas-pagar/agrupar', { ids: Array.from(selecionadas), grupo: destino });
+            setSelecionadas(new Set());
+            await carregar();
+        } catch (err: any) {
+            alert(err?.response?.data?.message ?? 'Não foi possível mover as contas.');
+        } finally {
+            setMovendo(false);
+        }
+    }
+
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(20);
@@ -551,7 +582,7 @@ export function ContasPagar() {
                     <button
                         key={g.value}
                         type="button"
-                        onClick={() => { setPeriodo(''); setGrupo(g.value); setPage(1); }}
+                        onClick={() => { setPeriodo(''); setSelecionadas(new Set()); setGrupo(g.value); setPage(1); }}
                         className={`px-4 py-2 rounded-lg text-sm font-medium transition ${grupo === g.value
                             ? 'bg-blue-600 text-white'
                             : 'bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -885,9 +916,30 @@ export function ContasPagar() {
                     <p className="text-sm text-gray-400 py-8 text-center">Nenhuma conta encontrada com esses filtros.</p>
                 ) : (
                     <div className="overflow-x-auto">
+                        {selecionadas.size > 0 && (
+                            <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 px-4 py-3 bg-blue-50 dark:bg-blue-500/10 border-b border-blue-200 dark:border-blue-500/30">
+                                <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">
+                                    {selecionadas.size} selecionada{selecionadas.size > 1 ? 's' : ''} — mover para:
+                                </span>
+                                {([['FORNECEDORES', 'Fornecedores'], ['IMPOSTOS', 'Impostos'], ['SOCIOS', 'Sócios']] as const).map(([v, l]) => (
+                                    <button key={v} disabled={movendo} onClick={() => moverSelecionadas(v)}
+                                        className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white disabled:opacity-60">
+                                        {l}
+                                    </button>
+                                ))}
+                                <button onClick={() => setSelecionadas(new Set())} className="px-3 py-1.5 rounded-lg text-sm text-gray-600 dark:text-gray-300">
+                                    Limpar
+                                </button>
+                            </div>
+                        )}
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="text-left text-xs text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-800">
+                                    <th className="py-2.5 pl-4 pr-1 w-8">
+                                        <input type="checkbox" title="Selecionar todas desta página"
+                                            checked={contas.length > 0 && selecionadas.size === contas.length}
+                                            onChange={alternarTodas} />
+                                    </th>
                                     <th className="py-2.5 px-4 font-medium">Descrição</th>
                                     <th className="py-2.5 px-4 font-medium">Fornecedor</th>
                                     <th className="py-2.5 px-4 font-medium">Categoria</th>
@@ -904,6 +956,9 @@ export function ContasPagar() {
                                             onClick={() => setDetalhe(c)}
                                             className="border-b border-gray-50 dark:border-gray-800/60 text-gray-700 dark:text-gray-300 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/40"
                                         >
+                                            <td className="py-2.5 pl-4 pr-1" onClick={(e) => e.stopPropagation()}>
+                                                <input type="checkbox" checked={selecionadas.has(c.id)} onChange={() => alternarSelecao(c.id)} />
+                                            </td>
                                             <td className="py-2.5 px-4">
                                                 <p className="font-semibold text-gray-900 dark:text-white">{c.descricao}</p>
                                                 {c.caminhao && (
@@ -974,7 +1029,7 @@ export function ContasPagar() {
                                         </tr>
                                         {historicoAbertoId === c.id && (
                                             <tr key={`${c.id}-historico`} className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-100 dark:border-gray-800">
-                                                <td colSpan={7} className="py-3 px-4">
+                                                <td colSpan={8} className="py-3 px-4">
                                                     {carregandoHistorico ? (
                                                         <p className="text-xs text-gray-400">Carregando baixas...</p>
                                                     ) : historicoPagamentos.length === 0 ? (

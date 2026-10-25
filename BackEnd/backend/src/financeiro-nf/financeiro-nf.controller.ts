@@ -234,6 +234,16 @@ export class FinanceiroNfController {
         return this.service.criarContaPagar(empresaId, body as any);
     }
 
+    // Move várias contas de uma vez pra Fornecedores / Impostos / Sócios.
+    // Precisa vir antes de 'contas-pagar/:id' pra "agrupar" não virar um id.
+    @Patch('contas-pagar/agrupar')
+    agruparContasPagar(
+        @EmpresaAtual() empresaId: string,
+        @Body() body: { ids: string[]; grupo: string },
+    ) {
+        return this.service.agruparContasPagar(empresaId, body.ids, body.grupo);
+    }
+
     @Patch('contas-pagar/:id')
     atualizarContaPagar(
         @Param('id') id: string,

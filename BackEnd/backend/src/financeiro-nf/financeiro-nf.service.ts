@@ -620,6 +620,23 @@ export class FinanceiroNfService {
         return r;
     }
 
+    async agruparContasPagar(empresaId: string, ids: string[], grupoParam: string) {
+        const grupo = this.normalizarGrupo(grupoParam);
+        if (grupo === 'TODOS') throw new BadRequestException('Escolha Fornecedores, Impostos ou Sócios.');
+        if (!Array.isArray(ids) || ids.length === 0) throw new BadRequestException('Selecione ao menos uma conta.');
+
+        const r = await this.prisma.contaPagar.updateMany({
+            where: { empresaId, id: { in: ids } },
+            data: {
+                grupo: grupo as any,
+                // Fora de Fornecedores não existe "pagar hoje" — tira da fila.
+                ...(grupo !== 'FORNECEDORES' ? { queuedForPaymentAt: null } : {}),
+            },
+        });
+
+        return { atualizadas: r.count };
+    }
+
     async resumoContasPagar(empresaId: string, mes?: string) {
         const where: any = { empresaId };
 
