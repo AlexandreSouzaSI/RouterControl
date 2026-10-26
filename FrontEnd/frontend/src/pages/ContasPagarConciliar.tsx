@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Ban, CheckCircle2, FileUp, Landmark, Loader2, Sparkles } from 'lucide-react';
 import { api } from '../services/api';
+import { RateioCarretasModal } from '../components/RateioCarretasModal';
 
 // =============================================================================
 // Conciliação bancária da Conta a Pagar — importa o extrato (.ofx) e sugere,
@@ -138,6 +139,16 @@ export function ContasPagarConciliar() {
     const [lote, setLote] = useState(false);
     const [filtro, setFiltro] = useState<Filtro>('TODAS');
     const [erro, setErro] = useState<string | null>(null);
+    // Carretas escolhidas por transação (2+ = valor dividido entre elas)
+    const [caminhoes, setCaminhoes] = useState<{ id: string; placa: string }[]>([]);
+    const [carretasEscolha, setCarretasEscolha] = useState<Record<string, string[]>>({});
+    const [rateioFit, setRateioFit] = useState<string | null>(null);
+
+    useEffect(() => {
+        api.get('/caminhoes')
+            .then((r) => setCaminhoes((Array.isArray(r.data) ? r.data : r.data?.data ?? []).filter((c: any) => c.placa)))
+            .catch(() => { });
+    }, []);
     const [saldoRestante, setSaldoRestante] = useState<Record<string, number>>({});
 
     async function carregarContasAbertas() {
@@ -231,6 +242,10 @@ export function ContasPagarConciliar() {
                 : atual.map((c) => (c.id === contaId ? { ...c, saldoDevedor: restante } : c)),
         );
         if (restante > 0.01) setSaldoRestante((atual) => ({ ...atual, [transacao.fitId]: restante }));
+        const carretas = carretasEscolha[transacao.fitId];
+        if (carretas && carretas.length > 0) {
+            await api.patch('/financeiro-nf/contas-pagar/ratear', { ids: [contaId], caminhaoIds: carretas });
+        }
         setStatusLinha((atual) => ({ ...atual, [transacao.fitId]: 'CONFIRMED' }));
     }
 
@@ -469,6 +484,18 @@ export function ContasPagarConciliar() {
 
                                                 <div className="flex gap-2">
                                                     <button
+                                                        type="button"
+                                                        onClick={() => setRateioFit(transacao.fitId)}
+                                                        title="Se o valor é de mais de uma carreta, ele será dividido entre elas"
+                                                        className={`px-3 py-2 rounded-lg border text-sm font-medium transition ${(carretasEscolha[transacao.fitId]?.length ?? 0) > 0 ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300'}`}
+                                                    >
+                                                        🚚 {(carretasEscolha[transacao.fitId]?.length ?? 0) >= 2
+                                                            ? `Dividir em ${carretasEscolha[transacao.fitId].length}`
+                                                            : (carretasEscolha[transacao.fitId]?.length ?? 0) === 1
+                                                                ? caminhoes.find((c) => c.id === carretasEscolha[transacao.fitId][0])?.placa
+                                                                : 'Carretas'}
+                                                    </button>
+                                                    <button
                                                         onClick={() => confirmarVinculo(transacao)}
                                                         disabled={processando || !atual}
                                                         className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
@@ -492,6 +519,15 @@ export function ContasPagarConciliar() {
                         })}
                     </div>
                 </>
+            )}
+            {rateioFit && (
+                <RateioCarretasModal
+                    caminhoes={caminhoes}
+                    valorTotal={Math.abs(transacoes.find((t) => t.fitId === rateioFit)?.amount ?? 0)}
+                    inicial={carretasEscolha[rateioFit] ?? []}
+                    onConfirmar={(ids) => { setCarretasEscolha((e) => ({ ...e, [rateioFit]: ids })); setRateioFit(null); }}
+                    onFechar={() => setRateioFit(null)}
+                />
             )}
         </div>
     );

@@ -53,6 +53,9 @@ model Caminhao {
   empresaId String?
   empresa   Empresa? @relation(fields: [empresaId], references: [id])
 
+  contasReceber       ContaReceber[]
+  rateiosPagar        ContaPagarRateio[]
+  rateiosReceber      ContaReceberRateio[]
   uploadPeriods       UploadPeriod[]
   tripRecords         TripRecord[]
   stopRecords         StopRecord[]
@@ -216,6 +219,9 @@ model Empresa {
 
   // Link secreto (sem login) pra o proprietário só enviar avisos de pagamento.
   tokenAvisoPagamento String? @unique
+  // Link secreto onde o proprietário marca o que quer pagar hoje.
+  tokenPagarHoje      String? @unique
+  contasReceber       ContaReceber[]
 }
 
 // Perfil dentro da própria empresa (não confundir com isAdminMaster, que é
@@ -1030,6 +1036,8 @@ model ContaPagar {
   id        String @id @default(uuid())
   descricao String
   valor     Float
+  // Juros/multa pagos além do valor original (valor continua sendo o original).
+  juros     Float  @default(0)
 
   tipo           TipoContaPagar           @default(BOLETO)
   formaPagamento FormaPagamentoContaPagar @default(BOLETO)
@@ -1092,6 +1100,7 @@ model ContaPagar {
   nfServicos NfServico[] @relation("NfServicoContaPagar")
 
   pagamentos PagamentoContaPagar[]
+  rateios    ContaPagarRateio[]
 
   // Evita gerar a mesma ocorrência duas vezes pra uma recorrência no
   // mesmo vencimento (geração idempotente).
@@ -1443,6 +1452,10 @@ model PagamentoAvisado {
   // ID da transação Pix lido do comprovante — evita enviar o mesmo duas vezes.
   idTransacao     String?
 
+  // Opcionais informados por quem avisa: de qual caminhão foi a despesa e o tipo.
+  caminhaoId      String?
+  categoriaId     String?
+
   status          StatusPagamentoAvisado @default(PENDENTE)
   conciliadoEm    DateTime?
   conciliadoPor   String?
@@ -1453,4 +1466,76 @@ model PagamentoAvisado {
 
   @@unique([empresaId, idTransacao])
   @@index([empresaId, status])
+}
+
+
+enum StatusContaReceber {
+  ABERTA
+  RECEBIDA
+  CANCELADA
+}
+
+// Contas a Receber: fretes/valores que clientes devem pagar. Mesmo estilo de
+// Contas a Pagar (filtros, cards por carreta, edição em massa).
+model ContaReceber {
+  id        String  @id @default(uuid())
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  descricao String
+  cliente   String?
+  valor     Float
+  vencimento DateTime
+
+  // Colunas da planilha de Contas a Receber
+  motorista   String? // placa do cavalo, TERCEIRO, FROTA...
+  cte         String?
+  banco       String?
+  dataEmissao DateTime?
+  referencia  String?
+  comercial   String?
+
+  status        StatusContaReceber @default(ABERTA)
+  recebidoEm    DateTime?
+  valorRecebido Float?
+
+  caminhaoId String?
+  caminhao   Caminhao? @relation(fields: [caminhaoId], references: [id])
+  rateios    ContaReceberRateio[]
+
+  observacao String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([empresaId, status, vencimento])
+  @@index([empresaId, caminhaoId])
+}
+
+
+// Conta paga/recebida que vale para MAIS DE UM caminhão: o valor total é
+// dividido e a parcela de cada caminhão fica aqui (alimenta a aba Caminhões).
+// Conta com rateio fica com caminhaoId nulo.
+model ContaPagarRateio {
+  id           String     @id @default(uuid())
+  contaPagarId String
+  contaPagar   ContaPagar @relation(fields: [contaPagarId], references: [id], onDelete: Cascade)
+  caminhaoId   String
+  caminhao     Caminhao   @relation(fields: [caminhaoId], references: [id], onDelete: Cascade)
+  valor        Float
+
+  @@unique([contaPagarId, caminhaoId])
+  @@index([caminhaoId])
+}
+
+model ContaReceberRateio {
+  id             String       @id @default(uuid())
+  contaReceberId String
+  contaReceber   ContaReceber @relation(fields: [contaReceberId], references: [id], onDelete: Cascade)
+  caminhaoId     String
+  caminhao       Caminhao     @relation(fields: [caminhaoId], references: [id], onDelete: Cascade)
+  valor          Float
+
+  @@unique([contaReceberId, caminhaoId])
+  @@index([caminhaoId])
 }

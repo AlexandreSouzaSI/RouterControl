@@ -175,6 +175,7 @@ export class CaminhaoService {
             .filter((l) => l.tipo === 'RECEITA')
             .reduce((acc, l) => acc + Number(l.valor), 0);
 
+        let totalReceitaFinal = totalReceita;
         let totalDespesa = lancamentos
             .filter((l) => l.tipo === 'DESPESA')
             .reduce((acc, l) => acc + Number(l.valor), 0);
@@ -188,7 +189,26 @@ export class CaminhaoService {
             const contasPagar = await this.prisma.contaPagar.findMany({
                 where: { caminhaoId: caminhao.id, empresaId, status: { not: 'CANCELADA' } },
             });
-            totalDespesa += contasPagar.reduce((acc, c) => acc + c.valor, 0);
+            totalDespesa += contasPagar.reduce((acc, c) => acc + c.valor + (c.status === 'PAGA' ? c.juros ?? 0 : 0), 0);
+
+            // Parcelas de contas pagas/recebidas divididas entre mais de uma carreta.
+            const rateiosPagar = await this.prisma.contaPagarRateio.findMany({
+                where: { caminhaoId: caminhao.id, contaPagar: { empresaId, status: { not: 'CANCELADA' } } },
+                select: { valor: true },
+            });
+            totalDespesa += rateiosPagar.reduce((acc, r) => acc + r.valor, 0);
+
+            // Contas a Receber já recebidas (conciliadas) viram receita do caminhão.
+            const recebidas = await this.prisma.contaReceber.findMany({
+                where: { caminhaoId: caminhao.id, empresaId, status: 'RECEBIDA' },
+                select: { valor: true, valorRecebido: true },
+            });
+            totalReceitaFinal += recebidas.reduce((acc, c) => acc + (c.valorRecebido ?? c.valor), 0);
+            const rateiosReceber = await this.prisma.contaReceberRateio.findMany({
+                where: { caminhaoId: caminhao.id, contaReceber: { empresaId, status: 'RECEBIDA' } },
+                select: { valor: true },
+            });
+            totalReceitaFinal += rateiosReceber.reduce((acc, r) => acc + r.valor, 0);
         }
 
         return {
@@ -198,9 +218,9 @@ export class CaminhaoService {
             ativo: caminhao?.ativo ?? null,
             capacidadeTanqueLitros: caminhao?.capacidadeTanqueLitros ?? null,
             terceiro: !!viagemTerceiro,
-            totalReceita,
+            totalReceita: totalReceitaFinal,
             totalDespesa,
-            diferenca: totalReceita - totalDespesa,
+            diferenca: totalReceitaFinal - totalDespesa,
         };
     }
 
@@ -245,7 +265,45 @@ export class CaminhaoService {
             status: c.status,
         }));
 
-        return [...manuais, ...daContasPagar].sort(
+        const rateiosPagar = await this.prisma.contaPagarRateio.findMany({
+            where: { caminhaoId: caminhao.id, contaPagar: { empresaId, status: { not: 'CANCELADA' } } },
+            include: { contaPagar: { include: { rateios: { select: { id: true } } } } },
+        });
+        const daRateioPagar = rateiosPagar.map((r) => ({
+            id: `rateio-${r.id}`,
+            tipo: 'DESPESA' as const,
+            descricao: `${r.contaPagar.descricao} (Conta a Pagar · dividida em ${r.contaPagar.rateios.length} carretas)`,
+            valor: r.valor,
+            data: r.contaPagar.vencimento,
+            origem: 'CONTA_PAGAR' as const,
+            status: r.contaPagar.status,
+        }));
+
+        const recebidas = await this.prisma.contaReceber.findMany({
+            where: { caminhaoId: caminhao.id, empresaId, status: 'RECEBIDA' },
+        });
+        const daContasReceber = recebidas.map((c) => ({
+            id: `receber-${c.id}`,
+            tipo: 'RECEITA' as const,
+            descricao: `${c.descricao}${c.cliente ? ` — ${c.cliente}` : ''} (Conta a Receber)`,
+            valor: c.valorRecebido ?? c.valor,
+            data: c.recebidoEm ?? c.vencimento,
+            origem: 'CONTA_RECEBER' as const,
+        }));
+        const rateiosReceber = await this.prisma.contaReceberRateio.findMany({
+            where: { caminhaoId: caminhao.id, contaReceber: { empresaId, status: 'RECEBIDA' } },
+            include: { contaReceber: { include: { rateios: { select: { id: true } } } } },
+        });
+        const daRateioReceber = rateiosReceber.map((r) => ({
+            id: `rateio-receber-${r.id}`,
+            tipo: 'RECEITA' as const,
+            descricao: `${r.contaReceber.descricao} (Conta a Receber · dividida em ${r.contaReceber.rateios.length} carretas)`,
+            valor: r.valor,
+            data: r.contaReceber.recebidoEm ?? r.contaReceber.vencimento,
+            origem: 'CONTA_RECEBER' as const,
+        }));
+
+        return [...manuais, ...daContasPagar, ...daRateioPagar, ...daContasReceber, ...daRateioReceber].sort(
             (a, b) => new Date(b.data).getTime() - new Date(a.data).getTime(),
         );
     }

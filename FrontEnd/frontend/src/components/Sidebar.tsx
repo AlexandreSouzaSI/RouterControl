@@ -12,6 +12,7 @@ import {
     Settings2,
     ShieldAlert,
     Warehouse,
+    Banknote,
     type LucideIcon,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
@@ -67,6 +68,7 @@ const grupos: MenuGroup[] = [
             { name: 'NF de Transporte', icon: Truck, path: '/financeiro-nf/transporte' },
             { name: 'NF de Serviço', icon: FileCheck, path: '/financeiro-nf/servico' },
             { name: 'Contas a Pagar', icon: Wallet, path: '/financeiro-nf/contas-pagar' },
+            { name: 'Contas a Receber', icon: Banknote, path: '/financeiro-nf/contas-receber' },
         ],
     },
     {

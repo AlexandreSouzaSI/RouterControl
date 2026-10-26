@@ -185,10 +185,17 @@ export class FinanceiroNfController {
         @Query('periodo') periodo?: string,
         @Query('situacao') situacao?: string,
         @Query('grupo') grupo?: string,
+        @Query('caminhaoId') caminhaoId?: string,
     ) {
         return this.service.listarContasPagar(empresaId, {
-            status, mes, page, pageSize, de, ate, busca, valorMin, valorMax, periodo, situacao, grupo,
+            status, mes, page, pageSize, de, ate, busca, valorMin, valorMax, periodo, situacao, grupo, caminhaoId,
         });
+    }
+
+    // Gasto por caminhão (e contas gerais, sem caminhão). Antes de ':id'.
+    @Get('contas-pagar/por-caminhao')
+    porCaminhao(@EmpresaAtual() empresaId: string, @Query('grupo') grupo?: string) {
+        return this.service.gastoPorCaminhao(empresaId, grupo);
     }
 
     @Get('contas-pagar/dashboard')
@@ -242,6 +249,21 @@ export class FinanceiroNfController {
         @Body() body: { ids: string[]; grupo: string },
     ) {
         return this.service.agruparContasPagar(empresaId, body.ids, body.grupo);
+    }
+
+    // Divide o valor entre 2+ carretas (ou vincula 1 / remove).
+    @Patch('contas-pagar/ratear')
+    ratearContasPagar(@EmpresaAtual() empresaId: string, @Body() body: { ids: string[]; caminhaoIds: string[] }) {
+        return this.service.ratearContasPagar(empresaId, body.ids, body.caminhaoIds ?? []);
+    }
+
+    // Edição em massa: grupo, carreta e/ou categoria das contas marcadas.
+    @Patch('contas-pagar/editar-em-massa')
+    editarContasEmMassa(
+        @EmpresaAtual() empresaId: string,
+        @Body() body: { ids: string[]; grupo?: string; caminhaoId?: string; categoriaId?: string },
+    ) {
+        return this.service.editarContasEmMassa(empresaId, body);
     }
 
     @Patch('contas-pagar/:id')

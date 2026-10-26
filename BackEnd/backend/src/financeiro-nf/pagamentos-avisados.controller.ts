@@ -104,7 +104,7 @@ export class PagamentosAvisadosPublicController {
     @Get(':token')
     async validar(@Param('token') token: string) {
         const e = await this.service.empresaDoToken(token);
-        return { empresa: e.nome };
+        return { empresa: e.nome, ...(await this.service.opcoes(e.id)) };
     }
 
     @Public()

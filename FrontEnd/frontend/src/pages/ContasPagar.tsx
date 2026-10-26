@@ -1,10 +1,13 @@
 import { Fragment, useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Plus, Loader2, CheckCircle2, Trash2, Pencil, Landmark, X, History, Repeat, Clock, ArrowUpCircle } from 'lucide-react';
+import { Plus, Printer, Link2, Loader2, CheckCircle2, Trash2, Pencil, Landmark, X, History, Repeat, Clock, ArrowUpCircle } from 'lucide-react';
 import { api } from '../services/api';
 import { Pagination } from '../components/Pagination';
 import { useAuth } from '../context/AuthContext';
 import { AbasContas } from '../components/AbasContas';
+import { imprimirContas } from '../lib/imprimirContas';
+import { corPlaca, COR_GERAL } from '../lib/corPlaca';
+import { RateioCarretasModal, EtiquetaRateio } from '../components/RateioCarretasModal';
 
 // =============================================================================
 // Contas a Pagar — página própria (grupo Financeiro no menu). Lançamento
@@ -44,12 +47,16 @@ type ContaPagar = {
     fornecedor: Fornecedor | null;
     categoria: Categoria | null;
     caminhao: Caminhao | null;
+    rateios?: { caminhaoId: string; valor: number; caminhao?: { placa: string } }[];
     observacao: string | null;
     valorPago?: number;
     saldoDevedor?: number;
+    juros?: number;
     queuedForPaymentAt?: string | null;
     grupo?: Grupo;
 };
+
+const CARRETAS = ['POZ', 'QPM', 'RFX', 'RME', 'SEV', 'SEZ', 'SYR', 'TCF'];
 
 type Grupo = 'FORNECEDORES' | 'IMPOSTOS' | 'SOCIOS' | 'TODOS';
 
@@ -127,8 +134,92 @@ export function ContasPagar() {
     const [detalhePagamentos, setDetalhePagamentos] = useState<Pagamento[]>([]);
 
     const [contas, setContas] = useState<ContaPagar[]>([]);
+    // Filtro por caminhão ('' = todos, 'GERAL' = contas sem caminhão)
+    const [filtroCaminhao, setFiltroCaminhao] = useState('');
+    const [gastos, setGastos] = useState<Array<{ caminhaoId: string; placa: string; pago: number; aberto: number; quantidade: number }>>([]);
+
+    const [modalImprimir, setModalImprimir] = useState(false);
+    const [imprimindo, setImprimindo] = useState(false);
+
+    async function imprimir(escolha: Grupo) {
+        setImprimindo(true);
+        try {
+            const todas: any[] = [];
+            for (let pg = 1; pg <= 40; pg++) {
+                const r = await api.get('/financeiro-nf/contas-pagar', {
+                    params: { grupo: escolha, situacao: 'pendentes', page: pg, pageSize: 50 },
+                });
+                const itens = r.data?.items ?? [];
+                todas.push(...itens);
+                if (todas.length >= (r.data?.total ?? 0) || itens.length === 0) break;
+            }
+            const rotulo = { TODOS: 'Todas', FORNECEDORES: 'Fornecedores', IMPOSTOS: 'Impostos', SOCIOS: 'Sócios' }[escolha];
+            imprimirContas(todas, rotulo);
+            setModalImprimir(false);
+        } catch {
+            alert('Não foi possível carregar as contas para impressão.');
+        } finally {
+            setImprimindo(false);
+        }
+    }
+
+    // Link do proprietário (escolher o que pagar hoje)
+    const podeLinkHoje = !!usuario?.isAdminMaster || usuario?.perfil === 'ADMIN';
+    const [modalLinkHoje, setModalLinkHoje] = useState(false);
+    const [tokenHoje, setTokenHoje] = useState<string | null>(null);
+    const [copiadoHoje, setCopiadoHoje] = useState(false);
+    const urlLinkHoje = tokenHoje ? `${window.location.origin}/pagar-hoje/${tokenHoje}` : '';
+
+    async function abrirLinkHoje() {
+        setModalLinkHoje(true);
+        try { setTokenHoje((await api.get('/financeiro-nf/pagar-hoje/link')).data.token); } catch { /* ignora */ }
+    }
+    async function gerarLinkHoje() {
+        if (tokenHoje && !confirm('Gerar um novo link desativa o anterior. Continuar?')) return;
+        setTokenHoje((await api.post('/financeiro-nf/pagar-hoje/link')).data.token);
+    }
+    async function desativarLinkHoje() {
+        if (!confirm('Desativar o link?')) return;
+        await api.delete('/financeiro-nf/pagar-hoje/link');
+        setTokenHoje(null);
+    }
+
     const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
     const [movendo, setMovendo] = useState(false);
+    const [massaCaminhao, setMassaCaminhao] = useState('');
+    const [modalRateio, setModalRateio] = useState(false);
+
+    async function ratear(caminhaoIds: string[]) {
+        try {
+            await api.patch('/financeiro-nf/contas-pagar/ratear', { ids: Array.from(selecionadas), caminhaoIds });
+            setModalRateio(false);
+            setSelecionadas(new Set());
+            await carregar();
+        } catch (err: any) {
+            alert(err?.response?.data?.message ?? 'Não foi possível dividir.');
+        }
+    }
+    const [massaCategoria, setMassaCategoria] = useState('');
+
+    async function aplicarEmMassa() {
+        if (selecionadas.size === 0 || (!massaCaminhao && !massaCategoria)) return;
+        setMovendo(true);
+        try {
+            await api.patch('/financeiro-nf/contas-pagar/editar-em-massa', {
+                ids: Array.from(selecionadas),
+                caminhaoId: massaCaminhao || undefined,
+                categoriaId: massaCategoria || undefined,
+            });
+            setSelecionadas(new Set());
+            setMassaCaminhao('');
+            setMassaCategoria('');
+            await carregar();
+        } catch (err: any) {
+            alert(err?.response?.data?.message ?? 'Não foi possível editar as contas.');
+        } finally {
+            setMovendo(false);
+        }
+    }
 
     function alternarSelecao(id: string) {
         setSelecionadas((atual) => {
@@ -213,6 +304,7 @@ export function ContasPagar() {
                 api.get('/financeiro-nf/contas-pagar', {
                     params: {
                         grupo,
+                        caminhaoId: filtroCaminhao || undefined,
                         periodo: periodo || undefined,
                         situacao: periodo ? undefined : situacao,
                         busca: busca.trim() || undefined,
@@ -226,6 +318,9 @@ export function ContasPagar() {
                 }),
                 api.get('/financeiro-nf/contas-pagar/dashboard', { params: { grupo } }),
             ]);
+            api.get('/financeiro-nf/contas-pagar/por-caminhao', { params: { grupo } })
+                .then((r) => setGastos(r.data ?? []))
+                .catch(() => setGastos([]));
             setContas(resContas.data?.items ?? []);
             setTotal(resContas.data?.total ?? 0);
             setPage(resContas.data?.page ?? pageAlvo);
@@ -277,7 +372,7 @@ export function ContasPagar() {
         const t = setTimeout(() => carregar(1, pageSize), busca ? 350 : 0);
         return () => clearTimeout(t);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [grupo, periodo, situacao, busca, filtroDe, filtroAte, valorMin, valorMax]);
+    }, [grupo, filtroCaminhao, periodo, situacao, busca, filtroDe, filtroAte, valorMin, valorMax]);
 
     // Carrega as baixas da conta aberta no painel de detalhes.
     useEffect(() => {
@@ -591,7 +686,70 @@ export function ContasPagar() {
                         {g.label}
                     </button>
                 ))}
+                <button type="button" onClick={() => setModalImprimir(true)}
+                    className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">
+                    <Printer size={15} /> Imprimir PDF
+                </button>
+                {podeLinkHoje && !ehFisica && (
+                    <button type="button" onClick={abrirLinkHoje}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">
+                        <Link2 size={15} /> Link do proprietário
+                    </button>
+                )}
             </div>
+
+            {modalRateio && (
+                <RateioCarretasModal
+                    caminhoes={caminhoes}
+                    valorTotal={contas.filter((c) => selecionadas.has(c.id)).length === 1 ? contas.find((c) => selecionadas.has(c.id))?.valor : undefined}
+                    titulo={`Dividir ${selecionadas.size} conta${selecionadas.size > 1 ? 's' : ''} entre carretas`}
+                    onConfirmar={ratear}
+                    onFechar={() => setModalRateio(false)}
+                />
+            )}
+
+            {modalImprimir && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setModalImprimir(false)}>
+                    <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#111827] p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+                        <p className="font-semibold text-gray-900 dark:text-white">O que imprimir? (somente em aberto)</p>
+                        {([['TODOS', 'Todas'], ['FORNECEDORES', 'Somente Fornecedores'], ['IMPOSTOS', 'Somente Impostos'], ['SOCIOS', 'Somente Sócios']] as const).map(([v, l]) => (
+                            <button key={v} disabled={imprimindo} onClick={() => imprimir(v)}
+                                className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-600 text-white disabled:opacity-60 inline-flex items-center justify-center gap-2">
+                                {imprimindo && <Loader2 size={14} className="animate-spin" />} {l}
+                            </button>
+                        ))}
+                        <p className="text-xs text-gray-400">Abre a impressão — escolha "Salvar como PDF" no destino.</p>
+                        <button onClick={() => setModalImprimir(false)} className="w-full text-sm text-gray-500">Cancelar</button>
+                    </div>
+                </div>
+            )}
+
+            {modalLinkHoje && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setModalLinkHoje(false)}>
+                    <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#111827] p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+                        <p className="font-semibold text-gray-900 dark:text-white">Link do proprietário — escolher o que pagar hoje</p>
+                        <p className="text-xs text-gray-500">
+                            Mande por WhatsApp. Ele vê as contas de Fornecedores em aberto, marca as caixinhas e envia.
+                            As marcadas viram HOJE; as demais continuam como Vencidas ou A pagar. Não precisa de login.
+                        </p>
+                        {tokenHoje && (
+                            <div className="flex gap-2">
+                                <input readOnly value={urlLinkHoje} onFocus={(e) => e.target.select()}
+                                    className="w-full px-3 py-2 rounded-lg text-sm bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white" />
+                                <button onClick={async () => { await navigator.clipboard.writeText(urlLinkHoje); setCopiadoHoje(true); setTimeout(() => setCopiadoHoje(false), 2000); }}
+                                    className="px-3 rounded-lg bg-blue-600 text-white text-sm whitespace-nowrap">{copiadoHoje ? 'Copiado!' : 'Copiar'}</button>
+                            </div>
+                        )}
+                        <div className="flex gap-2">
+                            <button onClick={gerarLinkHoje} className="text-xs px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200">
+                                {tokenHoje ? 'Gerar novo link' : 'Gerar link'}
+                            </button>
+                            {tokenHoje && <button onClick={desativarLinkHoje} className="text-xs px-3 py-2 rounded-lg text-red-500">Desativar</button>}
+                            <button onClick={() => setModalLinkHoje(false)} className="ml-auto text-sm text-gray-500">Fechar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {dash && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -632,6 +790,40 @@ export function ContasPagar() {
                             </div>
                         );
                     })}
+                </div>
+            )}
+
+            {!ehFisica && (
+                <div className="space-y-2">
+                    <p className="text-xs text-gray-400">Gasto por carreta (clique para filtrar, clique de novo para limpar)</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                        {CARRETAS.map((cod) => {
+                            const cam = caminhoes.find((c) => c.placa.toUpperCase().includes(cod));
+                            const g = cam ? gastos.find((x) => x.caminhaoId === cam.id) : undefined;
+                            const ativo = !!cam && filtroCaminhao === cam.id;
+                            return (
+                                <button key={cod} type="button" disabled={!cam}
+                                    onClick={() => { if (!cam) return; setPeriodo(''); setFiltroCaminhao(ativo ? '' : cam.id); }}
+                                    className={`p-3 rounded-xl border text-left transition disabled:opacity-50 ${corPlaca(cod)} ${ativo ? 'ring-2 ring-blue-500' : ''}`}>
+                                    <p className="text-xs font-bold">🚚 {cod}</p>
+                                    <p className="text-sm font-bold">{formatCurrency((g?.pago ?? 0) + (g?.aberto ?? 0))}</p>
+                                    <p className="text-[10px] opacity-80">pago {formatCurrency(g?.pago ?? 0)} · aberto {formatCurrency(g?.aberto ?? 0)}</p>
+                                </button>
+                            );
+                        })}
+                        {(() => {
+                            const g = gastos.find((x) => x.caminhaoId === 'GERAL');
+                            const ativo = filtroCaminhao === 'GERAL';
+                            return (
+                                <button type="button" onClick={() => { setPeriodo(''); setFiltroCaminhao(ativo ? '' : 'GERAL'); }}
+                                    className={`p-3 rounded-xl border text-left ${COR_GERAL} ${ativo ? 'ring-2 ring-blue-500' : ''}`}>
+                                    <p className="text-xs font-bold">Gerais (todas)</p>
+                                    <p className="text-sm font-bold">{formatCurrency((g?.pago ?? 0) + (g?.aberto ?? 0))}</p>
+                                    <p className="text-[10px] opacity-80">pago {formatCurrency(g?.pago ?? 0)} · aberto {formatCurrency(g?.aberto ?? 0)}</p>
+                                </button>
+                            );
+                        })()}
+                    </div>
                 </div>
             )}
 
@@ -927,6 +1119,30 @@ export function ContasPagar() {
                                         {l}
                                     </button>
                                 ))}
+                                {!ehFisica && (
+                                    <>
+                                        <span className="mx-1 text-gray-300">|</span>
+                                        <select value={massaCaminhao} onChange={(e) => setMassaCaminhao(e.target.value)}
+                                            className="px-2 py-1.5 rounded-lg text-sm border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0B1120] text-gray-900 dark:text-white">
+                                            <option value="">Carreta: não mudar</option>
+                                            <option value="GERAL">Geral (todas)</option>
+                                            {caminhoes.map((c) => <option key={c.id} value={c.id}>{c.placa}</option>)}
+                                        </select>
+                                        <select value={massaCategoria} onChange={(e) => setMassaCategoria(e.target.value)}
+                                            className="px-2 py-1.5 rounded-lg text-sm border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0B1120] text-gray-900 dark:text-white">
+                                            <option value="">Categoria: não mudar</option>
+                                            {categorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                                        </select>
+                                        <button type="button" onClick={() => setModalRateio(true)}
+                                            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-500 text-white">
+                                            Dividir entre carretas
+                                        </button>
+                                        <button disabled={movendo || (!massaCaminhao && !massaCategoria)} onClick={aplicarEmMassa}
+                                            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-green-600 text-white disabled:opacity-50">
+                                            Aplicar
+                                        </button>
+                                    </>
+                                )}
                                 <button onClick={() => setSelecionadas(new Set())} className="px-3 py-1.5 rounded-lg text-sm text-gray-600 dark:text-gray-300">
                                     Limpar
                                 </button>
@@ -972,13 +1188,20 @@ export function ContasPagar() {
                                                     </span>
                                                     {c.descricao}
                                                 </p>
-                                                {c.caminhao && (
-                                                    <Link
-                                                        to={`/caminhoes/${encodeURIComponent(c.caminhao.placa)}`}
-                                                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                                                    >
-                                                        🚚 {c.caminhao.placa}
-                                                    </Link>
+                                                {!ehFisica && (c.rateios?.length ?? 0) >= 2 ? (
+                                                    <EtiquetaRateio rateios={c.rateios} />
+                                                ) : !ehFisica && (
+                                                    c.caminhao ? (
+                                                        <Link
+                                                            to={`/caminhoes/${encodeURIComponent(c.caminhao.placa)}`}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            className={`inline-block mt-0.5 px-2 py-0.5 rounded border text-xs font-bold hover:opacity-80 ${corPlaca(c.caminhao.placa)}`}
+                                                        >
+                                                            🚚 {c.caminhao.placa}
+                                                        </Link>
+                                                    ) : (
+                                                        <span className={`inline-block mt-0.5 px-2 py-0.5 rounded border text-xs ${COR_GERAL}`}>Geral</span>
+                                                    )
                                                 )}
                                             </td>
                                             <td className="py-2.5 px-4">{c.fornecedor?.nome ?? '-'}</td>
@@ -991,6 +1214,11 @@ export function ContasPagar() {
                                             </td>
                                             <td className="py-2.5 px-4">
                                                 <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(c.valor)}</p>
+                                                {(c.juros ?? 0) > 0 && (
+                                                    <p className="text-xs font-semibold text-red-600 dark:text-red-400">
+                                                        Juros + {formatCurrency(c.juros)} · pago {formatCurrency(c.valor + (c.juros ?? 0))}
+                                                    </p>
+                                                )}
                                                 {c.status === 'PARCIAL' && (
                                                     <p className="text-xs text-amber-600 dark:text-amber-400">
                                                         Pago {formatCurrency(c.valorPago)} · falta {formatCurrency(c.saldoDevedor)}

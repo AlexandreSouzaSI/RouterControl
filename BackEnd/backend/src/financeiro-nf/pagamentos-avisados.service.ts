@@ -30,7 +30,7 @@ export class PagamentosAvisadosService {
     async criar(
         empresaId: string,
         usuario: { id?: string; nome?: string },
-        body: { fornecedor?: string; valor?: string | number; data?: string; descricao?: string },
+        body: { fornecedor?: string; valor?: string | number; data?: string; descricao?: string; caminhaoId?: string; categoriaId?: string },
         file?: Express.Multer.File,
     ) {
         const lido = await this.lerComprovante(file);
@@ -54,9 +54,19 @@ export class PagamentosAvisadosService {
             if (repetido) throw new BadRequestException('Este comprovante já foi enviado antes.');
         }
 
+        // Só aceita caminhão/categoria que sejam desta empresa.
+        const caminhao = body.caminhaoId
+            ? await this.prisma.caminhao.findFirst({ where: { id: body.caminhaoId, empresaId }, select: { id: true } })
+            : null;
+        const categoria = body.categoriaId
+            ? await this.prisma.categoriaContaPagar.findFirst({ where: { id: body.categoriaId, empresaId }, select: { id: true } })
+            : null;
+
         return this.prisma.pagamentoAvisado.create({
             data: {
                 empresaId,
+                caminhaoId: caminhao?.id ?? null,
+                categoriaId: categoria?.id ?? null,
                 fornecedor: fornecedor || 'Não informado (ver comprovante)',
                 valor: valor > 0 ? valor : 0,
                 dataPagamento: dataISO ? new Date(`${dataISO}T12:00:00`) : new Date(),
@@ -112,6 +122,15 @@ export class PagamentosAvisadosService {
         return empresa;
     }
 
+    // Listas para os selects do aviso (placa e categoria).
+    async opcoes(empresaId: string) {
+        const [caminhoes, categorias] = await Promise.all([
+            this.prisma.caminhao.findMany({ where: { empresaId, ativo: true }, select: { id: true, placa: true }, orderBy: { placa: 'asc' } }),
+            this.prisma.categoriaContaPagar.findMany({ where: { empresaId, ativo: true }, select: { id: true, nome: true }, orderBy: { nome: 'asc' } }),
+        ]);
+        return { caminhoes, categorias };
+    }
+
     async listar(empresaId: string, status?: string) {
         const where: any = { empresaId };
         if (status === 'PENDENTE' || status === 'CONCILIADO' || status === 'DESCARTADO') where.status = status;
@@ -123,7 +142,13 @@ export class PagamentosAvisadosService {
             select: { ...this.selectSemArquivo(), comprovanteNome: true, comprovanteMime: true },
         });
 
-        return itens.map((i) => ({ ...i, temComprovante: !!i.comprovanteNome }));
+        const op = await this.opcoes(empresaId);
+        return itens.map((i) => ({
+            ...i,
+            temComprovante: !!i.comprovanteNome,
+            placa: op.caminhoes.find((c) => c.id === i.caminhaoId)?.placa ?? null,
+            categoriaNome: op.categorias.find((c) => c.id === i.categoriaId)?.nome ?? null,
+        }));
     }
 
     async comprovante(id: string, empresaId: string) {
@@ -159,27 +184,85 @@ export class PagamentosAvisadosService {
             .slice(0, 6);
     }
 
-    // Vincula a uma conta a pagar (dá baixa no valor) OU só marca como
-    // conciliado (já lançado na planilha / sem conta correspondente).
+    // Vincula a uma conta a pagar (dá baixa), CRIA a conta já paga (quando não
+    // existe na planilha) OU só marca como conciliado.
+    // Se o valor pago for maior que o saldo da conta, a diferença vira juros.
     async conciliar(
         id: string,
         empresaId: string,
         usuario: { nome?: string },
-        body: { contaPagarId?: string; observacao?: string },
+        body: {
+            contaPagarId?: string;
+            criarConta?: boolean;
+            valorPago?: number | string;
+            caminhaoIds?: string[];
+            grupo?: string;
+            observacao?: string;
+        },
     ) {
         const aviso = await this.prisma.pagamentoAvisado.findFirst({ where: { id, empresaId } });
         if (!aviso) throw new NotFoundException('Aviso não encontrado.');
         if (aviso.status !== 'PENDENTE') throw new BadRequestException('Esse aviso já foi tratado.');
 
+        const digitado = Number(String(body.valorPago ?? '').replace(',', '.'));
+        const valorPago = digitado > 0 ? digitado : aviso.valor;
+        const dataISO = aviso.dataPagamento.toISOString().slice(0, 10);
+        const obs = `Aviso de pagamento: ${aviso.fornecedor}${aviso.descricao ? ` — ${aviso.descricao}` : ''}`;
+        let contaPagarId: string | null = null;
+
         if (body.contaPagarId) {
-            if (!aviso.valor || aviso.valor <= 0) {
-                throw new BadRequestException('Preencha o valor do aviso antes de vincular a uma conta.');
+            if (!valorPago || valorPago <= 0) {
+                throw new BadRequestException('Informe o valor pago antes de vincular a uma conta.');
             }
-            await this.financeiro.registrarPagamento(body.contaPagarId, empresaId, {
-                valor: aviso.valor,
-                data: aviso.dataPagamento.toISOString().slice(0, 10),
-                observacao: `Aviso de pagamento: ${aviso.fornecedor}${aviso.descricao ? ` — ${aviso.descricao}` : ''}`,
+            const conta = await this.prisma.contaPagar.findFirst({
+                where: { id: body.contaPagarId, empresaId },
+                include: { pagamentos: { select: { valor: true } } },
             });
+            if (!conta) throw new NotFoundException('Conta a pagar não encontrada.');
+            const saldo = Math.max(0, conta.valor - conta.pagamentos.reduce((s, p) => s + p.valor, 0));
+            const principal = Math.min(valorPago, saldo);
+            const juros = valorPago > saldo + 0.01 ? Number((valorPago - saldo).toFixed(2)) : 0;
+
+            await this.financeiro.registrarPagamento(body.contaPagarId, empresaId, {
+                valor: Number(principal.toFixed(2)),
+                data: dataISO,
+                observacao: juros > 0 ? `${obs} (inclui R$ ${juros.toFixed(2)} de juros)` : obs,
+                juros,
+            });
+            contaPagarId = body.contaPagarId;
+        } else if (body.criarConta) {
+            if (!valorPago || valorPago <= 0) {
+                throw new BadRequestException('Informe o valor pago para criar a conta.');
+            }
+            const grupo = body.grupo === 'IMPOSTOS' || body.grupo === 'SOCIOS' ? body.grupo : 'FORNECEDORES';
+            const nome = aviso.fornecedor.startsWith('Não informado') ? null : aviso.fornecedor;
+            const fornecedor = nome
+                ? await this.prisma.fornecedor.findFirst({ where: { empresaId, nome: { equals: nome, mode: 'insensitive' } }, select: { id: true } })
+                : null;
+            const data = new Date(`${dataISO}T12:00:00`);
+
+            const criada = await this.prisma.contaPagar.create({
+                data: {
+                    empresaId,
+                    descricao: aviso.descricao || nome || 'Pagamento avisado',
+                    valor: valorPago,
+                    vencimento: data,
+                    pagoEm: data,
+                    status: 'PAGA',
+                    grupo: grupo as any,
+                    fornecedorId: fornecedor?.id ?? null,
+                    caminhaoId: aviso.caminhaoId,
+                    categoriaId: aviso.categoriaId,
+                    pagamentos: { create: { valor: valorPago, data, observacao: obs } },
+                },
+                select: { id: true },
+            });
+            contaPagarId = criada.id;
+        }
+
+        // Pagamento para 2+ carretas: divide o valor e grava a parcela de cada uma.
+        if (contaPagarId && Array.isArray(body.caminhaoIds) && body.caminhaoIds.length > 0) {
+            await this.financeiro.ratearContasPagar(empresaId, [contaPagarId], body.caminhaoIds);
         }
 
         return this.prisma.pagamentoAvisado.update({
@@ -188,7 +271,7 @@ export class PagamentosAvisadosService {
                 status: 'CONCILIADO',
                 conciliadoEm: new Date(),
                 conciliadoPor: usuario.nome ?? null,
-                contaPagarId: body.contaPagarId ?? null,
+                contaPagarId,
                 observacaoFinanceiro: body.observacao?.trim() || null,
             },
             select: this.selectSemArquivo(),
@@ -209,7 +292,7 @@ export class PagamentosAvisadosService {
         return {
             id: true, fornecedor: true, valor: true, dataPagamento: true, descricao: true,
             avisadoPorNome: true, status: true, conciliadoEm: true, conciliadoPor: true,
-            contaPagarId: true, observacaoFinanceiro: true, createdAt: true,
+            contaPagarId: true, observacaoFinanceiro: true, createdAt: true, caminhaoId: true, categoriaId: true,
         } as const;
     }
 }

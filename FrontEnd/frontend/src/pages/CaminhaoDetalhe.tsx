@@ -41,7 +41,7 @@ type Lancamento = {
     descricao: string;
     valor: string | number;
     data: string;
-    origem?: 'MANUAL' | 'CONTA_PAGAR';
+    origem?: 'MANUAL' | 'CONTA_PAGAR' | 'CONTA_RECEBER';
     status?: 'ABERTA' | 'PAGA' | 'VENCIDA' | 'CANCELADA' | 'PARCIAL';
 };
 
@@ -296,12 +296,22 @@ export function CaminhaoDetalhe() {
                                                 <span className="text-sm font-semibold text-blue-700 dark:text-blue-400">
                                                     {formatCurrency(Number(l.valor))}
                                                 </span>
-                                                <button
-                                                    onClick={() => excluirLancamento(l.id)}
-                                                    className="p-1 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition"
-                                                >
-                                                    <Trash2 size={14} />
-                                                </button>
+                                                {l.origem === 'CONTA_RECEBER' ? (
+                                                    <Link
+                                                        to="/financeiro-nf/contas-receber"
+                                                        title="Ver em Contas a Receber"
+                                                        className="p-1 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition"
+                                                    >
+                                                        <Landmark size={14} />
+                                                    </Link>
+                                                ) : (
+                                                    <button
+                                                        onClick={() => excluirLancamento(l.id)}
+                                                        className="p-1 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </li>
                                     ))}

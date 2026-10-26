@@ -21,9 +21,12 @@ import { NfEntrada } from './pages/NfEntrada';
 import { NfTransporte } from './pages/NfTransporte';
 import { NfServico } from './pages/NfServico';
 import { ContasPagar } from './pages/ContasPagar';
+import { ContasReceber } from './pages/ContasReceber';
+import { ContasReceberConciliar } from './pages/ContasReceberConciliar';
 import { ContasPagarConciliar } from './pages/ContasPagarConciliar';
 import { ContaPaga } from './pages/ContaPaga';
 import { AvisarPagamento } from './pages/AvisarPagamento';
+import { PagarHoje } from './pages/PagarHoje';
 import { Cadastros } from './pages/Cadastros';
 import { Admin } from './pages/Admin';
 
@@ -46,6 +49,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/avisar/:token" element={<AvisarPagamento />} />
+          <Route path="/pagar-hoje/:token" element={<PagarHoje />} />
 
           <Route
             path="*"
@@ -71,6 +75,8 @@ export default function App() {
                     <Route path="/financeiro-nf/transporte" element={<NfTransporte />} />
                     <Route path="/financeiro-nf/servico" element={<NfServico />} />
                     <Route path="/financeiro-nf/contas-pagar" element={<ContasPagar />} />
+                    <Route path="/financeiro-nf/contas-receber" element={<ContasReceber />} />
+                    <Route path="/financeiro-nf/contas-receber/conciliar" element={<ContasReceberConciliar />} />
                     <Route path="/financeiro-nf/contas-pagar/conciliar" element={<ContasPagarConciliar />} />
                     <Route path="/financeiro-nf/conta-paga" element={<ContaPaga />} />
                     <Route path="/cadastros" element={<Cadastros />} />

@@ -1,3 +1,4 @@
+import { dividirIgualmente } from './rateio.util';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
@@ -474,6 +475,7 @@ export class FinanceiroNfService {
             periodo?: string; // hoje | semana | mes | vencidas
             situacao?: string; // pendentes | pagas | todas
             grupo?: string; // FORNECEDORES (padrão) | IMPOSTOS | SOCIOS | TODOS
+            caminhaoId?: string; // id do caminhão, ou GERAL = contas sem caminhão
             page?: string;
             pageSize?: string;
         },
@@ -483,6 +485,13 @@ export class FinanceiroNfService {
 
         const grupo = this.normalizarGrupo(filtros?.grupo);
         if (grupo !== 'TODOS') where.grupo = grupo;
+
+        if (filtros?.caminhaoId === 'GERAL') {
+            where.caminhaoId = null;
+            where.rateios = { none: {} };
+        } else if (filtros?.caminhaoId) {
+            and.push({ OR: [{ caminhaoId: filtros.caminhaoId }, { rateios: { some: { caminhaoId: filtros.caminhaoId } } }] });
+        }
 
         if (filtros?.status) where.status = filtros.status;
 
@@ -565,7 +574,7 @@ export class FinanceiroNfService {
         const [contas, total] = await Promise.all([
             this.prisma.contaPagar.findMany({
                 where,
-                include: { fornecedor: true, categoria: true, caminhao: true, pagamentos: true },
+                include: { fornecedor: true, categoria: true, caminhao: true, pagamentos: true, rateios: { include: { caminhao: { select: { placa: true } } } } },
                 orderBy: [{ vencimento: 'asc' }, { valor: 'desc' }],
                 skip,
                 take,
@@ -618,6 +627,97 @@ export class FinanceiroNfService {
         }
 
         return r;
+    }
+
+    // Quanto cada caminhão gastou (pago + em aberto, sem canceladas) e as
+    // contas gerais (sem caminhão), dentro do grupo escolhido.
+    async gastoPorCaminhao(empresaId: string, grupoParam?: string) {
+        const grupo = this.normalizarGrupo(grupoParam);
+        const contas = await this.prisma.contaPagar.findMany({
+            where: { empresaId, status: { not: 'CANCELADA' }, ...(grupo !== 'TODOS' ? { grupo } : {}) },
+            select: {
+                caminhaoId: true, valor: true, juros: true, status: true,
+                caminhao: { select: { placa: true } },
+                rateios: { select: { caminhaoId: true, valor: true, caminhao: { select: { placa: true } } } },
+            },
+        });
+
+        const mapa = new Map<string, { caminhaoId: string; placa: string; pago: number; aberto: number; quantidade: number }>();
+        const somar = (chave: string, placa: string, valor: number, paga: boolean) => {
+            const item = mapa.get(chave) ?? { caminhaoId: chave, placa, pago: 0, aberto: 0, quantidade: 0 };
+            if (paga) item.pago += valor; else item.aberto += valor;
+            item.quantidade++;
+            mapa.set(chave, item);
+        };
+        for (const c of contas) {
+            const paga = c.status === 'PAGA';
+            if (c.rateios.length > 0) {
+                for (const r of c.rateios) somar(r.caminhaoId, r.caminhao.placa, r.valor, paga);
+            } else {
+                somar(c.caminhaoId ?? 'GERAL', c.caminhao?.placa ?? 'Gerais', paga ? c.valor + (c.juros ?? 0) : c.valor, paga);
+            }
+        }
+        return Array.from(mapa.values()).sort((x, y) => (y.pago + y.aberto) - (x.pago + x.aberto));
+    }
+
+    // Rateio: 0 carretas = tira; 1 = vincula direto; 2+ = divide o valor
+    // (valor + juros) igualmente e grava a parcela de cada uma.
+    async ratearContasPagar(empresaId: string, ids: string[], caminhaoIds: string[]) {
+        if (!Array.isArray(ids) || ids.length === 0) throw new BadRequestException('Selecione ao menos uma conta.');
+        const unicos = Array.from(new Set(caminhaoIds ?? []));
+        if (unicos.length > 0) {
+            const validos = await this.prisma.caminhao.count({ where: { id: { in: unicos }, empresaId } });
+            if (validos !== unicos.length) throw new NotFoundException('Caminhão não encontrado.');
+        }
+        const contas = await this.prisma.contaPagar.findMany({
+            where: { empresaId, id: { in: ids } },
+            select: { id: true, valor: true, juros: true },
+        });
+        for (const c of contas) {
+            await this.prisma.contaPagarRateio.deleteMany({ where: { contaPagarId: c.id } });
+            if (unicos.length >= 2) {
+                const partes = dividirIgualmente(c.valor + (c.juros ?? 0), unicos.length);
+                await this.prisma.contaPagarRateio.createMany({
+                    data: unicos.map((caminhaoId, i) => ({ contaPagarId: c.id, caminhaoId, valor: partes[i] })),
+                });
+                await this.prisma.contaPagar.update({ where: { id: c.id }, data: { caminhaoId: null } });
+            } else {
+                await this.prisma.contaPagar.update({ where: { id: c.id }, data: { caminhaoId: unicos[0] ?? null } });
+            }
+        }
+        return { atualizadas: contas.length };
+    }
+
+    // caminhaoId: 'GERAL' = tira a carreta (conta de todas); vazio/undefined = não muda.
+    async editarContasEmMassa(
+        empresaId: string,
+        body: { ids: string[]; grupo?: string; caminhaoId?: string; categoriaId?: string },
+    ) {
+        if (!Array.isArray(body.ids) || body.ids.length === 0) throw new BadRequestException('Selecione ao menos uma conta.');
+        const data: any = {};
+
+        if (body.grupo) {
+            const grupo = this.normalizarGrupo(body.grupo);
+            if (grupo === 'TODOS') throw new BadRequestException('Grupo inválido.');
+            data.grupo = grupo;
+            if (grupo !== 'FORNECEDORES') data.queuedForPaymentAt = null;
+        }
+        if (body.caminhaoId === 'GERAL') {
+            data.caminhaoId = null;
+        } else if (body.caminhaoId) {
+            const cam = await this.prisma.caminhao.findFirst({ where: { id: body.caminhaoId, empresaId }, select: { id: true } });
+            if (!cam) throw new NotFoundException('Caminhão não encontrado.');
+            data.caminhaoId = cam.id;
+        }
+        if (body.categoriaId) {
+            const cat = await this.prisma.categoriaContaPagar.findFirst({ where: { id: body.categoriaId, empresaId }, select: { id: true } });
+            if (!cat) throw new NotFoundException('Categoria não encontrada.');
+            data.categoriaId = cat.id;
+        }
+        if (Object.keys(data).length === 0) throw new BadRequestException('Escolha o que alterar.');
+
+        const r = await this.prisma.contaPagar.updateMany({ where: { empresaId, id: { in: body.ids } }, data });
+        return { atualizadas: r.count };
     }
 
     async agruparContasPagar(empresaId: string, ids: string[], grupoParam: string) {
@@ -869,7 +969,7 @@ export class FinanceiroNfService {
     async registrarPagamento(
         contaPagarId: string,
         empresaId: string,
-        body: { valor: number; data?: string; formaPagamento?: FormaPagamentoContaPagar; observacao?: string },
+        body: { valor: number; data?: string; formaPagamento?: FormaPagamentoContaPagar; observacao?: string; juros?: number },
     ) {
         const conta = await this.prisma.contaPagar.findFirst({
             where: { id: contaPagarId, empresaId },
@@ -903,6 +1003,14 @@ export class FinanceiroNfService {
                 observacao: body.observacao?.trim() || null,
             },
         });
+
+        // Juros/multa pagos além do valor original ficam na própria conta.
+        if (body.juros && body.juros > 0.001) {
+            await this.prisma.contaPagar.update({
+                where: { id: contaPagarId },
+                data: { juros: { increment: Number(body.juros.toFixed(2)) } },
+            });
+        }
 
         await this.recalcularStatusContaPagar(contaPagarId);
 

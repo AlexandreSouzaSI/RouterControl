@@ -18,6 +18,10 @@ export function AvisarPagamento() {
     const [fornecedor, setFornecedor] = useState('');
     const [valor, setValor] = useState('');
     const [descricao, setDescricao] = useState('');
+    const [caminhoes, setCaminhoes] = useState<{ id: string; placa: string }[]>([]);
+    const [categorias, setCategorias] = useState<{ id: string; nome: string }[]>([]);
+    const [caminhaoId, setCaminhaoId] = useState('');
+    const [categoriaId, setCategoriaId] = useState('');
     const [maisDados, setMaisDados] = useState(false);
     const [enviando, setEnviando] = useState(false);
     const [erro, setErro] = useState<string | null>(null);
@@ -25,7 +29,7 @@ export function AvisarPagamento() {
 
     useEffect(() => {
         axios.get(`${API}/avisar/${token}`)
-            .then((r) => setEmpresa(r.data.empresa))
+            .then((r) => { setEmpresa(r.data.empresa); setCaminhoes(r.data.caminhoes ?? []); setCategorias(r.data.categorias ?? []); })
             .catch(() => setInvalido(true));
     }, [token]);
 
@@ -39,9 +43,11 @@ export function AvisarPagamento() {
             fd.append('fornecedor', fornecedor);
             fd.append('valor', valor);
             fd.append('descricao', descricao);
+            if (caminhaoId) fd.append('caminhaoId', caminhaoId);
+            if (categoriaId) fd.append('categoriaId', categoriaId);
             const r = await axios.post(`${API}/avisar/${token}`, fd);
             setOk(r.data.valor > 0 ? `${r.data.fornecedor} — ${r.data.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : 'Comprovante recebido.');
-            setArquivo(null); setFornecedor(''); setValor(''); setDescricao('');
+            setArquivo(null); setFornecedor(''); setValor(''); setDescricao(''); setCaminhaoId(''); setCategoriaId('');
         } catch (err: any) {
             setErro(err?.response?.data?.message ?? 'Não foi possível enviar.');
         } finally {
@@ -75,6 +81,15 @@ export function AvisarPagamento() {
                             {arquivo ? arquivo.name : 'Anexar comprovante (PDF ou foto)'}
                             <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} />
                         </label>
+
+                        <select className={campo} value={caminhaoId} onChange={(e) => setCaminhaoId(e.target.value)}>
+                            <option value="">Caminhão (opcional) — nenhum / todos</option>
+                            {caminhoes.map((c) => <option key={c.id} value={c.id}>{c.placa}</option>)}
+                        </select>
+                        <select className={campo} value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)}>
+                            <option value="">Tipo (opcional) — Abastecimento, Borracharia...</option>
+                            {categorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                        </select>
 
                         <button type="button" onClick={() => setMaisDados((v) => !v)} className="text-sm text-blue-600">
                             {maisDados ? 'Ocultar dados' : 'Informar valor / fornecedor (opcional com PDF)'}
