@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, Loader2, Truck, Landmark } from 'lucide-react';
 import { api } from '../services/api';
+import { FiltroMes } from '../components/FiltroMes';
 
 // =============================================================================
 // Página de detalhe de um caminhão, buscado pela PLACA (não pelo id) —
@@ -72,14 +73,16 @@ export function CaminhaoDetalhe() {
     const [valor, setValor] = useState('');
     const [data, setData] = useState(hojeISO());
     const [salvando, setSalvando] = useState(false);
+    // '' = todos os meses; AAAA-MM = receita, despesa, lucro e lançamentos só daquele mês
+    const [mes, setMes] = useState('');
 
     async function carregar() {
         if (!placa) return;
         setLoading(true);
         try {
             const [resDetalhe, resLancamentos] = await Promise.all([
-                api.get(`/caminhoes/detalhe/${encodeURIComponent(placa)}`),
-                api.get(`/caminhoes/lancamentos/${encodeURIComponent(placa)}`),
+                api.get(`/caminhoes/detalhe/${encodeURIComponent(placa)}`, { params: { mes: mes || undefined } }),
+                api.get(`/caminhoes/lancamentos/${encodeURIComponent(placa)}`, { params: { mes: mes || undefined } }),
             ]);
             setDetalhe(resDetalhe.data ?? null);
             setLancamentos(resLancamentos.data ?? []);
@@ -94,7 +97,7 @@ export function CaminhaoDetalhe() {
     useEffect(() => {
         carregar();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [placa]);
+    }, [placa, mes]);
 
     function abrirForm(tipo: 'RECEITA' | 'DESPESA') {
         setFormAberto(tipo);
@@ -171,6 +174,12 @@ export function CaminhaoDetalhe() {
                     </div>
                 </div>
             </div>
+
+            <FiltroMes
+                mes={mes}
+                onChange={setMes}
+                dica={mes ? 'Receita, despesa, lucro e lançamentos só deste mês (contas pagas/recebidas pela data do pagamento).' : undefined}
+            />
 
             {loading ? (
                 <p className="text-sm text-gray-400 py-8 text-center">Carregando...</p>

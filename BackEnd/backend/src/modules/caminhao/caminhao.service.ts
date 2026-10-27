@@ -1,5 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { dentroDaFaixa, faixaDoMes } from '../../common/mes.util';
+
+// Data que decide em qual mês uma conta a pagar cai: paga = quando foi paga
+// (sem data, vencimento); em aberto = vencimento.
+const dataRefPagar = (c: { status: string; pagoEm: Date | null; vencimento: Date }) =>
+    c.status === 'PAGA' ? c.pagoEm ?? c.vencimento : c.vencimento;
 
 @Injectable()
 export class CaminhaoService {
@@ -155,8 +161,10 @@ export class CaminhaoService {
     // pra placa de terceiro que só existe em ViagemGps, sem registro em
     // Caminhao. É o que alimenta o cabeçalho da tela (nome, badge
     // "Terceiro", se está cadastrado) e o comparativo de Receita x Despesa.
-    async getDetalhePorPlaca(placaRaw: string, empresaId: string) {
+    async getDetalhePorPlaca(placaRaw: string, empresaId: string, mes?: string) {
         const placa = placaRaw.toUpperCase();
+        // Filtro de mês opcional (AAAA-MM): só entra o que é daquele mês.
+        const faixa = faixaDoMes(mes);
 
         const caminhao = await this.prisma.caminhao.findFirst({
             where: { placa, ...this.filtroEmpresa(empresaId) },
@@ -167,9 +175,9 @@ export class CaminhaoService {
             select: { id: true },
         });
 
-        const lancamentos = await this.prisma.lancamentoCaminhao.findMany({
+        const lancamentos = (await this.prisma.lancamentoCaminhao.findMany({
             where: { placa, empresaId },
-        });
+        })).filter((l) => dentroDaFaixa(l.data, faixa));
 
         const totalReceita = lancamentos
             .filter((l) => l.tipo === 'RECEITA')
@@ -186,28 +194,28 @@ export class CaminhaoService {
         // caminhaoId (placa de terceiro não tem Caminhao pra vincular).
         // Conta cancelada não conta.
         if (caminhao) {
-            const contasPagar = await this.prisma.contaPagar.findMany({
+            const contasPagar = (await this.prisma.contaPagar.findMany({
                 where: { caminhaoId: caminhao.id, empresaId, status: { not: 'CANCELADA' } },
-            });
+            })).filter((c) => dentroDaFaixa(dataRefPagar(c), faixa));
             totalDespesa += contasPagar.reduce((acc, c) => acc + c.valor + (c.status === 'PAGA' ? c.juros ?? 0 : 0), 0);
 
             // Parcelas de contas pagas/recebidas divididas entre mais de uma carreta.
-            const rateiosPagar = await this.prisma.contaPagarRateio.findMany({
+            const rateiosPagar = (await this.prisma.contaPagarRateio.findMany({
                 where: { caminhaoId: caminhao.id, contaPagar: { empresaId, status: { not: 'CANCELADA' } } },
-                select: { valor: true },
-            });
+                select: { valor: true, contaPagar: { select: { status: true, pagoEm: true, vencimento: true } } },
+            })).filter((r) => dentroDaFaixa(dataRefPagar(r.contaPagar), faixa));
             totalDespesa += rateiosPagar.reduce((acc, r) => acc + r.valor, 0);
 
             // Contas a Receber já recebidas (conciliadas) viram receita do caminhão.
-            const recebidas = await this.prisma.contaReceber.findMany({
+            const recebidas = (await this.prisma.contaReceber.findMany({
                 where: { caminhaoId: caminhao.id, empresaId, status: 'RECEBIDA' },
-                select: { valor: true, valorRecebido: true },
-            });
+                select: { valor: true, valorRecebido: true, recebidoEm: true, vencimento: true },
+            })).filter((c) => dentroDaFaixa(c.recebidoEm ?? c.vencimento, faixa));
             totalReceitaFinal += recebidas.reduce((acc, c) => acc + (c.valorRecebido ?? c.valor), 0);
-            const rateiosReceber = await this.prisma.contaReceberRateio.findMany({
+            const rateiosReceber = (await this.prisma.contaReceberRateio.findMany({
                 where: { caminhaoId: caminhao.id, contaReceber: { empresaId, status: 'RECEBIDA' } },
-                select: { valor: true },
-            });
+                select: { valor: true, contaReceber: { select: { recebidoEm: true, vencimento: true } } },
+            })).filter((r) => dentroDaFaixa(r.contaReceber.recebidoEm ?? r.contaReceber.vencimento, faixa));
             totalReceitaFinal += rateiosReceber.reduce((acc, r) => acc + r.valor, 0);
         }
 
@@ -228,8 +236,9 @@ export class CaminhaoService {
     // vinculadas a esse caminhão, pra aparecerem juntas na lista de despesa
     // da tela do caminhão. Cada item carrega "origem" pra o frontend saber
     // que conta a pagar não pode ser excluída por aqui (só em Contas a Pagar).
-    async listarLancamentos(placaRaw: string, empresaId: string) {
+    async listarLancamentos(placaRaw: string, empresaId: string, mes?: string) {
         const placa = placaRaw.toUpperCase();
+        const faixa = faixaDoMes(mes);
 
         const [lancamentos, caminhao] = await Promise.all([
             this.prisma.lancamentoCaminhao.findMany({
@@ -248,7 +257,7 @@ export class CaminhaoService {
             origem: 'MANUAL' as const,
         }));
 
-        if (!caminhao) return manuais;
+        if (!caminhao) return manuais.filter((l) => dentroDaFaixa(l.data, faixa));
 
         const contasPagar = await this.prisma.contaPagar.findMany({
             where: { caminhaoId: caminhao.id, empresaId, status: { not: 'CANCELADA' } },
@@ -260,7 +269,7 @@ export class CaminhaoService {
             tipo: 'DESPESA' as const,
             descricao: `${c.descricao} (Conta a Pagar)`,
             valor: c.valor,
-            data: c.vencimento,
+            data: dataRefPagar(c),
             origem: 'CONTA_PAGAR' as const,
             status: c.status,
         }));
@@ -274,7 +283,7 @@ export class CaminhaoService {
             tipo: 'DESPESA' as const,
             descricao: `${r.contaPagar.descricao} (Conta a Pagar · dividida em ${r.contaPagar.rateios.length} carretas)`,
             valor: r.valor,
-            data: r.contaPagar.vencimento,
+            data: dataRefPagar(r.contaPagar),
             origem: 'CONTA_PAGAR' as const,
             status: r.contaPagar.status,
         }));
@@ -303,7 +312,9 @@ export class CaminhaoService {
             origem: 'CONTA_RECEBER' as const,
         }));
 
-        return [...manuais, ...daContasPagar, ...daRateioPagar, ...daContasReceber, ...daRateioReceber].sort(
+        return [...manuais, ...daContasPagar, ...daRateioPagar, ...daContasReceber, ...daRateioReceber]
+            .filter((l) => dentroDaFaixa(l.data, faixa))
+            .sort(
             (a, b) => new Date(b.data).getTime() - new Date(a.data).getTime(),
         );
     }

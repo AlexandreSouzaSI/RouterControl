@@ -8,6 +8,8 @@ import { AbasContas } from '../components/AbasContas';
 import { imprimirContas } from '../lib/imprimirContas';
 import { corPlaca, COR_GERAL } from '../lib/corPlaca';
 import { RateioCarretasModal, EtiquetaRateio } from '../components/RateioCarretasModal';
+import { FiltroMes } from '../components/FiltroMes';
+import { nomeMes } from '../lib/mes';
 
 // =============================================================================
 // Contas a Pagar — página própria (grupo Financeiro no menu). Lançamento
@@ -129,6 +131,8 @@ export function ContasPagar() {
     const [filtroAte, setFiltroAte] = useState('');
     const [valorMin, setValorMin] = useState('');
     const [valorMax, setValorMax] = useState('');
+    // '' = todos os meses; AAAA-MM = a página inteira só com aquele mês (pagas pela data do pagamento, abertas pelo vencimento)
+    const [mes, setMes] = useState('');
     const [dash, setDash] = useState<DashContas | null>(null);
     const [detalhe, setDetalhe] = useState<ContaPagar | null>(null);
     const [detalhePagamentos, setDetalhePagamentos] = useState<Pagamento[]>([]);
@@ -312,13 +316,14 @@ export function ContasPagar() {
                         ate: filtroAte || undefined,
                         valorMin: valorMin || undefined,
                         valorMax: valorMax || undefined,
+                        mes: mes || undefined,
                         page: pageAlvo,
                         pageSize: pageSizeAlvo,
                     },
                 }),
-                api.get('/financeiro-nf/contas-pagar/dashboard', { params: { grupo } }),
+                api.get('/financeiro-nf/contas-pagar/dashboard', { params: { grupo, mes: mes || undefined } }),
             ]);
-            api.get('/financeiro-nf/contas-pagar/por-caminhao', { params: { grupo } })
+            api.get('/financeiro-nf/contas-pagar/por-caminhao', { params: { grupo, mes: mes || undefined } })
                 .then((r) => setGastos(r.data ?? []))
                 .catch(() => setGastos([]));
             setContas(resContas.data?.items ?? []);
@@ -372,7 +377,7 @@ export function ContasPagar() {
         const t = setTimeout(() => carregar(1, pageSize), busca ? 350 : 0);
         return () => clearTimeout(t);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [grupo, filtroCaminhao, periodo, situacao, busca, filtroDe, filtroAte, valorMin, valorMax]);
+    }, [grupo, filtroCaminhao, periodo, situacao, busca, filtroDe, filtroAte, valorMin, valorMax, mes]);
 
     // Carrega as baixas da conta aberta no painel de detalhes.
     useEffect(() => {
@@ -751,6 +756,12 @@ export function ContasPagar() {
                 </div>
             )}
 
+            <FiltroMes
+                mes={mes}
+                onChange={(m) => { setPeriodo(''); if (m) setSituacao('todas'); setMes(m); }}
+                dica={mes ? 'Toda a página mostra só este mês: pagas pela data do pagamento, em aberto pelo vencimento.' : undefined}
+            />
+
             {dash && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {([
@@ -795,7 +806,9 @@ export function ContasPagar() {
 
             {!ehFisica && (
                 <div className="space-y-2">
-                    <p className="text-xs text-gray-400">Gasto por carreta (clique para filtrar, clique de novo para limpar)</p>
+                    <p className="text-xs text-gray-400">
+                        Gasto por carreta {mes ? <>— <strong className="text-gray-700 dark:text-gray-200">{nomeMes(mes)}</strong></> : '— todos os meses'} (clique para filtrar, clique de novo para limpar)
+                    </p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                         {CARRETAS.map((cod) => {
                             const cam = caminhoes.find((c) => c.placa.toUpperCase().includes(cod));

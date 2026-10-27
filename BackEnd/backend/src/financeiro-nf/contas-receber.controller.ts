@@ -16,8 +16,8 @@ export class ContasReceberController {
 
     // Rotas fixas antes de ':id'
     @Get('dashboard')
-    dashboard(@EmpresaAtual() empresaId: string) {
-        return this.service.dashboard(empresaId);
+    dashboard(@EmpresaAtual() empresaId: string, @Query('mes') mes?: string) {
+        return this.service.dashboard(empresaId, mes);
     }
 
     // Todas em aberto — usado na conciliação bancária.
@@ -27,8 +27,8 @@ export class ContasReceberController {
     }
 
     @Get('por-caminhao')
-    porCaminhao(@EmpresaAtual() empresaId: string) {
-        return this.service.porCaminhao(empresaId);
+    porCaminhao(@EmpresaAtual() empresaId: string, @Query('mes') mes?: string) {
+        return this.service.porCaminhao(empresaId, mes);
     }
 
     @Patch('ratear')

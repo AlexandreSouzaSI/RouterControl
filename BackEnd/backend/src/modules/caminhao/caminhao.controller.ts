@@ -7,6 +7,7 @@ import {
     Put,
     Delete,
     Patch,
+    Query,
 } from '@nestjs/common';
 import { CaminhaoService } from './caminhao.service';
 import { EmpresaAtual } from '../../auth/empresa-atual.decorator';
@@ -32,16 +33,18 @@ export class CaminhaoController {
     getDetalhePorPlaca(
         @Param('placa') placa: string,
         @EmpresaAtual() empresaId: string,
+        @Query('mes') mes?: string,
     ) {
-        return this.service.getDetalhePorPlaca(placa, empresaId);
+        return this.service.getDetalhePorPlaca(placa, empresaId, mes);
     }
 
     @Get('lancamentos/:placa')
     listarLancamentos(
         @Param('placa') placa: string,
         @EmpresaAtual() empresaId: string,
+        @Query('mes') mes?: string,
     ) {
-        return this.service.listarLancamentos(placa, empresaId);
+        return this.service.listarLancamentos(placa, empresaId, mes);
     }
 
     @Post('lancamentos')

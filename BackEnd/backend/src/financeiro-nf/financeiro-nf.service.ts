@@ -23,7 +23,9 @@ import {
     parseNfseXml,
     type NfseView,
 } from './sefaz-nfse-client';
+import { faixaDoMes } from '../common/mes.util';
 import {
+    Prisma,
     FormaPagamentoContaPagar,
     StatusContaPagar,
     TipoChavePix,
@@ -452,6 +454,21 @@ export class FinanceiroNfService {
         return { hoje, amanha, inicioSemana, fimSemana, inicioMes, fimMes };
     }
 
+    // Filtro de mês (AAAA-MM) de Contas a Pagar: conta PAGA entra no mês em
+    // que foi paga (sem data de pagamento, cai no vencimento); as demais
+    // entram no mês do vencimento.
+    private filtroMesContaPagar(mes?: string): Prisma.ContaPagarWhereInput | null {
+        const faixa = faixaDoMes(mes);
+        if (!faixa) return null;
+        return {
+            OR: [
+                { status: 'PAGA', pagoEm: faixa },
+                { status: 'PAGA', pagoEm: null, vencimento: faixa },
+                { status: { not: 'PAGA' }, vencimento: faixa },
+            ],
+        };
+    }
+
     private static readonly STATUS_PENDENTES: StatusContaPagar[] = ['ABERTA', 'VENCIDA', 'PARCIAL'] as StatusContaPagar[];
 
     // Sem grupo informado = FORNECEDORES, pra o Contas a Pagar principal
@@ -501,13 +518,8 @@ export class FinanceiroNfService {
             where.status = 'PAGA';
         }
 
-        if (filtros?.mes) {
-            const [ano, mesNum] = filtros.mes.split('-').map(Number);
-            where.vencimento = {
-                gte: new Date(ano, mesNum - 1, 1),
-                lt: new Date(ano, mesNum, 1),
-            };
-        }
+        const porMes = this.filtroMesContaPagar(filtros?.mes);
+        if (porMes) and.push(porMes);
 
         // Faixa de datas livre (dia único: de = ate).
         if (filtros?.de || filtros?.ate) {
@@ -594,15 +606,17 @@ export class FinanceiroNfService {
 
     // Cards do dashboard: quanto (saldo devedor) e quantas contas pendentes
     // vencem hoje, na semana, no mês e quantas estão vencidas.
-    async dashboardContasPagar(empresaId: string, grupoParam?: string) {
+    async dashboardContasPagar(empresaId: string, grupoParam?: string, mes?: string) {
         const j = this.janelasContasPagar();
         const grupo = this.normalizarGrupo(grupoParam);
+        const faixa = faixaDoMes(mes);
 
         const contas = await this.prisma.contaPagar.findMany({
             where: {
                 empresaId,
                 status: { in: FinanceiroNfService.STATUS_PENDENTES },
                 ...(grupo !== 'TODOS' ? { grupo } : {}),
+                ...(faixa ? { vencimento: faixa } : {}),
             },
             include: { pagamentos: true },
         });
@@ -631,10 +645,14 @@ export class FinanceiroNfService {
 
     // Quanto cada caminhão gastou (pago + em aberto, sem canceladas) e as
     // contas gerais (sem caminhão), dentro do grupo escolhido.
-    async gastoPorCaminhao(empresaId: string, grupoParam?: string) {
+    async gastoPorCaminhao(empresaId: string, grupoParam?: string, mes?: string) {
         const grupo = this.normalizarGrupo(grupoParam);
+        const porMes = this.filtroMesContaPagar(mes);
         const contas = await this.prisma.contaPagar.findMany({
-            where: { empresaId, status: { not: 'CANCELADA' }, ...(grupo !== 'TODOS' ? { grupo } : {}) },
+            where: {
+                empresaId, status: { not: 'CANCELADA' }, ...(grupo !== 'TODOS' ? { grupo } : {}),
+                ...(porMes ? { AND: [porMes] } : {}),
+            },
             select: {
                 caminhaoId: true, valor: true, juros: true, status: true,
                 caminhao: { select: { placa: true } },

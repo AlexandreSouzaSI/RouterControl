@@ -194,13 +194,13 @@ export class FinanceiroNfController {
 
     // Gasto por caminhão (e contas gerais, sem caminhão). Antes de ':id'.
     @Get('contas-pagar/por-caminhao')
-    porCaminhao(@EmpresaAtual() empresaId: string, @Query('grupo') grupo?: string) {
-        return this.service.gastoPorCaminhao(empresaId, grupo);
+    porCaminhao(@EmpresaAtual() empresaId: string, @Query('grupo') grupo?: string, @Query('mes') mes?: string) {
+        return this.service.gastoPorCaminhao(empresaId, grupo, mes);
     }
 
     @Get('contas-pagar/dashboard')
-    dashboardContasPagar(@EmpresaAtual() empresaId: string, @Query('grupo') grupo?: string) {
-        return this.service.dashboardContasPagar(empresaId, grupo);
+    dashboardContasPagar(@EmpresaAtual() empresaId: string, @Query('grupo') grupo?: string, @Query('mes') mes?: string) {
+        return this.service.dashboardContasPagar(empresaId, grupo, mes);
     }
 
     @Get('contas-pagar/resumo')

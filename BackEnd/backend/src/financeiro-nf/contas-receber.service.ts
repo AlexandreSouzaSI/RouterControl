@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { faixaDoMes } from '../common/mes.util';
 import { dividirIgualmente } from './rateio.util';
 
 type Filtros = {
@@ -11,6 +13,7 @@ type Filtros = {
     valorMin?: string;
     valorMax?: string;
     caminhaoId?: string; // id, ou GERAL = sem carreta
+    mes?: string; // AAAA-MM: recebidas pela data de recebimento, abertas pelo vencimento
     page?: string;
     pageSize?: string;
 };
@@ -29,6 +32,21 @@ export class ContasReceberService {
         fimSemana.setDate(hoje.getDate() - diaSemana + 7);
         const fimMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1);
         return { hoje, amanha, fimSemana, fimMes };
+    }
+
+    // Filtro de mês (AAAA-MM). Conta recebida entra no mês em que foi
+    // recebida (sem data de recebimento, cai no vencimento); conta em aberto
+    // entra no mês do vencimento.
+    private filtroMes(mes?: string): Prisma.ContaReceberWhereInput | null {
+        const faixa = faixaDoMes(mes);
+        if (!faixa) return null;
+        return {
+            OR: [
+                { status: 'RECEBIDA', recebidoEm: faixa },
+                { status: 'RECEBIDA', recebidoEm: null, vencimento: faixa },
+                { status: { not: 'RECEBIDA' }, vencimento: faixa },
+            ],
+        };
     }
 
     private async validarCaminhao(empresaId: string, caminhaoId?: string | null) {
@@ -71,6 +89,9 @@ export class ContasReceberService {
             else if (f.periodo === 'semana') where.vencimento = { gte: j.amanha, lt: j.fimSemana };
             else if (f.periodo === 'mes') where.vencimento = { gte: j.amanha, lt: j.fimMes };
         }
+
+        const porMes = this.filtroMes(f.mes);
+        if (porMes) and.push(porMes);
 
         if (f.busca?.trim()) {
             const t = f.busca.trim();
@@ -124,10 +145,11 @@ export class ContasReceberService {
         });
     }
 
-    async dashboard(empresaId: string) {
+    async dashboard(empresaId: string, mes?: string) {
         const j = this.janelas();
+        const faixa = faixaDoMes(mes);
         const contas = await this.prisma.contaReceber.findMany({
-            where: { empresaId, status: 'ABERTA' },
+            where: { empresaId, status: 'ABERTA', ...(faixa ? { vencimento: faixa } : {}) },
             select: { valor: true, vencimento: true },
         });
         const vazio = () => ({ quantidade: 0, valor: 0 });
@@ -144,9 +166,10 @@ export class ContasReceberService {
     }
 
     // A receber (aberto) e já recebido, por carreta e gerais (considera rateio).
-    async porCaminhao(empresaId: string) {
+    async porCaminhao(empresaId: string, mes?: string) {
+        const porMes = this.filtroMes(mes);
         const contas = await this.prisma.contaReceber.findMany({
-            where: { empresaId, status: { not: 'CANCELADA' } },
+            where: { empresaId, status: { not: 'CANCELADA' }, ...(porMes ? { AND: [porMes] } : {}) },
             select: {
                 caminhaoId: true, valor: true, valorRecebido: true, status: true,
                 caminhao: { select: { placa: true } },

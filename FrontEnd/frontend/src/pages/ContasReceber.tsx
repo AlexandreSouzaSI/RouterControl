@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Landmark, Loader2, CheckCircle2, Trash2, Pencil, Undo2, X } from 'lucide-react';
+import { FiltroMes } from '../components/FiltroMes';
+import { nomeMes } from '../lib/mes';
 import { api } from '../services/api';
 import { Pagination } from '../components/Pagination';
 import { corPlaca, COR_GERAL } from '../lib/corPlaca';
@@ -73,6 +75,8 @@ export function ContasReceber() {
     const [valorMin, setValorMin] = useState('');
     const [valorMax, setValorMax] = useState('');
     const [filtroCaminhao, setFiltroCaminhao] = useState('');
+    // '' = todos os meses; AAAA-MM = só aquele mês (recebidas pela data do recebimento, abertas pelo vencimento)
+    const [mes, setMes] = useState('');
 
     const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
     const [massaCaminhao, setMassaCaminhao] = useState('');
@@ -120,10 +124,10 @@ export function ContasReceber() {
                     params: {
                         situacao, periodo: periodo || undefined, busca: busca.trim() || undefined,
                         de: de || undefined, ate: ate || undefined, valorMin: valorMin || undefined, valorMax: valorMax || undefined,
-                        caminhaoId: filtroCaminhao || undefined, page: pg, pageSize: ps,
+                        caminhaoId: filtroCaminhao || undefined, mes: mes || undefined, page: pg, pageSize: ps,
                     },
                 }),
-                api.get('/financeiro-nf/contas-receber/dashboard'),
+                api.get('/financeiro-nf/contas-receber/dashboard', { params: { mes: mes || undefined } }),
             ]);
             setContas(rc.data?.items ?? []);
             setTotal(rc.data?.total ?? 0);
@@ -131,7 +135,7 @@ export function ContasReceber() {
             setPage(rc.data?.page ?? pg);
             setPageSize(rc.data?.pageSize ?? ps);
             setDash(rd.data ?? null);
-            api.get('/financeiro-nf/contas-receber/por-caminhao').then((r) => setGastos(r.data ?? [])).catch(() => setGastos([]));
+            api.get('/financeiro-nf/contas-receber/por-caminhao', { params: { mes: mes || undefined } }).then((r) => setGastos(r.data ?? [])).catch(() => setGastos([]));
         } catch {
             // lista vazia
         } finally {
@@ -149,7 +153,7 @@ export function ContasReceber() {
         const t = setTimeout(() => carregar(1, pageSize), busca ? 350 : 0);
         return () => clearTimeout(t);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [periodo, situacao, busca, de, ate, valorMin, valorMax, filtroCaminhao]);
+    }, [periodo, situacao, busca, de, ate, valorMin, valorMax, filtroCaminhao, mes]);
 
     function abrirNova() {
         setEditId(null); setFDescricao(''); setFCliente(''); setFValor(''); setFVenc(hojeISO()); setFCaminhao(''); setFObs('');
@@ -252,6 +256,12 @@ export function ContasReceber() {
                 </div>
             </div>
 
+            <FiltroMes
+                mes={mes}
+                onChange={(m) => { setPeriodo(''); if (m) setSituacao('todas'); setMes(m); }}
+                dica={mes ? 'Toda a página mostra só este mês: recebidas pela data do recebimento, a receber pelo vencimento.' : undefined}
+            />
+
             {dash && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {cards.map((b) => {
@@ -270,7 +280,9 @@ export function ContasReceber() {
             )}
 
             <div className="space-y-2">
-                <p className="text-xs text-gray-400">Por carreta (clique para filtrar; "Gerais" mostra todas)</p>
+                <p className="text-xs text-gray-400">
+                    Por carreta {mes ? <>— <strong className="text-gray-700 dark:text-gray-200">{nomeMes(mes)}</strong></> : '— todos os meses'} (clique para filtrar; "Gerais" mostra todas)
+                </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                     {CARRETAS.map((cod) => {
                         const cam = caminhoes.find((c) => c.placa.toUpperCase().includes(cod));
