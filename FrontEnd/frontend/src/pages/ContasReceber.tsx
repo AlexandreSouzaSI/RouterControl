@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Landmark, Loader2, CheckCircle2, Trash2, Pencil, Undo2, X } from 'lucide-react';
+import { Plus, Landmark, Loader2, CheckCircle2, Trash2, Pencil, Undo2, X, FileUp } from 'lucide-react';
 import { FiltroMes } from '../components/FiltroMes';
+import { ImportarCteModal } from '../components/ImportarCteModal';
 import { nomeMes } from '../lib/mes';
 import { api } from '../services/api';
 import { Pagination } from '../components/Pagination';
@@ -77,6 +78,7 @@ export function ContasReceber() {
     const [filtroCaminhao, setFiltroCaminhao] = useState('');
     // '' = todos os meses; AAAA-MM = só aquele mês (recebidas pela data do recebimento, abertas pelo vencimento)
     const [mes, setMes] = useState('');
+    const [importarAberto, setImportarAberto] = useState(false);
 
     const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
     const [massaCaminhao, setMassaCaminhao] = useState('');
@@ -250,11 +252,16 @@ export function ContasReceber() {
                 <button onClick={() => navigate('/financeiro-nf/contas-receber/conciliar')} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-200 text-sm font-medium">
                     <Landmark size={16} /> Conciliar com banco
                 </button>
+                <button onClick={() => setImportarAberto(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-200 text-sm font-medium">
+                    <FileUp size={16} /> Importar XML de CT-e
+                </button>
                 <button onClick={abrirNova} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium">
                     <Plus size={16} /> Nova Conta a Receber
                 </button>
                 </div>
             </div>
+
+            <ImportarCteModal aberto={importarAberto} onFechar={() => setImportarAberto(false)} onImportado={() => carregar(1, pageSize)} />
 
             <FiltroMes
                 mes={mes}

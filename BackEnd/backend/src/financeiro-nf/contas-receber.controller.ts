@@ -1,4 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { EmpresaModulo } from '@prisma/client';
 import { ContasReceberService } from './contas-receber.service';
 import { EmpresaAtual } from '../auth/empresa-atual.decorator';
@@ -39,6 +41,31 @@ export class ContasReceberController {
     @Patch('editar-em-massa')
     editarEmMassa(@EmpresaAtual() empresaId: string, @Body() body: { ids: string[]; caminhaoId?: string }) {
         return this.service.editarEmMassa(empresaId, body);
+    }
+
+    // Importação em massa de XML de CT-e (até 200 arquivos por envio; o
+    // frontend manda em lotes menores).
+    @Post('importar-cte')
+    @UseInterceptors(
+        FilesInterceptor('arquivos', 200, {
+            storage: memoryStorage(),
+            limits: { fileSize: 5 * 1024 * 1024 },
+            fileFilter: (_req, file, cb) => {
+                if (!/\.xml$/i.test(file.originalname || '')) return cb(new BadRequestException(`"${file.originalname}" não é .xml`), false);
+                cb(null, true);
+            },
+        }),
+    )
+    importarCte(
+        @EmpresaAtual() empresaId: string,
+        @UploadedFiles() arquivos: Express.Multer.File[],
+        @Body('prazoDias') prazoDias?: string,
+    ) {
+        return this.service.importarCte(
+            empresaId,
+            (arquivos ?? []).map((f) => ({ nome: f.originalname, conteudo: f.buffer.toString('utf8').replace(/^\uFEFF/, '') })),
+            prazoDias,
+        );
     }
 
     @Post()

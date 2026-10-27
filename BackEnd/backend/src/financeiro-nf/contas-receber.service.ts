@@ -2,6 +2,10 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { faixaDoMes } from '../common/mes.util';
+import { CteLido, lerXmlCte, normalizarPlaca } from './cte-xml.util';
+
+export type ArquivoXml = { nome: string; conteudo: string };
+type ItemImportacao = { arquivo: string; cte?: string; motivo?: string; valor?: number; cliente?: string; placa?: string | null };
 import { dividirIgualmente } from './rateio.util';
 
 type Filtros = {
@@ -241,6 +245,129 @@ export class ContasReceberService {
                 comercial: b.comercial?.trim() || null,
             },
         });
+    }
+
+    // -------------------------------------------------------------------------
+    // Importação em massa de XML de CT-e. Cria uma conta a receber por CT-e
+    // autorizado. Fica de fora: CT-e cancelado (evento de cancelamento no
+    // mesmo lote ou protocolo != 100), anulação, homologação, emitido por
+    // outro CNPJ e o que já foi importado antes (a chave fica gravada na
+    // observação — não precisa de coluna nova no banco). Se vier o evento de
+    // cancelamento de um CT-e já importado e ainda em aberto, a conta vira
+    // CANCELADA.
+    // -------------------------------------------------------------------------
+    async importarCte(empresaId: string, arquivos: ArquivoXml[], prazoDiasParam?: string | number) {
+        if (!arquivos?.length) throw new BadRequestException('Envie ao menos um XML de CT-e.');
+        const prazoDias = Math.min(365, Math.max(0, Math.round(Number(prazoDiasParam ?? 30)) || 0));
+
+        const [empresa, caminhoes] = await Promise.all([
+            this.prisma.empresa.findUnique({ where: { id: empresaId }, select: { cnpj: true } }),
+            this.prisma.caminhao.findMany({ where: { OR: [{ empresaId }, { empresaId: null }] }, select: { id: true, placa: true } }),
+        ]);
+        const cnpjEmpresa = (empresa?.cnpj ?? '').replace(/\D/g, '');
+        const caminhaoPorPlaca = new Map(caminhoes.map((c) => [normalizarPlaca(c.placa), c.id]));
+
+        // Contas lançadas à mão/planilha com o número do CT-e no campo "CTE":
+        // não importa de novo pra não contar o mesmo frete duas vezes.
+        const numeroCte = (v: string | null | undefined) => (v ?? '').replace(/\D/g, '').replace(/^0+/, '');
+        const ctesManuais = new Set(
+            (await this.prisma.contaReceber.findMany({
+                where: { empresaId, cte: { not: null }, status: { not: 'CANCELADA' } },
+                select: { cte: true },
+            })).map((c) => numeroCte(c.cte)).filter(Boolean),
+        );
+
+        const importados: ItemImportacao[] = [];
+        const duplicados: ItemImportacao[] = [];
+        const ignorados: ItemImportacao[] = [];
+        const cancelados: ItemImportacao[] = [];
+
+        // 1ª passada: lê tudo e separa os cancelamentos.
+        const lidos: { arquivo: string; cte: CteLido }[] = [];
+        const chavesCanceladas = new Set<string>();
+        for (const a of arquivos) {
+            const r = lerXmlCte(a.conteudo);
+            if (r.tipo === 'CANCELAMENTO') chavesCanceladas.add(r.chave);
+            else if (r.tipo === 'INVALIDO') ignorados.push({ arquivo: a.nome, motivo: r.motivo });
+            else lidos.push({ arquivo: a.nome, cte: r });
+        }
+
+        // Cancelamento de CT-e que já está no sistema: só mexe se ainda estiver em aberto.
+        for (const chave of chavesCanceladas) {
+            const existentes = await this.prisma.contaReceber.findMany({
+                where: { empresaId, observacao: { contains: chave } },
+                select: { id: true, status: true, cte: true },
+            });
+            for (const e of existentes) {
+                if (e.status === 'ABERTA') {
+                    await this.prisma.contaReceber.update({ where: { id: e.id }, data: { status: 'CANCELADA' } });
+                    cancelados.push({ arquivo: chave, cte: e.cte ?? undefined, motivo: 'Conta que já estava no sistema foi marcada como CANCELADA.' });
+                } else if (e.status === 'RECEBIDA') {
+                    cancelados.push({ arquivo: chave, cte: e.cte ?? undefined, motivo: 'CT-e cancelado, mas a conta já consta como RECEBIDA — confira manualmente.' });
+                }
+            }
+        }
+
+        const vistasNoLote = new Set<string>();
+        for (const { arquivo, cte } of lidos) {
+            const base: ItemImportacao = { arquivo, cte: cte.numero, valor: cte.valor, cliente: cte.tomadorNome, placa: cte.placaCavalo };
+            if (chavesCanceladas.has(cte.chave)) { cancelados.push({ ...base, motivo: 'CT-e cancelado (evento de cancelamento no lote) — não importado.' }); continue; }
+            if (cte.cStat && cte.cStat !== '100') { ignorados.push({ ...base, motivo: `Não autorizado: ${cte.cStat} ${cte.xMotivo}`.trim() }); continue; }
+            if (!cte.cStat) { ignorados.push({ ...base, motivo: 'XML sem protocolo de autorização (envie o XML autorizado, cteProc).' }); continue; }
+            if (cte.tpAmb === '2') { ignorados.push({ ...base, motivo: 'CT-e de homologação (teste).' }); continue; }
+            if (cte.tpCTe === '2') { ignorados.push({ ...base, motivo: 'CT-e de anulação — não gera recebimento.' }); continue; }
+            if (cnpjEmpresa && cte.emitenteCnpj && cte.emitenteCnpj !== cnpjEmpresa) { ignorados.push({ ...base, motivo: `Emitido por outro CNPJ (${cte.emitenteNome}).` }); continue; }
+            if (!(cte.valor > 0)) { ignorados.push({ ...base, motivo: 'CT-e sem valor a receber.' }); continue; }
+            if (!cte.chave || vistasNoLote.has(cte.chave)) { duplicados.push({ ...base, motivo: 'Arquivo repetido no mesmo lote.' }); continue; }
+            vistasNoLote.add(cte.chave);
+
+            const jaExiste = await this.prisma.contaReceber.findFirst({ where: { empresaId, observacao: { contains: cte.chave } }, select: { id: true } });
+            if (jaExiste) { duplicados.push({ ...base, motivo: 'Já importado antes.' }); continue; }
+            if (ctesManuais.has(numeroCte(cte.numero))) { duplicados.push({ ...base, motivo: `Já existe conta a receber com o CT-e nº ${cte.numero} (lançada manualmente).` }); continue; }
+
+            const caminhaoId = cte.placas.map((p) => caminhaoPorPlaca.get(normalizarPlaca(p))).find(Boolean) ?? null;
+            const emissao = cte.dataEmissao ?? new Date();
+            const parcelas = cte.vencimentos.length > 0
+                ? cte.vencimentos
+                : [{ data: new Date(emissao.getFullYear(), emissao.getMonth(), emissao.getDate() + prazoDias, 12), valor: cte.valor }];
+
+            const observacao = [
+                `Chave CT-e: ${cte.chave}`,
+                cte.motoristaNome ? `Motorista: ${cte.motoristaNome}${cte.motoristaCpf ? ` (CPF ${cte.motoristaCpf})` : ''}` : null,
+                cte.placas.length ? `Veículos: ${cte.placas.join(', ')}` : null,
+                cte.container ? `Container: ${cte.container}` : null,
+                cte.tomadorDoc ? `CNPJ tomador: ${cte.tomadorDoc}` : null,
+                'Importado do XML do CT-e.',
+            ].filter(Boolean).join('\n');
+
+            for (let i = 0; i < parcelas.length; i++) {
+                const p = parcelas[i];
+                await this.prisma.contaReceber.create({
+                    data: {
+                        empresaId,
+                        descricao: `CT-e ${cte.numero} — ${cte.origem} → ${cte.destino}${parcelas.length > 1 ? ` (parcela ${i + 1}/${parcelas.length})` : ''}`,
+                        cliente: cte.tomadorNome || null,
+                        valor: p.valor,
+                        vencimento: p.data,
+                        dataEmissao: cte.dataEmissao,
+                        cte: cte.numero,
+                        motorista: cte.placaCavalo,
+                        referencia: cte.referencia,
+                        caminhaoId,
+                        observacao,
+                    },
+                });
+            }
+            importados.push(base);
+        }
+
+        return {
+            importados,
+            duplicados,
+            ignorados,
+            cancelados,
+            totalImportado: importados.reduce((s, i) => s + (i.valor ?? 0), 0),
+        };
     }
 
     private async obter(id: string, empresaId: string) {
