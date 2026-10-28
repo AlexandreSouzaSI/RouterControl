@@ -26,6 +26,8 @@ import { ContasReceberConciliar } from './pages/ContasReceberConciliar';
 import { ContasPagarConciliar } from './pages/ContasPagarConciliar';
 import { ContaPaga } from './pages/ContaPaga';
 import { AvisarPagamento } from './pages/AvisarPagamento';
+import { EnviarConta } from './pages/EnviarConta';
+import { LancarContas } from './pages/LancarContas';
 import { PagarHoje } from './pages/PagarHoje';
 import { Cadastros } from './pages/Cadastros';
 import { Admin } from './pages/Admin';
@@ -49,6 +51,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/avisar/:token" element={<AvisarPagamento />} />
+          <Route path="/enviar-conta/:token" element={<EnviarConta />} />
           <Route path="/pagar-hoje/:token" element={<PagarHoje />} />
 
           <Route
@@ -79,6 +82,7 @@ export default function App() {
                     <Route path="/financeiro-nf/contas-receber/conciliar" element={<ContasReceberConciliar />} />
                     <Route path="/financeiro-nf/contas-pagar/conciliar" element={<ContasPagarConciliar />} />
                     <Route path="/financeiro-nf/conta-paga" element={<ContaPaga />} />
+                    <Route path="/financeiro-nf/lancar-contas" element={<LancarContas />} />
                     <Route path="/cadastros" element={<Cadastros />} />
                     <Route path="/admin" element={<Admin />} />
                   </Routes>

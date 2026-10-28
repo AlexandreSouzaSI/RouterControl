@@ -216,11 +216,14 @@ model Empresa {
   lancamentosCaminhao LancamentoCaminhao[]
 
   pagamentosAvisados PagamentoAvisado[]
+  contasEnviadas     ContaEnviada[]
 
   // Link secreto (sem login) pra o proprietário só enviar avisos de pagamento.
   tokenAvisoPagamento String? @unique
   // Link secreto onde o proprietário marca o que quer pagar hoje.
   tokenPagarHoje      String? @unique
+  // Link secreto (sem login) pra enviar boletos/notas que viram contas a pagar.
+  tokenEnvioContas    String? @unique
   contasReceber       ContaReceber[]
 }
 
@@ -1468,6 +1471,55 @@ model PagamentoAvisado {
   @@index([empresaId, status])
 }
 
+
+// "Lançar contas": boleto/nota enviado (pelo link ou pela tela) que o
+// financeiro confere e transforma em conta(s) a pagar. Os campos lidos do
+// documento são só sugestão; o que vale é o que for lançado.
+enum StatusContaEnviada {
+  PENDENTE
+  LANCADA
+  DESCARTADA
+}
+
+model ContaEnviada {
+  id        String  @id @default(uuid())
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  arquivo     Bytes?
+  arquivoNome String?
+  arquivoMime String?
+
+  // Lido do documento (sugestão)
+  tipoDocumento   String? // BOLETO | NFE | NFSE | OUTRO
+  fornecedor      String?
+  fornecedorDoc   String?
+  valor           Float?
+  vencimento      DateTime?
+  emissao         DateTime?
+  numeroDocumento String?
+  codigoBarras    String?
+  chaveNfe        String?
+  descricao       String?
+  parcelas        Json? // [{ vencimento, valor, numero }]
+
+  // Informado por quem enviou
+  caminhaoId      String?
+  categoriaId     String?
+  observacaoEnvio String?
+  enviadoPorNome  String?
+
+  status        StatusContaEnviada @default(PENDENTE)
+  contaPagarIds String[]
+  lancadoEm     DateTime?
+  lancadoPor    String?
+  motivoDescarte String?
+
+  createdAt DateTime @default(now())
+
+  @@index([empresaId, status])
+  @@index([empresaId, codigoBarras])
+}
 
 enum StatusContaReceber {
   ABERTA

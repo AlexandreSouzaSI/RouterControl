@@ -8,11 +8,13 @@ import { PagarHojeController, PagarHojePublicController } from './pagar-hoje.con
 import { PagarHojeService } from './pagar-hoje.service';
 import { ContasReceberController } from './contas-receber.controller';
 import { ContasReceberService } from './contas-receber.service';
+import { ContasEnviadasController, ContasEnviadasPublicController } from './contas-enviadas.controller';
+import { ContasEnviadasService } from './contas-enviadas.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Module({
-    controllers: [FinanceiroNfController, PagamentosAvisadosController, PagamentosAvisadosPublicController, PagarHojeController, PagarHojePublicController, ContasReceberController],
-    providers: [FinanceiroNfService, PagamentosAvisadosService, PagarHojeService, ContasReceberService, CertificadoDigitalService, PrismaService],
+    controllers: [FinanceiroNfController, PagamentosAvisadosController, PagamentosAvisadosPublicController, PagarHojeController, PagarHojePublicController, ContasReceberController, ContasEnviadasController, ContasEnviadasPublicController],
+    providers: [FinanceiroNfService, PagamentosAvisadosService, PagarHojeService, ContasReceberService, ContasEnviadasService, CertificadoDigitalService, PrismaService],
     exports: [FinanceiroNfService, CertificadoDigitalService],
 })
 export class FinanceiroNfModule { }
