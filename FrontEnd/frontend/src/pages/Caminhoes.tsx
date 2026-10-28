@@ -3,6 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { Truck, Pencil, Trash2, Settings2, ChevronRight, Plus } from 'lucide-react';
 import { api } from '../services/api';
 import { TruckTimeline } from '../components/TruckTimeline';
+import { FiltroMes } from '../components/FiltroMes';
+import { nomeMes } from '../lib/mes';
+
+type Resumo = { caminhaoId: string; placa: string; totalReceita: number; totalDespesa: number; diferenca: number };
+
+const moeda = (v: number | null | undefined) => (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 type Caminhao = {
     id: string;
@@ -30,6 +36,34 @@ export function Caminhoes() {
     const [loading, setLoading] = useState(false);
     const [novaPlaca, setNovaPlaca] = useState('');
     const [criando, setCriando] = useState(false);
+    // '' = todos os meses; AAAA-MM = receita/despesa/resultado só daquele mês
+    const [mes, setMes] = useState('');
+    const [resumos, setResumos] = useState<Record<string, Resumo>>({});
+    const [carregandoResumo, setCarregandoResumo] = useState(false);
+
+    async function carregarResumo() {
+        setCarregandoResumo(true);
+        try {
+            const res = await api.get('/caminhoes/resumo-financeiro', { params: { mes: mes || undefined } });
+            const mapa: Record<string, Resumo> = {};
+            for (const r of (res.data ?? []) as Resumo[]) mapa[r.caminhaoId] = r;
+            setResumos(mapa);
+        } catch {
+            setResumos({});
+        } finally {
+            setCarregandoResumo(false);
+        }
+    }
+
+    useEffect(() => {
+        carregarResumo();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mes, caminhoes.length]);
+
+    const totalFrota = Object.values(resumos).reduce(
+        (t, r) => ({ rec: t.rec + r.totalReceita, desp: t.desp + r.totalDespesa }),
+        { rec: 0, desp: 0 },
+    );
 
     async function fetchCaminhoes() {
         const res = await api.get('/caminhoes');
@@ -145,6 +179,29 @@ export function Caminhoes() {
                 </p>
             </div>
 
+            <FiltroMes
+                mes={mes}
+                onChange={setMes}
+                dica={mes ? 'Receita (CT-e pela emissão), despesa (contas a pagar pelo vencimento) e resultado só deste mês.' : undefined}
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20">
+                    <p className="text-xs text-blue-700 dark:text-blue-400">Receita da frota {mes ? `— ${nomeMes(mes)}` : '— todos os meses'}</p>
+                    <p className="text-xl font-bold text-blue-700 dark:text-blue-400">{moeda(totalFrota.rec)}</p>
+                </div>
+                <div className="p-4 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20">
+                    <p className="text-xs text-red-700 dark:text-red-400">Despesa da frota</p>
+                    <p className="text-xl font-bold text-red-700 dark:text-red-400">{moeda(totalFrota.desp)}</p>
+                </div>
+                <div className="p-4 rounded-xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Resultado da frota</p>
+                    <p className={`text-xl font-bold ${totalFrota.rec - totalFrota.desp >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {moeda(totalFrota.rec - totalFrota.desp)}
+                    </p>
+                </div>
+            </div>
+
             <div className="flex flex-wrap items-end gap-3 p-4 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
                 <div className="flex-1 min-w-[220px]">
                     <label className={labelClasse}>Nova placa</label>
@@ -176,9 +233,9 @@ export function Caminhoes() {
                             key={c.id}
                             role="button"
                             tabIndex={0}
-                            onClick={() => navigate(`/caminhoes/${encodeURIComponent(c.placa)}`)}
+                            onClick={() => navigate(`/caminhoes/${encodeURIComponent(c.placa)}${mes ? `?mes=${mes}` : ''}`)}
                             onKeyDown={(e) => {
-                                if (e.key === 'Enter') navigate(`/caminhoes/${encodeURIComponent(c.placa)}`);
+                                if (e.key === 'Enter') navigate(`/caminhoes/${encodeURIComponent(c.placa)}${mes ? `?mes=${mes}` : ''}`);
                             }}
                             className="group relative cursor-pointer rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111827] hover:border-blue-300 dark:hover:border-blue-800 hover:shadow-sm transition"
                         >
@@ -192,6 +249,27 @@ export function Caminhoes() {
                                 </div>
                                 <ChevronRight size={16} className="text-gray-300 dark:text-gray-600 group-hover:text-blue-500 shrink-0" />
                             </div>
+
+                            {(() => {
+                                const r = resumos[c.id];
+                                const resultado = r?.diferenca ?? 0;
+                                return (
+                                    <div className={`px-4 pb-3 space-y-1 text-xs ${carregandoResumo ? 'opacity-50' : ''}`}>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-500 dark:text-gray-400">Receita</span>
+                                            <span className="font-semibold text-blue-700 dark:text-blue-400">{moeda(r?.totalReceita)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-500 dark:text-gray-400">Despesa</span>
+                                            <span className="font-semibold text-red-600 dark:text-red-400">{moeda(r?.totalDespesa)}</span>
+                                        </div>
+                                        <div className="flex justify-between pt-1 border-t border-dashed border-gray-200 dark:border-gray-700">
+                                            <span className="text-gray-700 dark:text-gray-300 font-medium">{resultado >= 0 ? 'Lucro' : 'Prejuízo'}</span>
+                                            <span className={`font-bold ${resultado >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{moeda(resultado)}</span>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
 
                             <div className="flex items-center gap-1 px-3 py-1.5 border-t border-gray-100 dark:border-gray-800">
                                 <button

@@ -9,7 +9,10 @@ export function faixaDoMes(mes?: string | null): FaixaMes | null {
     const ano = Number(m[1]);
     const idx = Number(m[2]) - 1;
     if (idx < 0 || idx > 11) return null;
-    return { gte: new Date(ano, idx, 1), lt: new Date(ano, idx + 1, 1) };
+    // Mês no horário de Brasília (UTC-3, sem horário de verão desde 2019): o
+    // servidor (Docker) roda em UTC, e sem isso um CT-e emitido dia 30 às 22h
+    // cairia no mês seguinte.
+    return { gte: new Date(Date.UTC(ano, idx, 1, 3)), lt: new Date(Date.UTC(ano, idx + 1, 1, 3)) };
 }
 
 // Sem faixa = tudo passa. Sem data = fica de fora quando há faixa.

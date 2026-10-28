@@ -44,11 +44,12 @@ export class ContasReceberService {
     private filtroMes(mes?: string): Prisma.ContaReceberWhereInput | null {
         const faixa = faixaDoMes(mes);
         if (!faixa) return null;
+        // Competência = mês de EMISSÃO (do CT-e). Conta lançada sem data de
+        // emissão cai pelo vencimento.
         return {
             OR: [
-                { status: 'RECEBIDA', recebidoEm: faixa },
-                { status: 'RECEBIDA', recebidoEm: null, vencimento: faixa },
-                { status: { not: 'RECEBIDA' }, vencimento: faixa },
+                { dataEmissao: faixa },
+                { dataEmissao: null, vencimento: faixa },
             ],
         };
     }
@@ -153,7 +154,10 @@ export class ContasReceberService {
         const j = this.janelas();
         const faixa = faixaDoMes(mes);
         const contas = await this.prisma.contaReceber.findMany({
-            where: { empresaId, status: 'ABERTA', ...(faixa ? { vencimento: faixa } : {}) },
+            where: {
+                empresaId, status: 'ABERTA',
+                ...(faixa ? { OR: [{ dataEmissao: faixa }, { dataEmissao: null, vencimento: faixa }] } : {}),
+            },
             select: { valor: true, vencimento: true },
         });
         const vazio = () => ({ quantidade: 0, valor: 0 });

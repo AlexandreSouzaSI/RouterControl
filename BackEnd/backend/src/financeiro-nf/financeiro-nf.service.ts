@@ -454,19 +454,12 @@ export class FinanceiroNfService {
         return { hoje, amanha, inicioSemana, fimSemana, inicioMes, fimMes };
     }
 
-    // Filtro de mês (AAAA-MM) de Contas a Pagar: conta PAGA entra no mês em
-    // que foi paga (sem data de pagamento, cai no vencimento); as demais
-    // entram no mês do vencimento.
+    // Filtro de mês (AAAA-MM) de Contas a Pagar: a conta entra no mês do
+    // VENCIMENTO, paga ou não (competência).
     private filtroMesContaPagar(mes?: string): Prisma.ContaPagarWhereInput | null {
         const faixa = faixaDoMes(mes);
         if (!faixa) return null;
-        return {
-            OR: [
-                { status: 'PAGA', pagoEm: faixa },
-                { status: 'PAGA', pagoEm: null, vencimento: faixa },
-                { status: { not: 'PAGA' }, vencimento: faixa },
-            ],
-        };
+        return { vencimento: faixa };
     }
 
     private static readonly STATUS_PENDENTES: StatusContaPagar[] = ['ABERTA', 'VENCIDA', 'PARCIAL'] as StatusContaPagar[];

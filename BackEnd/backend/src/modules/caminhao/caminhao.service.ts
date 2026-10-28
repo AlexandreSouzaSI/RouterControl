@@ -2,10 +2,9 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { dentroDaFaixa, faixaDoMes } from '../../common/mes.util';
 
-// Data que decide em qual mês uma conta a pagar cai: paga = quando foi paga
-// (sem data, vencimento); em aberto = vencimento.
-const dataRefPagar = (c: { status: string; pagoEm: Date | null; vencimento: Date }) =>
-    c.status === 'PAGA' ? c.pagoEm ?? c.vencimento : c.vencimento;
+// Data que decide em qual mês uma conta a pagar cai: o vencimento (mesma
+// regra do filtro de mês de Contas a Pagar).
+const dataRefPagar = (c: { status: string; pagoEm: Date | null; vencimento: Date }) => c.vencimento;
 
 @Injectable()
 export class CaminhaoService {
@@ -156,6 +155,22 @@ export class CaminhaoService {
         });
     }
 
+    // Mesmos totais da tela de cada caminhão, pra todos de uma vez (cards da
+    // tela Caminhões). Reaproveita getDetalhePorPlaca pra os números baterem.
+    async resumoFinanceiro(empresaId: string, mes?: string) {
+        const caminhoes = await this.prisma.caminhao.findMany({
+            where: this.filtroEmpresa(empresaId),
+            select: { id: true, placa: true },
+        });
+        const itens = await Promise.all(
+            caminhoes.map(async (c) => {
+                const d = await this.getDetalhePorPlaca(c.placa, empresaId, mes);
+                return { caminhaoId: c.id, placa: c.placa, totalReceita: d.totalReceita, totalDespesa: d.totalDespesa, diferenca: d.diferenca };
+            }),
+        );
+        return itens;
+    }
+
     // Detalhe da página de Caminhão, buscado pela PLACA (não pelo id) —
     // assim funciona tanto pra caminhão cadastrado (frota própria) quanto
     // pra placa de terceiro que só existe em ViagemGps, sem registro em
@@ -209,13 +224,13 @@ export class CaminhaoService {
             // Contas a Receber já recebidas (conciliadas) viram receita do caminhão.
             const recebidas = (await this.prisma.contaReceber.findMany({
                 where: { caminhaoId: caminhao.id, empresaId, status: 'RECEBIDA' },
-                select: { valor: true, valorRecebido: true, recebidoEm: true, vencimento: true },
-            })).filter((c) => dentroDaFaixa(c.recebidoEm ?? c.vencimento, faixa));
+                select: { valor: true, valorRecebido: true, recebidoEm: true, vencimento: true, dataEmissao: true },
+            })).filter((c) => dentroDaFaixa(c.dataEmissao ?? c.recebidoEm ?? c.vencimento, faixa));
             totalReceitaFinal += recebidas.reduce((acc, c) => acc + (c.valorRecebido ?? c.valor), 0);
             const rateiosReceber = (await this.prisma.contaReceberRateio.findMany({
                 where: { caminhaoId: caminhao.id, contaReceber: { empresaId, status: 'RECEBIDA' } },
-                select: { valor: true, contaReceber: { select: { recebidoEm: true, vencimento: true } } },
-            })).filter((r) => dentroDaFaixa(r.contaReceber.recebidoEm ?? r.contaReceber.vencimento, faixa));
+                select: { valor: true, contaReceber: { select: { recebidoEm: true, vencimento: true, dataEmissao: true } } },
+            })).filter((r) => dentroDaFaixa(r.contaReceber.dataEmissao ?? r.contaReceber.recebidoEm ?? r.contaReceber.vencimento, faixa));
             totalReceitaFinal += rateiosReceber.reduce((acc, r) => acc + r.valor, 0);
         }
 
@@ -296,7 +311,7 @@ export class CaminhaoService {
             tipo: 'RECEITA' as const,
             descricao: `${c.descricao}${c.cliente ? ` — ${c.cliente}` : ''} (Conta a Receber)`,
             valor: c.valorRecebido ?? c.valor,
-            data: c.recebidoEm ?? c.vencimento,
+            data: c.dataEmissao ?? c.recebidoEm ?? c.vencimento,
             origem: 'CONTA_RECEBER' as const,
         }));
         const rateiosReceber = await this.prisma.contaReceberRateio.findMany({
@@ -308,7 +323,7 @@ export class CaminhaoService {
             tipo: 'RECEITA' as const,
             descricao: `${r.contaReceber.descricao} (Conta a Receber · dividida em ${r.contaReceber.rateios.length} carretas)`,
             valor: r.valor,
-            data: r.contaReceber.recebidoEm ?? r.contaReceber.vencimento,
+            data: r.contaReceber.dataEmissao ?? r.contaReceber.recebidoEm ?? r.contaReceber.vencimento,
             origem: 'CONTA_RECEBER' as const,
         }));
 

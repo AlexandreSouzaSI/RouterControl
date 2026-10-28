@@ -424,7 +424,7 @@ export function ContasPagar() {
     }
 
     function rotuloPrazo(c: ContaPagar) {
-        if (c.status === 'PAGA') return { texto: 'Paga', tom: 'text-green-600 dark:text-green-400' };
+        if (c.status === 'PAGA') return { texto: c.pagoEm ? `Paga em ${new Date(c.pagoEm).toLocaleDateString('pt-BR')}` : 'Paga', tom: 'text-green-600 dark:text-green-400' };
         const d = diasAte(c.vencimento);
         if (d < 0) return { texto: `Vencida há ${-d} dia${d === -1 ? '' : 's'}`, tom: 'text-red-600 dark:text-red-400' };
         if (d === 0) return { texto: 'Vence hoje', tom: 'text-amber-600 dark:text-amber-400' };
@@ -759,7 +759,7 @@ export function ContasPagar() {
             <FiltroMes
                 mes={mes}
                 onChange={(m) => { setPeriodo(''); if (m) setSituacao('todas'); setMes(m); }}
-                dica={mes ? 'Toda a página mostra só este mês: pagas pela data do pagamento, em aberto pelo vencimento.' : undefined}
+                dica={mes ? 'Toda a página mostra só as contas com vencimento neste mês (pagas ou não).' : undefined}
             />
 
             {dash && (

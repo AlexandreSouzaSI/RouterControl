@@ -266,7 +266,7 @@ export function ContasReceber() {
             <FiltroMes
                 mes={mes}
                 onChange={(m) => { setPeriodo(''); if (m) setSituacao('todas'); setMes(m); }}
-                dica={mes ? 'Toda a página mostra só este mês: recebidas pela data do recebimento, a receber pelo vencimento.' : undefined}
+                dica={mes ? 'Toda a página mostra só os CT-e/contas emitidos neste mês (sem data de emissão, vale o vencimento).' : undefined}
             />
 
             {dash && (

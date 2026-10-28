@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, Loader2, Truck, Landmark } from 'lucide-react';
 import { api } from '../services/api';
 import { FiltroMes } from '../components/FiltroMes';
@@ -74,7 +74,9 @@ export function CaminhaoDetalhe() {
     const [data, setData] = useState(hojeISO());
     const [salvando, setSalvando] = useState(false);
     // '' = todos os meses; AAAA-MM = receita, despesa, lucro e lançamentos só daquele mês
-    const [mes, setMes] = useState('');
+    // Vem do card da tela Caminhões (?mes=AAAA-MM) já com o mês escolhido lá.
+    const [searchParams] = useSearchParams();
+    const [mes, setMes] = useState(() => (/^\d{4}-\d{2}$/.test(searchParams.get('mes') ?? '') ? searchParams.get('mes')! : ''));
 
     async function carregar() {
         if (!placa) return;
@@ -178,7 +180,7 @@ export function CaminhaoDetalhe() {
             <FiltroMes
                 mes={mes}
                 onChange={setMes}
-                dica={mes ? 'Receita, despesa, lucro e lançamentos só deste mês (contas pagas/recebidas pela data do pagamento).' : undefined}
+                dica={mes ? 'Receita, despesa, lucro e lançamentos só deste mês (receita de CT-e pela emissão; contas a pagar pelo vencimento).' : undefined}
             />
 
             {loading ? (

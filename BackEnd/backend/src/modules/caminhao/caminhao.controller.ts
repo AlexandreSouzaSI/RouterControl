@@ -26,6 +26,13 @@ export class CaminhaoController {
         return this.service.findAll(empresaId);
     }
 
+    // Receita, despesa e resultado de cada caminhão (cards da tela Caminhões).
+    // Rota estática: precisa vir antes de ':id'.
+    @Get('resumo-financeiro')
+    resumoFinanceiro(@EmpresaAtual() empresaId: string, @Query('mes') mes?: string) {
+        return this.service.resumoFinanceiro(empresaId, mes);
+    }
+
     // Rotas estáticas ('detalhe', 'lancamentos') precisam vir ANTES de
     // ':id' — senão o Nest casa 'detalhe'/'lancamentos' como se fossem o
     // parâmetro :id.
