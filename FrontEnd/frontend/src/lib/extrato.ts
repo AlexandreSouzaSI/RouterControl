@@ -23,6 +23,7 @@ export const FIXOS: Record<string, { nome: string; curto: string; tecla: string;
     GERAL: { nome: 'Geral / empresa', curto: 'Geral', tecla: 'G', cor: 'bg-slate-600 text-white border-slate-600' },
     SOCIO: { nome: 'Sócios / proprietários', curto: 'Sócios', tecla: 'P', cor: 'bg-amber-700 text-white border-amber-700' },
     NAO: { nome: 'Não é despesa', curto: 'Não é despesa', tecla: 'N', cor: 'bg-gray-400 text-white border-gray-400' },
+    AGREGADO: { nome: 'Agregados / terceiros', curto: 'Agregados', tecla: 'A', cor: 'bg-indigo-600 text-white border-indigo-600' },
     JA_LANCADO: { nome: 'Já lançado (Contas a Pagar)', curto: 'Já lançado', tecla: 'J', cor: 'bg-emerald-600 text-white border-emerald-600' },
 };
 

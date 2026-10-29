@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, Loader2, Truck, Landmark } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Loader2, Truck, Landmark, Search, X } from 'lucide-react';
 import { api } from '../services/api';
 import { FiltroMes } from '../components/FiltroMes';
+import { lerMesCaminhoes, salvarMesCaminhoes } from '../lib/mes';
 
 // =============================================================================
 // Página de detalhe de um caminhão, buscado pela PLACA (não pelo id) —
@@ -73,10 +74,13 @@ export function CaminhaoDetalhe() {
     const [valor, setValor] = useState('');
     const [data, setData] = useState(hojeISO());
     const [salvando, setSalvando] = useState(false);
+    const [filtro, setFiltro] = useState('');
     // '' = todos os meses; AAAA-MM = receita, despesa, lucro e lançamentos só daquele mês
     // Vem do card da tela Caminhões (?mes=AAAA-MM) já com o mês escolhido lá.
     const [searchParams] = useSearchParams();
-    const [mes, setMes] = useState(() => (/^\d{4}-\d{2}$/.test(searchParams.get('mes') ?? '') ? searchParams.get('mes')! : ''));
+    // Mês vem do link (?mes=) ou do último escolhido; trocar aqui vale também pra lista de Caminhões.
+    const [mes, setMesEstado] = useState(() => (/^\d{4}-\d{2}$/.test(searchParams.get('mes') ?? '') ? searchParams.get('mes')! : lerMesCaminhoes()));
+    const setMes = (m: string) => { setMesEstado(m); salvarMesCaminhoes(m); };
 
     async function carregar() {
         if (!placa) return;
@@ -138,8 +142,18 @@ export function CaminhaoDetalhe() {
         }
     }
 
-    const receitas = lancamentos.filter((l) => l.tipo === 'RECEITA');
-    const despesas = lancamentos.filter((l) => l.tipo === 'DESPESA');
+    // Filtro por qualquer palavra da descrição, valor (2071,69 / 2.071,69) ou data.
+    const semAcento = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const termos = semAcento(filtro.trim()).split(/\s+/).filter(Boolean);
+    const bate = (l: Lancamento) => {
+        if (!termos.length) return true;
+        const v = Number(l.valor);
+        const alvo = semAcento(`${l.descricao} ${v.toFixed(2)} ${v.toFixed(2).replace('.', ',')} ${formatCurrency(v)} ${new Date(l.data).toLocaleDateString('pt-BR')}`);
+        return termos.every((t) => alvo.includes(t));
+    };
+    const receitas = lancamentos.filter((l) => l.tipo === 'RECEITA' && bate(l));
+    const despesas = lancamentos.filter((l) => l.tipo === 'DESPESA' && bate(l));
+    const somaLista = (ls: Lancamento[]) => ls.reduce((s, l) => s + Number(l.valor), 0);
 
     return (
         <div className="space-y-6">
@@ -288,13 +302,29 @@ export function CaminhaoDetalhe() {
                         </div>
                     )}
 
+                    <div className="relative">
+                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input value={filtro} onChange={(e) => setFiltro(e.target.value)}
+                            placeholder="Filtrar lançamentos por palavra, valor ou data (ex.: posto, 2071,69, 30/09)…"
+                            className="w-full pl-9 pr-9 py-2.5 rounded-xl text-sm bg-white dark:bg-[#111827] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white" />
+                        {filtro && (
+                            <button onClick={() => setFiltro('')} title="Limpar filtro" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"><X size={16} /></button>
+                        )}
+                    </div>
+                    {termos.length > 0 && (
+                        <p className="text-xs text-gray-500 -mt-2">
+                            Filtro “{filtro.trim()}”: {receitas.length} receita(s) · {formatCurrency(somaLista(receitas))} — {despesas.length} despesa(s) · {formatCurrency(somaLista(despesas))}
+                        </p>
+                    )}
+
                     <div className="grid sm:grid-cols-2 gap-4">
                         <div className="bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden">
-                            <h4 className="px-4 py-3 text-sm font-semibold text-blue-700 dark:text-blue-400 border-b border-gray-100 dark:border-gray-800">
-                                Lançamentos de receita
+                            <h4 className="px-4 py-3 text-sm font-semibold text-blue-700 dark:text-blue-400 border-b border-gray-100 dark:border-gray-800 flex justify-between gap-2">
+                                <span>Lançamentos de receita</span>
+                                {termos.length > 0 && <span className="text-xs font-medium tabular-nums">{receitas.length} · {formatCurrency(somaLista(receitas))}</span>}
                             </h4>
                             {receitas.length === 0 ? (
-                                <p className="text-sm text-gray-400 py-6 text-center">Nenhum lançamento ainda.</p>
+                                <p className="text-sm text-gray-400 py-6 text-center">{termos.length ? 'Nada encontrado com esse filtro.' : 'Nenhum lançamento ainda.'}</p>
                             ) : (
                                 <ul className="divide-y divide-gray-100 dark:divide-gray-800">
                                     {receitas.map((l) => (
@@ -331,11 +361,12 @@ export function CaminhaoDetalhe() {
                         </div>
 
                         <div className="bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden">
-                            <h4 className="px-4 py-3 text-sm font-semibold text-red-700 dark:text-red-400 border-b border-gray-100 dark:border-gray-800">
-                                Lançamentos de despesa
+                            <h4 className="px-4 py-3 text-sm font-semibold text-red-700 dark:text-red-400 border-b border-gray-100 dark:border-gray-800 flex justify-between gap-2">
+                                <span>Lançamentos de despesa</span>
+                                {termos.length > 0 && <span className="text-xs font-medium tabular-nums">{despesas.length} · {formatCurrency(somaLista(despesas))}</span>}
                             </h4>
                             {despesas.length === 0 ? (
-                                <p className="text-sm text-gray-400 py-6 text-center">Nenhum lançamento ainda.</p>
+                                <p className="text-sm text-gray-400 py-6 text-center">{termos.length ? 'Nada encontrado com esse filtro.' : 'Nenhum lançamento ainda.'}</p>
                             ) : (
                                 <ul className="divide-y divide-gray-100 dark:divide-gray-800">
                                     {despesas.map((l) => (

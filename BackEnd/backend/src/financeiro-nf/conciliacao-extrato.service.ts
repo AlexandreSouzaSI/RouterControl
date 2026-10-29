@@ -12,7 +12,7 @@ import { juntarExtratos, lerExtrato, ExtratoLido } from './extrato-parser';
 // =============================================================================
 
 export type Parte = { k: string; v: number };
-export const FIXOS = ['GERAL', 'SOCIO', 'NAO', 'JA_LANCADO'] as const;
+export const FIXOS = ['GERAL', 'SOCIO', 'AGREGADO', 'NAO', 'JA_LANCADO'] as const;
 
 const norm = (s: string) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
 const placaLimpa = (p: string) => norm(p).replace(/[^A-Z0-9]/g, '');
@@ -390,7 +390,7 @@ export class ConciliacaoExtratoService {
         const destino = String(body?.destino ?? '');
         if (termo.length < 3) throw new BadRequestException('Termo muito curto (mínimo 3 letras).');
         const ids = new Set((await this.caminhoes(empresaId)).map((c) => c.id));
-        if (!ids.has(destino) && !['GERAL', 'SOCIO', 'NAO'].includes(destino)) throw new BadRequestException('Escolha o destino.');
+        if (!ids.has(destino) && !['GERAL', 'SOCIO', 'AGREGADO', 'NAO'].includes(destino)) throw new BadRequestException('Escolha o destino.');
         const t = tipo === 'PLACA' ? placaLimpa(termo) : termo;
         return this.prisma.conciliacaoVinculo.upsert({
             where: { empresaId_termo: { empresaId, termo: t } },
@@ -408,6 +408,7 @@ export class ConciliacaoExtratoService {
             if (/^GERA/.test(d) || d === 'EMPRESA') return 'GERAL';
             if (/^SOCIO|^PROPRIET/.test(d)) return 'SOCIO';
             if (/^NAO|^NAOEDESPESA/.test(d)) return 'NAO';
+            if (/^AGREG|^TERCEIR/.test(d)) return 'AGREGADO';
             const exata = caminhoes.find((c) => placaLimpa(c.placa) === d);
             if (exata) return exata.id;
             const pre = caminhoes.filter((c) => placaLimpa(c.placa).startsWith(d.slice(0, 3)));

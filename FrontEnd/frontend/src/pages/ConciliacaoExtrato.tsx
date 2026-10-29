@@ -386,6 +386,7 @@ function VinculosModal({ caminhoes, vinculos, item, onFechar, onMudou }: {
                         {caminhoes.map((c) => <option key={c.id} value={c.id}>{c.placa}</option>)}
                         <option value="GERAL">Geral / empresa</option>
                         <option value="SOCIO">Sócios / proprietários</option>
+                        <option value="AGREGADO">Agregados / terceiros</option>
                         <option value="NAO">Não é despesa</option>
                     </select>
                     <button onClick={salvar} disabled={termo.trim().length < 3 || !destino} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold disabled:opacity-50">Salvar</button>
@@ -394,7 +395,7 @@ function VinculosModal({ caminhoes, vinculos, item, onFechar, onMudou }: {
                 {!item && (
                     <details className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2">
                         <summary className="text-sm font-semibold text-gray-900 dark:text-white cursor-pointer">Colar vários de uma vez</summary>
-                        <p className="text-xs text-gray-500 mt-2">Um por linha: <code>TERMO → DESTINO</code> (também vale <code>=</code> ou <code>;</code>). Destino = placa do caminhão, <code>GERAL</code>, <code>SOCIOS</code> ou <code>NAO</code>. Linha começando com # é ignorada.</p>
+                        <p className="text-xs text-gray-500 mt-2">Um por linha: <code>TERMO → DESTINO</code> (também vale <code>=</code> ou <code>;</code>). Destino = placa do caminhão, <code>GERAL</code>, <code>SOCIOS</code>, <code>AGREGADOS</code> ou <code>NAO</code>. Linha começando com # é ignorada.</p>
                         <textarea value={lote} onChange={(e) => setLote(e.target.value)} rows={8} placeholder={'FQA → POZ\nGJP → POZ\nGIOVANNI → POZ\nNU GALHO → SOCIOS'}
                             className="mt-2 w-full px-3 py-2 rounded-lg text-sm font-mono bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white" />
                         <button onClick={salvarLote} disabled={!lote.trim()} className="mt-2 px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold disabled:opacity-50">Salvar todos</button>

@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pagamentos de motoristas · Set/2026</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--ink:#16181d;--muted:#6b7280;--line:#e5e7eb;--soft:#f9fafb;--accent:#2563eb;--ok:#059669;--warn:#d97706;--bad:#dc2626;--sel:#eff6ff}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a21;--ink:#e8eaed;--muted:#9aa1ad;--line:#2a2f3a;--soft:#1d212a;--accent:#60a5fa;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--sel:#1e2a44}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);padding:12px 20px 10px}
+h1{font-size:17px;margin:0}.sub{color:var(--muted);font-size:12.5px;margin-top:2px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.acoes{display:flex;gap:6px;flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 10px}
+button:hover{border-color:var(--accent)}button.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+button:disabled{opacity:.5;cursor:default}
+.prog{height:6px;background:var(--line);border-radius:4px;margin:10px 0;overflow:hidden}.prog>div{height:100%;background:var(--ok);transition:width .25s}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.cardt{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--c,#999);border-radius:10px;padding:8px 10px;cursor:pointer;min-width:0}
+.cardt.ativo{outline:2px solid var(--accent)}
+.cardt .n{font-weight:700;font-size:13px;display:flex;justify-content:space-between}.cardt .n small{color:var(--muted);font-weight:500}
+.cardt .v{font-size:16px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cardt .d{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conc{margin-top:8px;font-size:12.5px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:7px 10px;display:flex;flex-wrap:wrap;gap:4px 10px}
+.conc b{font-variant-numeric:tabular-nums}.okk{color:var(--ok);font-weight:700}.nok{color:var(--bad);font-weight:700}
+main{padding:14px 20px 90px;max-width:1300px;margin:0 auto}
+.filtros{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.filtros input,.filtros select{padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit}
+.filtros input{flex:1;min-width:200px}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;border-right:1px solid var(--line)}.seg button:last-child{border-right:0}.seg button.on{background:var(--accent);color:#fff}
+.seg .ct{font-size:11px;opacity:.75;margin-left:4px}
+.dica{font-size:12px;color:var(--muted);margin:0 0 10px}
+kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--card)}
+.lin{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;display:grid;grid-template-columns:22px 70px 1fr 120px;gap:10px;align-items:start}
+.lin.foco{border-color:var(--accent);background:var(--sel);box-shadow:0 0 0 1px var(--accent)}
+.lin.marc{outline:2px dashed var(--accent)}
+.lin .dt{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+.lin .nm{font-weight:700}
+.lin .it{font-size:12px;color:var(--muted);margin-top:2px}
+.lin .it span{display:inline-block;margin-right:8px;white-space:nowrap}
+.lin .val{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;font-size:15px}
+.lin .val small{display:block;font-size:10px;color:var(--warn);font-weight:600}
+.btns,.res{grid-column:3/5;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.res{font-size:12.5px}
+.pl{padding:4px 9px;font-size:12.5px;font-weight:700;border-radius:7px;border:1px solid var(--line);background:var(--soft);color:var(--ink)}
+.pl .k{font-weight:500;color:var(--muted);font-size:10.5px;margin-left:3px}
+.pl.on{background:var(--c);border-color:var(--c);color:#fff}.pl.on .k{color:#ffffffb0}
+.sep{width:1px;height:20px;background:var(--line);margin:0 3px}
+.tag{display:inline-flex;padding:2px 8px;border-radius:999px;color:#fff;background:var(--c);font-weight:700;font-size:12px}
+.sug{font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);padding:3px 8px}
+.nota{grid-column:3/5;width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--soft);color:var(--ink);font:inherit;font-size:12.5px}
+.vazio{text-align:center;color:var(--muted);padding:40px}
+.lote{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:30;background:var(--card);border:1px solid var(--accent);box-shadow:0 8px 30px #0003;border-radius:12px;padding:10px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:calc(100% - 24px)}
+.lote b{margin-right:4px}
+.ov{position:fixed;inset:0;background:#0007;display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.mod{background:var(--card);border-radius:12px;width:min(460px,100%);padding:16px;max-height:90vh;overflow:auto}
+.mod h3{margin:0 0 4px;font-size:15px}
+.mod .lr{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)}
+.mod .lr label{flex:1;display:flex;gap:8px;align-items:center;font-weight:600}
+.mod .lr input[type=text]{width:120px;text-align:right;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--soft);color:var(--ink);font:inherit}
+.mod .rod{display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:8px}
+.st{font-size:12.5px;font-weight:600}.dot{width:10px;height:10px;border-radius:50%;background:var(--c);display:inline-block}
+@media (max-width:700px){header{position:static;padding:10px 16px}main{padding:12px 16px 110px}
+ .lin{grid-template-columns:22px 1fr auto}.lin .dt{grid-column:2/4}.btns,.res,.nota{grid-column:1/4}}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <div>
+      <h1>Pagamentos de motoristas por dia · Setembro/2026</h1>
+      <div class="sub" id="sub"></div>
+    </div>
+    <div class="acoes">
+      <button id="bSalvar" class="pri" title="Baixa um arquivo com a classificação, pra continuar depois">💾 Salvar progresso</button>
+      <button id="bAbrir">📂 Abrir progresso</button>
+      <button id="bCsv">⬇ Exportar planilha (CSV)</button>
+      <input type="file" id="fArq" accept=".json" hidden>
+    </div>
+  </div>
+  <div class="prog"><div id="barra"></div></div>
+  <div class="cards" id="cards"></div>
+  <div class="conc" id="conc"></div>
+</header>
+<main>
+  <div class="filtros">
+    <input id="busca" placeholder="Buscar motorista, CT-e, valor ou data…">
+    <select id="fMot"><option value="">Todos os motoristas</option></select>
+    <div class="seg" id="seg">
+      <button data-f="pend" class="on">Pendentes<span class="ct"></span></button>
+      <button data-f="feitos">Classificados<span class="ct"></span></button>
+      <button data-f="todos">Todos<span class="ct"></span></button>
+    </div>
+  </div>
+  <p class="dica">Cada linha é um motorista num dia (com os CT-es daquele dia). Clique em <b>mais de uma placa</b> para dividir igual, ou em <b>Dividir</b> para informar o valor de cada uma.
+    Marque a caixinha de várias linhas para classificar todas de uma vez. Atalhos: <kbd>1</kbd>–<kbd>8</kbd> placa · <kbd>Shift</kbd>+número soma outra placa · <kbd>D</kbd> dividir · <kbd>S</kbd> sugestão · <kbd>Espaço</kbd> marcar · <kbd>0</kbd> limpar · <kbd>↑</kbd><kbd>↓</kbd> navegar.
+    O que você classifica só sai de "Pendentes" quando clicar em Salvar progresso.</p>
+  <div id="lista"></div>
+</main>
+<div id="loteBar"></div>
+<div id="modal"></div>
+
+<script>
+const DADOS = [{"id": 1, "m": "RUAN", "d": "01/09/2026", "v": 14241.0, "itens": [{"ref": "422", "v": 14241.0, "banco": "SICRED"}]}, {"id": 2, "m": "WALLISSON", "d": "01/09/2026", "v": 5200.0, "itens": [{"ref": "S /CTE", "v": 3500.0, "banco": "SICRED"}, {"ref": "S /CTE", "v": 1700.0, "banco": ""}]}, {"id": 3, "m": "ISRAEL", "d": "02/09/2026", "v": 3500.0, "itens": [{"ref": "70%", "v": 3500.0, "banco": "SICRED"}]}, {"id": 4, "m": "LEONARDO", "d": "02/09/2026", "v": 14242.0, "itens": [{"ref": "423", "v": 14242.0, "banco": "SICRED"}]}, {"id": 5, "m": "JOAO BATISTA", "d": "03/09/2026", "v": 8171.5, "itens": [{"ref": "427", "v": 8171.5, "banco": "SICRED"}]}, {"id": 6, "m": "SERGIO", "d": "03/09/2026", "v": 8171.5, "itens": [{"ref": "428", "v": 5720.05, "banco": "SICRED"}, {"ref": "428", "v": 2451.45, "banco": "SICRED"}]}, {"id": 7, "m": "GILSON", "d": "04/09/2026", "v": 7500.0, "itens": [{"ref": "433", "v": 7500.0, "banco": ""}]}, {"id": 8, "m": "ISRAEL", "d": "04/09/2026", "v": 7700.0, "itens": [{"ref": "30%", "v": 1700.0, "banco": ""}, {"ref": "70%", "v": 4200.0, "banco": "SICRED"}, {"ref": "30%", "v": 1800.0, "banco": ""}]}, {"id": 9, "m": "WALLISSON", "d": "04/09/2026", "v": 12000.0, "itens": [{"ref": "429", "v": 6000.0, "banco": ""}, {"ref": "430", "v": 6000.0, "banco": ""}]}, {"id": 10, "m": "ISRAEL", "d": "07/09/2026", "v": 8800.0, "itens": [{"ref": "434", "v": 4400.0, "banco": "SICRED"}, {"ref": "435", "v": 4400.0, "banco": "SICRED"}]}, {"id": 11, "m": "JOAO BATISTA", "d": "07/09/2026", "v": 4400.0, "itens": [{"ref": "436", "v": 4400.0, "banco": "SICRED"}]}, {"id": 12, "m": "JOAO BATISTA", "d": "09/09/2026", "v": 4400.0, "itens": [{"ref": "437", "v": 4400.0, "banco": "SICRED"}]}, {"id": 13, "m": "RUAN", "d": "10/09/2026", "v": 14241.0, "itens": [{"ref": "439", "v": 4984.35, "banco": "SICRED"}, {"ref": "439", "v": 2136.15, "banco": "SICRED"}, {"ref": "440", "v": 7120.5, "banco": "SICRED"}]}, {"id": 14, "m": "WALLISSON", "d": "10/09/2026", "v": 5100.0, "itens": [{"ref": "S /CTE", "v": 2600.0, "banco": "SICRED"}, {"ref": "S /CTE", "v": 2500.0, "banco": "SICRED"}]}, {"id": 15, "m": "SERGIO", "d": "11/09/2026", "v": 14241.0, "itens": [{"ref": "441", "v": 14241.0, "banco": "SICRED"}]}, {"id": 16, "m": "ISRAEL", "d": "12/09/2026", "v": 8800.0, "itens": [{"ref": "444", "v": 4400.0, "banco": "SICRED"}, {"ref": "445", "v": 4400.0, "banco": "SICRED"}]}, {"id": 17, "m": "JOAO BATISTA", "d": "12/09/2026", "v": 8800.0, "itens": [{"ref": "442", "v": 4400.0, "banco": "SICRED"}, {"ref": "443", "v": 4400.0, "banco": "SICRED"}]}, {"id": 18, "m": "WALLISSON", "d": "12/09/2026", "v": 8800.0, "itens": [{"ref": "446", "v": 4400.0, "banco": "SICRED"}, {"ref": "447", "v": 4400.0, "banco": "SICRED"}]}, {"id": 19, "m": "GILSON", "d": "14/09/2026", "v": 14241.0, "itens": [{"ref": "448", "v": 14241.0, "banco": "SICRED"}]}, {"id": 20, "m": "ISRAEL", "d": "15/09/2026", "v": 8800.0, "itens": [{"ref": "457", "v": 4400.0, "banco": "SICRED"}, {"ref": "458", "v": 4400.0, "banco": "SICRED"}]}, {"id": 21, "m": "JOAO BATISTA", "d": "15/09/2026", "v": 8800.0, "itens": [{"ref": "453", "v": 4400.0, "banco": "SICRED"}, {"ref": "454", "v": 4400.0, "banco": "SICRED"}]}, {"id": 22, "m": "WALLISSON", "d": "15/09/2026", "v": 8800.0, "itens": [{"ref": "455", "v": 4400.0, "banco": "SICRED"}, {"ref": "456", "v": 4400.0, "banco": "SICRED"}]}, {"id": 23, "m": "SERGIO", "d": "16/09/2026", "v": 8800.0, "itens": [{"ref": "459", "v": 4400.0, "banco": "SICRED"}, {"ref": "460", "v": 4400.0, "banco": "SICRED"}]}, {"id": 24, "m": "GILSON", "d": "17/09/2026", "v": 14241.0, "itens": [{"ref": "461", "v": 14241.0, "banco": "SICRED"}]}, {"id": 25, "m": "ISRAEL", "d": "17/09/2026", "v": 8800.0, "itens": [{"ref": "466", "v": 4400.0, "banco": "SICRED"}, {"ref": "467", "v": 4400.0, "banco": "SICRED"}]}, {"id": 26, "m": "JOAO BATISTA", "d": "17/09/2026", "v": 14241.0, "itens": [{"ref": "462", "v": 7120.5, "banco": "SICRED"}, {"ref": "463", "v": 7120.5, "banco": "SICRED"}]}, {"id": 27, "m": "WALLISSON", "d": "17/09/2026", "v": 8800.0, "itens": [{"ref": "464", "v": 4400.0, "banco": "SICRED"}, {"ref": "465", "v": 4400.0, "banco": "SICRED"}]}, {"id": 28, "m": "RUAN", "d": "18/09/2026", "v": 14241.0, "itens": [{"ref": "472", "v": 7120.5, "banco": "SICRED"}, {"ref": "473", "v": 7120.5, "banco": "SICRED"}]}, {"id": 29, "m": "SERGIO", "d": "18/09/2026", "v": 8800.0, "itens": [{"ref": "470", "v": 4400.0, "banco": "SICRED"}, {"ref": "471", "v": 4400.0, "banco": "SICRED"}]}, {"id": 30, "m": "ANDRE TADEU", "d": "19/09/2026", "v": 8800.0, "itens": [{"ref": "478", "v": 4400.0, "banco": "SICRED"}, {"ref": "479", "v": 4400.0, "banco": "SICRED"}]}, {"id": 31, "m": "SERGIO", "d": "19/09/2026", "v": 8800.0, "itens": [{"ref": "480", "v": 4400.0, "banco": "SICRED"}, {"ref": "481", "v": 4400.0, "banco": "SICRED"}]}, {"id": 32, "m": "WALLISSON", "d": "19/09/2026", "v": 8800.0, "itens": [{"ref": "474", "v": 4400.0, "banco": "SICRED"}, {"ref": "475", "v": 4400.0, "banco": "SICRED"}]}, {"id": 33, "m": "GILSON", "d": "21/09/2026", "v": 8800.0, "itens": [{"ref": "482", "v": 4400.0, "banco": "SICRED"}, {"ref": "483", "v": 4400.0, "banco": "SICRED"}]}, {"id": 34, "m": "SERGIO", "d": "22/09/2026", "v": 8800.0, "itens": [{"ref": "488", "v": 4400.0, "banco": "SICRED"}, {"ref": "489", "v": 4400.0, "banco": "SICRED"}]}, {"id": 35, "m": "WALLISSON", "d": "22/09/2026", "v": 8800.0, "itens": [{"ref": "484", "v": 4400.0, "banco": "SICRED"}, {"ref": "485", "v": 4400.0, "banco": "SICRED"}]}, {"id": 36, "m": "GILSON", "d": "23/09/2026", "v": 8800.0, "itens": [{"ref": "490", "v": 4400.0, "banco": "SICRED"}, {"ref": "491", "v": 4400.0, "banco": "SICRED"}]}, {"id": 37, "m": "SERGIO", "d": "24/09/2026", "v": 8800.0, "itens": [{"ref": "494", "v": 4400.0, "banco": "SICRED"}, {"ref": "495", "v": 4400.0, "banco": "SICRED"}]}, {"id": 38, "m": "ANDRE TADEU", "d": "25/09/2026", "v": 18253.8, "itens": [{"ref": "514", "v": 574.8, "banco": "SICRED"}, {"ref": "514", "v": 12375.6, "banco": "SICRED"}, {"ref": "514", "v": 5303.4, "banco": "SICRED"}]}, {"id": 39, "m": "WALLISSON", "d": "25/09/2026", "v": 21770.95, "itens": [{"ref": "500", "v": 15239.67, "banco": "SICRED"}, {"ref": "500", "v": 6531.28, "banco": "SICRED"}]}, {"id": 40, "m": "GILSON", "d": "26/09/2026", "v": 4400.0, "itens": [{"ref": "496", "v": 4400.0, "banco": "SICRED"}]}, {"id": 41, "m": "GILSON", "d": "27/09/2026", "v": 4400.0, "itens": [{"ref": "497", "v": 4400.0, "banco": "SICRED"}]}, {"id": 42, "m": "ISRAEL", "d": "27/09/2026", "v": 8800.0, "itens": [{"ref": "498", "v": 4400.0, "banco": "SICRED"}, {"ref": "499", "v": 4400.0, "banco": "SICRED"}]}, {"id": 43, "m": "ISRAEL", "d": "28/09/2026", "v": 2340.0, "itens": [{"ref": "30%", "v": 1245.0, "banco": "SICRED"}, {"ref": "30%", "v": 1095.0, "banco": ""}]}, {"id": 44, "m": "JOAO BATISTA", "d": "28/09/2026", "v": 14242.0, "itens": [{"ref": "501", "v": 3560.5, "banco": ""}, {"ref": "502", "v": 3560.5, "banco": ""}, {"ref": "503", "v": 3560.5, "banco": ""}, {"ref": "504", "v": 3560.5, "banco": ""}]}, {"id": 45, "m": "GIOVANNI", "d": "29/09/2026", "v": 8800.0, "itens": [{"ref": "509", "v": 4400.0, "banco": "SICRED"}, {"ref": "510", "v": 4400.0, "banco": "SICRED"}]}, {"id": 46, "m": "SERGIO", "d": "29/09/2026", "v": 8800.0, "itens": [{"ref": "507", "v": 4400.0, "banco": "SICRED"}, {"ref": "508", "v": 4400.0, "banco": "SICRED"}]}, {"id": 47, "m": "GILSON", "d": "30/09/2026", "v": 8135.6, "itens": [{"ref": "511", "v": 8135.6, "banco": "SICRED"}]}, {"id": 48, "m": "JOAO BATISTA", "d": "30/09/2026", "v": 8000.0, "itens": [{"ref": "—", "v": 8000.0, "banco": ""}]}, {"id": 49, "m": "RUAN", "d": "30/09/2026", "v": 33600.0, "itens": [{"ref": "—", "v": 33600.0, "banco": ""}]}, {"id": 50, "m": "SERGIO", "d": "30/09/2026", "v": 1600.0, "itens": [{"ref": "—", "v": 1600.0, "banco": ""}]}]; // [{id, m, d, v, itens:[{ref, v, banco}]}]
+const PLACAS = [
+  {k:'POZ',placa:'POZ-6F28',mot:'GIOVANNI',cor:'#2563eb'},
+  {k:'QPM',placa:'QPM-7278',mot:'FLAVIO',cor:'#059669'},
+  {k:'RFX',placa:'RFX-4H06',mot:'ISRAEL',cor:'#d97706'},
+  {k:'RME',placa:'RME-9B20',mot:'ROBERTO',cor:'#dc2626'},
+  {k:'SEV',placa:'SEV-6G75',mot:'SERGIO',cor:'#7c3aed'},
+  {k:'SEZ',placa:'SEZ-8G61',mot:'JOAO BATISTA',cor:'#0891b2'},
+  {k:'SYR',placa:'SYR-4H04',mot:'GILSON',cor:'#db2777'},
+  {k:'TCF',placa:'TCF-1D34',mot:'WALLISSON',cor:'#65a30d'},
+];
+const OUTRO = {k:'OUTRO',nome:'Outro / terceiro',cor:'#475569'};
+const TODOS_K = [...PLACAS.map(p=>p.k), OUTRO.k];
+const corDe = k => (PLACAS.find(p=>p.k===k)||{}).cor || OUTRO.cor;
+const nomeDe = k => k===OUTRO.k ? OUTRO.nome : k;
+const brl = v => v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const fmt = v => v.toFixed(2).replace('.',',');
+const cent = v => Math.round(v*100);
+const num = t => { t=String(t||'').trim(); if(!t) return 0; const n=Number(t.includes(',')?t.replace(/\./g,'').replace(',','.'):t); return isFinite(n)?n:0; };
+const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase();
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const igual = (v, ks) => { const c=cent(v), b=Math.floor(c/ks.length); return ks.map((k,i)=>({k, v:(i===ks.length-1?c-b*(ks.length-1):b)/100})); };
+DADOS.forEach(d => { const p = PLACAS.find(p=>p.mot===d.m); d.sug = p ? p.k : null; });
+
+let cls = {};                  // id -> {partes:[{k,v}], nota}
+let base = new Set(DADOS.map(d=>d.id)); // pendentes no último salvar
+let filtro='pend', card=null, foco=0, mudou=false, alter=new Set(), marc=new Set();
+
+const partesDe = id => (cls[id]&&cls[id].partes)||[];
+function setPartes(id, partes){
+  cls[id] = {...(cls[id]||{}), partes};
+  if(!partes.length && !cls[id].nota) delete cls[id];
+  alter.add(id); mudou=true;
+}
+// Placa: marca/desmarca (várias = divide igual). OUTRO: sozinho.
+function alternar(d, k){
+  const atual = partesDe(d.id);
+  if(k===OUTRO.k){ setPartes(d.id, atual.length===1&&atual[0].k===k ? [] : [{k, v:d.v}]); return; }
+  const sel = atual.filter(p=>p.k!==OUTRO.k).map(p=>p.k);
+  const novos = sel.includes(k) ? sel.filter(x=>x!==k) : [...sel, k];
+  setPartes(d.id, novos.length ? igual(d.v, novos) : []);
+}
+function unico(d, k){ setPartes(d.id, [{k, v:d.v}]); }
+
+function totais(){
+  const t={}; TODOS_K.forEach(k=>t[k]={tot:0,n:0,mots:{}});
+  let feito=0, vFeito=0, total=0;
+  DADOS.forEach(d=>{ total+=cent(d.v); const ps=partesDe(d.id); if(!ps.length) return; feito++; vFeito+=cent(d.v);
+    ps.forEach(p=>{ const o=t[p.k]; o.tot+=cent(p.v); o.n++; o.mots[d.m]=(o.mots[d.m]||0)+cent(p.v); }); });
+  return {t, feito, vFeito, total};
+}
+
+function visiveis(){
+  const q = norm(document.getElementById('busca').value.trim());
+  const fm = document.getElementById('fMot').value;
+  return DADOS.filter(d=>{
+    const ps=partesDe(d.id);
+    if(card==='PEND'){ if(ps.length) return false; }
+    else if(card){ if(!ps.some(p=>p.k===card)) return false; }
+    else if(filtro==='pend' && !base.has(d.id)) return false;
+    else if(filtro==='feitos' && !ps.length) return false;
+    if(fm && d.m!==fm) return false;
+    if(q && !norm(`${d.m} ${d.d} ${fmt(d.v)} ${d.v} ${d.itens.map(i=>i.ref+' '+fmt(i.v)+' '+i.v).join(' ')}`).includes(q)) return false;
+    return true;
+  });
+}
+
+function render(){
+  const {t,feito,vFeito,total}=totais();
+  document.getElementById('sub').textContent = `${DADOS.length} dias de motorista · ${DADOS.reduce((s,d)=>s+d.itens.length,0)} lançamentos · ${brl(total/100)} · classificados ${feito} (${brl(vFeito/100)}) · faltam ${DADOS.length-feito} (${brl((total-vFeito)/100)})`;
+  document.getElementById('barra').style.width=(feito/DADOS.length*100)+'%';
+  let h='';
+  PLACAS.forEach((p,i)=>{ const o=t[p.k]; const mots=Object.entries(o.mots).map(([m,v])=>`${m.split(' ')[0]} ${brl(v/100)}`).join(' · ');
+    h+=`<div class="cardt ${card===p.k?'ativo':''}" style="--c:${p.cor}" data-card="${p.k}"><div class="n">${p.k} <small>${i+1}</small></div><div class="v">${brl(o.tot/100)}</div><div class="d" title="${esc(mots)}">${o.n} dia(s)${mots?' · '+esc(mots):''}</div></div>`; });
+  { const o=t[OUTRO.k]; h+=`<div class="cardt ${card===OUTRO.k?'ativo':''}" style="--c:${OUTRO.cor}" data-card="${OUTRO.k}"><div class="n">${OUTRO.nome}</div><div class="v">${brl(o.tot/100)}</div><div class="d">${o.n} dia(s)</div></div>`; }
+  h+=`<div class="cardt ${card==='PEND'?'ativo':''}" style="--c:var(--warn)" data-card="PEND"><div class="n">Falta classificar</div><div class="v">${brl((total-vFeito)/100)}</div><div class="d">${DADOS.length-feito} dia(s)</div></div>`;
+  document.getElementById('cards').innerHTML=h;
+  const somaPl = TODOS_K.reduce((s,k)=>s+t[k].tot,0), pend = total-vFeito, dif = total-(somaPl+pend);
+  document.getElementById('conc').innerHTML = `<span>Conferência:</span> Placas <b>${brl(somaPl/100)}</b> + Pendente <b>${brl(pend/100)}</b> = <b>${brl((somaPl+pend)/100)}</b> · Total da lista <b>${brl(total/100)}</b> ${dif===0?'<span class="okk">✓ Bate</span>':`<span class="nok">✗ Diferença ${brl(dif/100)}</span>`}`;
+  const cnt={pend:DADOS.filter(d=>!partesDe(d.id).length).length, feitos:feito, todos:DADOS.length};
+  document.querySelectorAll('#seg button').forEach(b=>b.querySelector('.ct').textContent=cnt[b.dataset.f]);
+
+  const vis=visiveis(); if(foco>=vis.length) foco=Math.max(0,vis.length-1);
+  document.getElementById('lista').innerHTML = vis.length ? vis.map((d,ix)=>linha(d,ix)).join('') : `<div class="vazio">${filtro==='pend'&&!card?'🎉 Nada pendente (salve o progresso para atualizar a lista).':'Nada neste filtro.'}</div>`;
+  renderLote();
+}
+
+function linha(d, ix){
+  const ps=partesDe(d.id), sel=new Set(ps.map(p=>p.k)), div=ps.length>1;
+  let b='';
+  PLACAS.forEach((p,i)=>{ b+=`<button class="pl ${sel.has(p.k)?'on':''}" style="--c:${p.cor}" data-a="alt" data-k="${p.k}" data-id="${d.id}" title="${p.placa} · ${p.mot}">${p.k}<span class="k">${i+1}</span></button>`; });
+  b+=`<span class="sep"></span><button class="pl ${div?'on':''}" style="--c:#0f766e" data-a="div" data-id="${d.id}">Dividir<span class="k">D</span></button>`;
+  b+=`<button class="pl ${sel.has(OUTRO.k)?'on':''}" style="--c:${OUTRO.cor}" data-a="alt" data-k="${OUTRO.k}" data-id="${d.id}">${OUTRO.nome}</button>`;
+  if(ps.length) b+=`<button class="pl" data-a="limpar" data-id="${d.id}" title="Limpar (0)">✕</button>`;
+  if(d.sug && !ps.length) b+=`<button class="sug" data-a="sug" data-id="${d.id}">Sugestão: ${d.sug} (${d.m.split(' ')[0]}) <kbd>S</kbd></button>`;
+  const res = ps.length ? `<div class="res">→ ${ps.map(p=>`<span class="tag" style="--c:${corDe(p.k)}">${nomeDe(p.k)}${div?' '+brl(p.v):''}</span>`).join(' ')}</div>` : '';
+  const itens = d.itens.map(i=>`<span>${i.ref==='—'?'sem CT-e':/^\d+$/.test(i.ref)?'CT-e '+esc(i.ref):esc(i.ref)}: <b>${brl(i.v)}</b>${i.banco?'':' <i>(sem banco)</i>'}</span>`).join('');
+  return `<div class="lin ${ix===foco?'foco':''} ${marc.has(d.id)?'marc':''}" data-ix="${ix}" data-id="${d.id}">
+    <input type="checkbox" data-a="marc" data-id="${d.id}" ${marc.has(d.id)?'checked':''} title="Marcar para classificar junto (Espaço)">
+    <div class="dt">${d.d.slice(0,5)}</div>
+    <div><div class="nm">${esc(d.m)}</div><div class="it">${itens}</div></div>
+    <div class="val">${brl(d.v)}${alter.has(d.id)?'<small>não salvo</small>':''}</div>
+    <div class="btns">${b}</div>${res}
+    <input class="nota" data-a="nota" data-id="${d.id}" placeholder="Observação (opcional)" value="${esc((cls[d.id]&&cls[d.id].nota)||'')}">
+  </div>`;
+}
+
+function renderLote(){
+  const el=document.getElementById('loteBar');
+  if(!marc.size){ el.innerHTML=''; return; }
+  const soma = DADOS.filter(d=>marc.has(d.id)).reduce((s,d)=>s+cent(d.v),0);
+  el.innerHTML = `<div class="lote"><b>${marc.size} marcado(s) · ${brl(soma/100)}</b>
+    ${PLACAS.map(p=>`<button class="pl" style="--c:${p.cor}" data-lote="${p.k}">${p.k}</button>`).join('')}
+    <button class="pl" data-lote="${OUTRO.k}">${OUTRO.nome}</button>
+    <button class="pl" data-lote="SUG" title="Cada um vai pra placa do próprio motorista">Usar sugestões</button>
+    <button class="pl" data-lote="LIMPAR">Limpar</button>
+    <button data-lote="DESMARCAR">Desmarcar</button></div>`;
+}
+let loteSel=[];
+function aplicarLote(k){
+  const alvos = DADOS.filter(d=>marc.has(d.id));
+  if(k==='DESMARCAR'){ marc.clear(); loteSel=[]; render(); return; }
+  if(k==='LIMPAR'){ alvos.forEach(d=>setPartes(d.id,[])); }
+  else if(k==='SUG'){ alvos.forEach(d=>{ if(d.sug) setPartes(d.id,[{k:d.sug,v:d.v}]); }); }
+  else if(k===OUTRO.k){ alvos.forEach(d=>setPartes(d.id,[{k,v:d.v}])); loteSel=[]; }
+  else {
+    // Botões do lote também somam: clicou POZ e depois RFX → todos divididos igual entre POZ e RFX.
+    loteSel = loteSel.includes(k) ? loteSel.filter(x=>x!==k) : [...loteSel, k];
+    alvos.forEach(d=>setPartes(d.id, loteSel.length ? igual(d.v, loteSel) : []));
+  }
+  render();
+  document.querySelectorAll('[data-lote]').forEach(b=>{ if(loteSel.includes(b.dataset.lote)){ b.classList.add('on'); } });
+}
+
+document.addEventListener('click',e=>{
+  const cd=e.target.closest('[data-card]'); if(cd){ card = card===cd.dataset.card?null:cd.dataset.card; foco=0; render(); return; }
+  const lt=e.target.closest('[data-lote]'); if(lt){ aplicarLote(lt.dataset.lote); return; }
+  const el=e.target.closest('[data-a]'); if(!el||el.tagName==='INPUT') return;
+  const d=DADOS.find(x=>x.id==el.dataset.id); const ln=el.closest('.lin'); if(ln) foco=+ln.dataset.ix;
+  const a=el.dataset.a;
+  if(a==='alt') alternar(d, el.dataset.k);
+  else if(a==='limpar') setPartes(d.id,[]);
+  else if(a==='sug') unico(d, d.sug);
+  else if(a==='div') { abrirDividir(d); return; }
+  render();
+});
+document.addEventListener('change',e=>{
+  const el=e.target;
+  if(el.dataset.a==='marc'){ const id=+el.dataset.id; el.checked?marc.add(id):marc.delete(id); loteSel=[]; render(); }
+  if(el.dataset.a==='nota'){ const id=+el.dataset.id; cls[id]={partes:partesDe(id),...(cls[id]||{}),nota:el.value}; if(!el.value&&!partesDe(id).length) delete cls[id]; alter.add(id); mudou=true; }
+});
+document.getElementById('busca').addEventListener('input',()=>{foco=0;render();});
+document.getElementById('fMot').addEventListener('change',()=>{foco=0;render();});
+document.getElementById('seg').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; filtro=b.dataset.f; card=null; foco=0; document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b)); render(); });
+document.addEventListener('keydown',e=>{
+  if(document.getElementById('modal').innerHTML){ if(e.key==='Escape') fecharModal(); return; }
+  if(['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+  const vis=visiveis(); const d=vis[foco]; if(!d) return;
+  const k=e.key.toUpperCase(); const dig=/^Digit([1-8])$/.exec(e.code);
+  if(e.key==='ArrowDown'){ foco=Math.min(foco+1,vis.length-1); render(); rolar(); e.preventDefault(); return; }
+  if(e.key==='ArrowUp'){ foco=Math.max(foco-1,0); render(); rolar(); e.preventDefault(); return; }
+  if(e.key===' '){ marc.has(d.id)?marc.delete(d.id):marc.add(d.id); loteSel=[]; render(); e.preventDefault(); return; }
+  if(dig && e.shiftKey){ alternar(d, PLACAS[+dig[1]-1].k); render(); e.preventDefault(); return; }
+  if(dig){ unico(d, PLACAS[+dig[1]-1].k); foco=Math.min(foco+1,vis.length-1); render(); rolar(); e.preventDefault(); return; }
+  if(k==='S' && d.sug){ unico(d, d.sug); foco=Math.min(foco+1,vis.length-1); render(); rolar(); return; }
+  if(k==='D'){ abrirDividir(d); e.preventDefault(); return; }
+  if(e.key==='0'){ setPartes(d.id,[]); render(); }
+});
+function rolar(){ const el=document.querySelector('.lin.foco'); if(!el) return; const hd=document.querySelector('header'); const topo=getComputedStyle(hd).position==='sticky'?hd.offsetHeight:0; const r=el.getBoundingClientRect(); if(r.top<topo+10||r.bottom>innerHeight-80) window.scrollTo({top:scrollY+r.top-topo-20,behavior:'smooth'}); }
+
+function abrirDividir(d){
+  const mapa={}; partesDe(d.id).forEach(p=>mapa[p.k]=p.v);
+  const opc=[...PLACAS.map(p=>({k:p.k,nome:`${p.k} · ${p.mot.split(' ')[0]}`,cor:p.cor})),{k:OUTRO.k,nome:OUTRO.nome,cor:OUTRO.cor}];
+  document.getElementById('modal').innerHTML=`<div class="ov" id="ov"><div class="mod">
+    <h3>Dividir ${brl(d.v)}</h3><div class="sub" style="margin-bottom:8px">${esc(d.m)} — ${d.d}</div>
+    ${opc.map(o=>`<div class="lr"><label><input type="checkbox" data-ck="${o.k}" ${mapa[o.k]!=null?'checked':''}><span class="dot" style="--c:${o.cor}"></span>${o.nome}</label><input type="text" inputmode="decimal" data-vl="${o.k}" value="${mapa[o.k]!=null?fmt(mapa[o.k]):''}" placeholder="0,00"></div>`).join('')}
+    <div class="rod"><div><button id="dIgual">Dividir igual</button> <button id="dResto">O resto</button></div><span class="st" id="dSt"></span></div>
+    <div class="rod"><button id="dCanc">Cancelar</button><button class="pri" id="dOk">Confirmar</button></div></div></div>`;
+  const M=document.getElementById('modal'); let ultimo=null;
+  const marcados=()=>[...M.querySelectorAll('[data-ck]:checked')].map(x=>x.dataset.ck);
+  const vl=k=>M.querySelector(`[data-vl="${k}"]`);
+  const status=()=>{ const ks=marcados(); const f=cent(d.v)-ks.reduce((a,k)=>a+cent(num(vl(k).value)),0); const ok=ks.length>=2&&f===0&&ks.every(k=>num(vl(k).value)>0);
+    const st=document.getElementById('dSt'); st.textContent=ks.length<2?'Marque 2 ou mais':ok?'Fechou ✓':f>0?`Falta ${brl(f/100)}`:`Passou ${brl(-f/100)}`; st.style.color=ok?'var(--ok)':'var(--warn)'; document.getElementById('dOk').disabled=!ok; return ok; };
+  const igualM=()=>{ const ks=marcados(); igual(d.v,ks).forEach(p=>vl(p.k).value=fmt(p.v)); status(); };
+  M.querySelectorAll('[data-ck]').forEach(ck=>ck.addEventListener('change',()=>{ if(!ck.checked) vl(ck.dataset.ck).value=''; igualM(); }));
+  M.querySelectorAll('[data-vl]').forEach(i=>i.addEventListener('input',()=>{ ultimo=i.dataset.vl; const ck=M.querySelector(`[data-ck="${i.dataset.vl}"]`); if(i.value&&!ck.checked) ck.checked=true; status(); }));
+  document.getElementById('dIgual').onclick=igualM;
+  document.getElementById('dResto').onclick=()=>{ const ks=marcados(); if(ks.length<2) return; const u=ks.find(k=>k!==ultimo&&!num(vl(k).value))||[...ks].reverse().find(k=>k!==ultimo); const s=ks.filter(k=>k!==u).reduce((a,k)=>a+cent(num(vl(k).value)),0); vl(u).value=fmt(Math.max(0,cent(d.v)-s)/100); status(); };
+  document.getElementById('dCanc').onclick=fecharModal;
+  const ov=document.getElementById('ov'); let fundo=false;
+  ov.addEventListener('mousedown',e=>fundo=e.target===ov); ov.addEventListener('click',e=>{ if(e.target===ov&&fundo) fecharModal(); });
+  document.getElementById('dOk').onclick=()=>{ if(!status()) return; setPartes(d.id, marcados().map(k=>({k,v:cent(num(vl(k).value))/100}))); fecharModal(); render(); };
+  status();
+}
+function fecharModal(){ document.getElementById('modal').innerHTML=''; }
+
+function baixar(nome, conteudo, tipo){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([conteudo],{type:tipo})); a.download=nome; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
+document.getElementById('bSalvar').onclick=()=>{
+  baixar('motoristas-set2026-classificacao.json', JSON.stringify({versao:1,cls},null,1),'application/json');
+  base = new Set(DADOS.filter(d=>!partesDe(d.id).length).map(d=>d.id)); alter.clear(); mudou=false; render();
+};
+document.getElementById('bAbrir').onclick=()=>document.getElementById('fArq').click();
+document.getElementById('fArq').onchange=async e=>{ const f=e.target.files[0]; if(!f) return;
+  try{ const j=JSON.parse(await f.text()); cls=j.cls||{}; base=new Set(DADOS.filter(d=>!partesDe(d.id).length).map(d=>d.id)); alter.clear(); mudou=false; render(); alert('Progresso carregado.'); }
+  catch{ alert('Arquivo inválido.'); } e.target.value=''; };
+document.getElementById('bCsv').onclick=()=>{
+  const L=[['Data','Motorista','CT-es','Valor do dia','Placa','Valor da placa','Observacao']];
+  DADOS.forEach(d=>{ const ps=partesDe(d.id), refs=d.itens.map(i=>i.ref).join(' / '), nota=(cls[d.id]&&cls[d.id].nota)||'';
+    if(!ps.length) L.push([d.d,d.m,refs,fmt(d.v),'PENDENTE','',nota]); ps.forEach(p=>L.push([d.d,d.m,refs,fmt(d.v),nomeDe(p.k),fmt(p.v),nota])); });
+  const {t,total,vFeito}=totais(); L.push([]); L.push(['RESUMO POR PLACA']);
+  TODOS_K.forEach(k=>L.push(['','',nomeDe(k),'','',fmt(t[k].tot/100)])); L.push(['','','Pendente','','',fmt((total-vFeito)/100)]); L.push(['','','TOTAL','','',fmt(total/100)]);
+  const csv='﻿'+L.map(r=>r.map(x=>{x=String(x??''); return /[;"\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(';')).join('\r\n');
+  baixar('motoristas-set2026-por-placa.csv',csv,'text/csv;charset=utf-8');
+};
+window.addEventListener('beforeunload',e=>{ if(mudou){ e.preventDefault(); e.returnValue=''; } });
+[...new Set(DADOS.map(d=>d.m))].sort().forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; document.getElementById('fMot').appendChild(o); });
+render();
+</script>
+</body>
+</html>

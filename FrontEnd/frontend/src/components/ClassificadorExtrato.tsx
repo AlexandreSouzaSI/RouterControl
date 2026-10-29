@@ -74,11 +74,12 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
     const definir = useCallback((it: ItemExtrato, k: string | null) => {
         const atual = it.partes;
         if (!k) return onChange(it.id, { partes: [] });
+        if (k === '__TODAS__') return onChange(it.id, { partes: igualEntre(it.valor, caminhoes.map((c) => c.id)) });
         if (FIXOS[k]) return onChange(it.id, { partes: atual.length === 1 && atual[0].k === k ? [] : [{ k, v: it.valor }] });
         const sel = atual.every((p) => !FIXOS[p.k]) ? atual.map((p) => p.k) : [];
         const novos = sel.includes(k) ? sel.filter((x) => x !== k) : [...sel, k];
         onChange(it.id, { partes: novos.length ? igualEntre(it.valor, novos) : [] });
-    }, [onChange]);
+    }, [onChange, caminhoes]);
 
     // Atalhos de teclado no pagamento destacado.
     const estado = useRef({ visiveis, focoReal, aba, card, caminhoes, base: pendentesBase, definir });
@@ -106,6 +107,8 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
             else if (k === 'P') dest = 'SOCIO';
             else if (k === 'N') dest = 'NAO';
             else if (k === 'J') dest = 'JA_LANCADO';
+            else if (k === 'A') dest = 'AGREGADO';
+            else if (k === 'T' && s.caminhoes.length) { e.preventDefault(); proximo(); onChange(it.id, { partes: igualEntre(it.valor, s.caminhoes.map((c) => c.id)) }); return; }
             else if (k === 'S' && it.sugestao) dest = it.sugestao;
             else if (e.key === '0') dest = null;
             else if (k === 'D') { setDividindo(it); e.preventDefault(); return; }
@@ -137,7 +140,7 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
         for (const it of itens) if (it.contaPagar) for (const p of it.partes) m[p.k] = (m[p.k] ?? 0) + p.v;
         return m;
     }, [itens]);
-    const soma = Math.round((sCam + vk('GERAL') + vk('SOCIO') + vk('NAO') + vk('JA_LANCADO') + t.pendente) * 100) / 100;
+    const soma = Math.round((sCam + vk('GERAL') + vk('SOCIO') + vk('NAO') + vk('AGREGADO') + vk('JA_LANCADO') + t.pendente) * 100) / 100;
     const dif = Math.round((totalPagamentos - soma) * 100) / 100;
 
     const cardCls = (ativo: boolean) => `shrink-0 w-36 md:w-auto snap-start text-left rounded-xl border bg-white dark:bg-[#111827] px-3 py-2 min-w-0 transition ${ativo ? 'ring-2 ring-blue-500 border-blue-500' : 'border-gray-200 dark:border-gray-800 hover:border-blue-400'}`;
@@ -182,6 +185,7 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
                     <span>+ Geral <b className="tabular-nums">{moeda(vk('GERAL'))}</b></span>
                     <span>+ Sócios <b className="tabular-nums">{moeda(vk('SOCIO'))}</b></span>
                     <span>+ Não é despesa <b className="tabular-nums">{moeda(vk('NAO'))}</b></span>
+                    <span>+ Agregados <b className="tabular-nums">{moeda(vk('AGREGADO'))}</b></span>
                     <span>+ Já lançado <b className="tabular-nums">{moeda(vk('JA_LANCADO'))}</b></span>
                     <span>+ Pendente <b className="tabular-nums">{moeda(t.pendente)}</b></span>
                     <span>= <b className="tabular-nums">{moeda(soma)}</b></span>
@@ -214,7 +218,7 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
             </div>
 
             <p className="text-xs text-gray-500 hidden md:block">
-                Clique em mais de um caminhão para dividir igual entre eles. Atalhos: <kbd>1</kbd>–<kbd>9</kbd> caminhão · <kbd>Shift</kbd>+<kbd>1</kbd>–<kbd>9</kbd> soma outro caminhão · <kbd>G</kbd> geral · <kbd>P</kbd> sócios · <kbd>N</kbd> não é despesa · <kbd>J</kbd> já lançado · <kbd>D</kbd> dividir · <kbd>S</kbd> aceitar sugestão · <kbd>0</kbd> limpar · <kbd>↑</kbd><kbd>↓</kbd> navegar.
+                Clique em mais de um caminhão para dividir igual entre eles. Atalhos: <kbd>1</kbd>–<kbd>9</kbd> caminhão · <kbd>Shift</kbd>+<kbd>1</kbd>–<kbd>9</kbd> soma outro caminhão · <kbd>G</kbd> geral · <kbd>P</kbd> sócios · <kbd>N</kbd> não é despesa · <kbd>A</kbd> agregados · <kbd>J</kbd> já lançado · <kbd>T</kbd> todas as placas · <kbd>D</kbd> dividir · <kbd>S</kbd> aceitar sugestão · <kbd>0</kbd> limpar · <kbd>↑</kbd><kbd>↓</kbd> navegar.
                 {card && <> Mostrando só <b>{card === 'PEND' ? 'pendentes' : rotulo(card)}</b> — <button className="text-blue-600 hover:underline" onClick={() => setCard(null)}>ver todos</button>.</>}
             </p>
 
@@ -255,6 +259,8 @@ const Linha = memo(function Linha({ it, ix, foco, alterado, caminhoes, rotulo, o
     const sel = ps.length === 1 ? ps[0].k : null;
     const dividido = ps.length > 1;
     const marcados = new Set(ps.map((p) => p.k));
+    const todas = caminhoes.length > 1 && ps.length === caminhoes.length && caminhoes.every((c) => marcados.has(c.id));
+    const definirTodas = (x: ItemExtrato) => definir(x, todas ? null : '__TODAS__');
     const btn = 'px-2.5 py-1 rounded-md border text-xs font-bold transition';
     const off = 'bg-gray-50 dark:bg-gray-800/60 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:border-blue-400';
     return (
@@ -280,6 +286,11 @@ const Linha = memo(function Linha({ it, ix, foco, alterado, caminhoes, rotulo, o
                         {c.placa}{i < 9 && <span className="ml-1 font-normal opacity-50">{i + 1}</span>}
                     </button>
                 ))}
+                {caminhoes.length > 1 && (
+                    <button type="button" title="Divide igual entre todos os caminhões (T)"
+                        onClick={(e) => { e.stopPropagation(); onFoco(ix); definirTodas(it); }}
+                        className={`${btn} ${todas ? 'bg-sky-600 text-white border-sky-600' : off}`}>Todas as placas</button>
+                )}
                 <span className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-0.5" />
                 <button type="button" onClick={(e) => { e.stopPropagation(); onFoco(ix); onDividir(it); }}
                     className={`${btn} inline-flex items-center gap-1 ${dividido ? 'bg-teal-600 text-white border-teal-600' : off}`}>

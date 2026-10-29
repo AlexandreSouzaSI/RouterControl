@@ -4,7 +4,7 @@ import { Truck, Pencil, Trash2, Settings2, ChevronRight, Plus } from 'lucide-rea
 import { api } from '../services/api';
 import { TruckTimeline } from '../components/TruckTimeline';
 import { FiltroMes } from '../components/FiltroMes';
-import { nomeMes } from '../lib/mes';
+import { lerMesCaminhoes, nomeMes, salvarMesCaminhoes } from '../lib/mes';
 
 type Resumo = { caminhaoId: string; placa: string; totalReceita: number; totalDespesa: number; diferenca: number };
 
@@ -37,7 +37,8 @@ export function Caminhoes() {
     const [novaPlaca, setNovaPlaca] = useState('');
     const [criando, setCriando] = useState(false);
     // '' = todos os meses; AAAA-MM = receita/despesa/resultado só daquele mês
-    const [mes, setMes] = useState('');
+    const [mes, setMesEstado] = useState(lerMesCaminhoes);
+    const setMes = (m: string) => { setMesEstado(m); salvarMesCaminhoes(m); };
     const [resumos, setResumos] = useState<Record<string, Resumo>>({});
     const [carregandoResumo, setCarregandoResumo] = useState(false);
 
