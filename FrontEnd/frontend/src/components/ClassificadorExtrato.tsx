@@ -25,6 +25,7 @@ type Props = {
     alterados?: Set<string>;
     onChange: (id: string, mud: { partes?: Parte[]; nota?: string }) => void;
     onVincular?: (it: ItemExtrato) => void;
+    onDesvincular?: (id: string) => void;
     topoFixo?: number; // px acima da barra fixa (ex: Topbar do sistema)
     // Quem estava pendente no último salvar/carregar. A aba "Pendentes" usa
     // isto: o que você classifica continua na aba até salvar/enviar.
@@ -37,7 +38,7 @@ function igualEntre(valor: number, ks: string[]): Parte[] {
     return ks.map((k, i) => ({ k, v: (i === ks.length - 1 ? c - b * (ks.length - 1) : b) / 100 }));
 }
 
-export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagamentos, totalRecebimentos, saldoAnterior, saldoFinal, alterados, onChange, onVincular, topoFixo = 0, pendentesBase }: Props) {
+export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagamentos, totalRecebimentos, saldoAnterior, saldoFinal, alterados, onChange, onVincular, onDesvincular, topoFixo = 0, pendentesBase }: Props) {
     const [aba, setAba] = useState<Aba>('pend');
     const [card, setCard] = useState<string | null>(null);
     const [busca, setBusca] = useState('');
@@ -130,6 +131,12 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
 
     const sCam = caminhoes.reduce((s, c) => s + cent(t.por[c.id]?.tot ?? 0), 0) / 100;
     const vk = (k: string) => t.por[k]?.tot ?? 0;
+    // Parte de cada caminhão que já está em Contas a Pagar (não é lançada de novo no Aplicar).
+    const jaCP = useMemo(() => {
+        const m: Record<string, number> = {};
+        for (const it of itens) if (it.contaPagar) for (const p of it.partes) m[p.k] = (m[p.k] ?? 0) + p.v;
+        return m;
+    }, [itens]);
     const soma = Math.round((sCam + vk('GERAL') + vk('SOCIO') + vk('NAO') + vk('JA_LANCADO') + t.pendente) * 100) / 100;
     const dif = Math.round((totalPagamentos - soma) * 100) / 100;
 
@@ -150,6 +157,7 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
                             </div>
                             <div className="mt-1 font-bold tabular-nums text-gray-900 dark:text-white truncate">{moeda(vk(c.id))}</div>
                             <div className="text-[11px] text-gray-500">{t.por[c.id]?.n ?? 0} lanç.</div>
+                            {(jaCP[c.id] ?? 0) > 0 && <div className="text-[10px] text-emerald-600 truncate" title="Já está em Contas a Pagar — não é lançado de novo">{moeda(jaCP[c.id])} já em C. Pagar</div>}
                         </button>
                     ))}
                     {Object.entries(FIXOS).map(([k, f]) => (
@@ -219,7 +227,7 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
                     {visiveis.map((it, ix) => (
                         <Linha key={it.id} it={it} ix={ix} foco={ix === focoReal} alterado={!!alterados?.has(it.id)}
                             caminhoes={caminhoes} rotulo={rotulo} onFoco={setFoco} definir={definir} onDividir={setDividindo}
-                            onNota={mudarNota} onVincular={onVincular} />
+                            onNota={mudarNota} onVincular={onVincular} onDesvincular={onDesvincular} />
                     ))}
                 </div>
             )}
@@ -239,9 +247,10 @@ type LinhaProps = {
     onFoco: (i: number) => void; definir: (it: ItemExtrato, k: string | null) => void;
     onDividir: (it: ItemExtrato) => void; onNota: (id: string, nota: string) => void;
     onVincular?: (it: ItemExtrato) => void;
+    onDesvincular?: (id: string) => void;
 };
 
-const Linha = memo(function Linha({ it, ix, foco, alterado, caminhoes, rotulo, onFoco, definir, onDividir, onNota, onVincular }: LinhaProps) {
+const Linha = memo(function Linha({ it, ix, foco, alterado, caminhoes, rotulo, onFoco, definir, onDividir, onNota, onVincular, onDesvincular }: LinhaProps) {
     const ps = it.partes;
     const sel = ps.length === 1 ? ps[0].k : null;
     const dividido = ps.length > 1;
@@ -293,7 +302,7 @@ const Linha = memo(function Linha({ it, ix, foco, alterado, caminhoes, rotulo, o
                         className="ml-auto p-1 rounded text-gray-400 hover:text-blue-600"><Pin size={14} /></button>
                 )}
             </div>
-            {(ps.length > 0 || it.motivo) && (
+            {(ps.length > 0 || it.motivo || it.contaPagar) && (
                 <div className="col-span-2 md:col-start-2 md:col-span-2 flex flex-wrap items-center gap-1.5 text-xs">
                     {ps.length > 0 && <span className="text-gray-400">→</span>}
                     {ps.map((p) => (
@@ -303,6 +312,14 @@ const Linha = memo(function Linha({ it, ix, foco, alterado, caminhoes, rotulo, o
                     ))}
                     {it.origem === 'AUTO' && it.motivo && <span className="px-2 py-0.5 rounded-full border border-dashed border-gray-300 dark:border-gray-600 text-gray-500">automático · {it.motivo}</span>}
                     {it.origem === 'LINK' && <span className="px-2 py-0.5 rounded-full border border-dashed border-violet-300 text-violet-600">pelo link</span>}
+                    {it.contaPagar && (
+                        <span className="px-2 py-0.5 rounded-full border border-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-semibold" title="Esta despesa já conta na tela do caminhão pela Conta a Pagar">
+                            já em Contas a Pagar · não lança de novo
+                        </span>
+                    )}
+                    {it.contaPagar && onDesvincular && (
+                        <button type="button" onClick={(e) => { e.stopPropagation(); onDesvincular(it.id); }} className="text-blue-600 hover:underline">não é essa conta</button>
+                    )}
                     {!ps.length && it.motivo && <span className="text-gray-500">{it.motivo}</span>}
                 </div>
             )}

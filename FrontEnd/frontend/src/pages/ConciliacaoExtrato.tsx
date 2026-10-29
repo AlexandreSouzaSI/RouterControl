@@ -126,6 +126,7 @@ export function ConciliacaoExtratoDetalhe() {
     const [itens, setItens] = useState<ItemExtrato[]>([]);
     const [alterados, setAlterados] = useState<Set<string>>(new Set());
     const [pendentesBase, setPendentesBase] = useState<Set<string>>(new Set());
+    const [desvinc, setDesvinc] = useState<Set<string>>(new Set());
     const [ocupado, setOcupado] = useState<string | null>(null);
     const [copiado, setCopiado] = useState(false);
     const [modalAplicar, setModalAplicar] = useState(false);
@@ -140,6 +141,7 @@ export function ConciliacaoExtratoDetalhe() {
         // "Pendentes" = o que estava pendente quando salvou/carregou.
         setPendentesBase(new Set(lista.filter((i) => !i.partes.length).map((i) => i.id)));
         setAlterados(new Set());
+        setDesvinc(new Set());
     }, [id]);
     useEffect(() => { carregar().catch(() => setD(null)); }, [carregar]);
 
@@ -161,11 +163,17 @@ export function ConciliacaoExtratoDetalhe() {
         setAlterados((s) => new Set(s).add(itemId));
     }, []);
 
+    const onDesvincular = useCallback((itemId: string) => {
+        setItens((l) => l.map((i) => (i.id === itemId ? { ...i, contaPagar: null } : i)));
+        setDesvinc((s) => new Set(s).add(itemId));
+        setAlterados((s) => new Set(s).add(itemId));
+    }, []);
+
     async function salvar(silencioso = false) {
         if (!alterados.size) return true;
         setOcupado('salvar');
         try {
-            const payload = itens.filter((i) => alterados.has(i.id)).map((i) => ({ id: i.id, partes: i.partes, nota: i.nota ?? '' }));
+            const payload = itens.filter((i) => alterados.has(i.id)).map((i) => ({ id: i.id, partes: i.partes, nota: i.nota ?? '', ...(desvinc.has(i.id) ? { desvincular: true } : {}) }));
             await api.patch(`/financeiro-nf/conciliacao-extrato/${id}/itens`, { itens: payload });
             await carregar();
             return true;
@@ -188,7 +196,10 @@ export function ConciliacaoExtratoDetalhe() {
 
     if (!d) return <div className="py-16 text-center text-gray-500"><Loader2 className="inline animate-spin" /> Carregando…</div>;
 
-    const resumoCaminhoes = d.caminhoes.map((c) => ({ ...c, v: t.por[c.id]?.tot ?? 0, n: t.por[c.id]?.n ?? 0 })).filter((c) => c.v > 0);
+    // No Aplicar só entra o que ainda não está em Contas a Pagar.
+    const tNovos = totaisExtrato(itens.filter((i) => !i.contaPagar));
+    const jaEmContas = Math.round(itens.filter((i) => i.contaPagar).reduce((s, i) => s + i.valor, 0) * 100) / 100;
+    const resumoCaminhoes = d.caminhoes.map((c) => ({ ...c, v: tNovos.por[c.id]?.tot ?? 0, n: tNovos.por[c.id]?.n ?? 0 })).filter((c) => c.v > 0);
     const totalCaminhoes = Math.round(resumoCaminhoes.reduce((s, c) => s + c.v, 0) * 100) / 100;
 
     return (
@@ -240,8 +251,8 @@ export function ConciliacaoExtratoDetalhe() {
                     <p className="text-sm font-semibold text-gray-900 dark:text-white">Ferramentas</p>
                     <div className="flex flex-wrap gap-2">
                         <button onClick={() => setVinculoDe('lista')} className={botao}><Pin size={15} /> Vínculos ({d.vinculos.length})</button>
-                        <button onClick={() => acao('auto', async () => { if (!(await salvar(true))) return; const r = await api.post(`/financeiro-nf/conciliacao-extrato/${id}/reclassificar`); await carregar(); alert(`${r.data.classificados} pagamento(s) classificados automaticamente.`); })} disabled={!!ocupado} className={botao} title="Aplica placas e vínculos nos pendentes">
-                            <Wand2 size={15} /> Classificar pendentes
+                        <button onClick={() => acao('auto', async () => { if (!(await salvar(true))) return; const r = await api.post(`/financeiro-nf/conciliacao-extrato/${id}/reclassificar`); await carregar(); alert(`${r.data.classificados} pagamento(s) classificados automaticamente.`); })} disabled={!!ocupado} className={botao} title="Refaz os automáticos e os pendentes com as placas e vínculos de agora. Não mexe no que você ou o link classificaram.">
+                            <Wand2 size={15} /> Reclassificar automático
                         </button>
                         <button onClick={() => { if (alterados.size && !confirm('Descartar as alterações não salvas?')) return; carregar(); }} className={botao}><RefreshCw size={15} /> Atualizar</button>
                         {d.status === 'APLICADA' && (
@@ -263,6 +274,7 @@ export function ConciliacaoExtratoDetalhe() {
                 saldoFinal={d.saldoFinal}
                 alterados={alterados}
                 onChange={onChange}
+                onDesvincular={onDesvincular}
                 pendentesBase={pendentesBase}
                 onVincular={(it) => setVinculoDe(it)}
             />
@@ -285,7 +297,7 @@ export function ConciliacaoExtratoDetalhe() {
                             <div className="flex items-center justify-between py-2 text-sm font-bold text-gray-900 dark:text-white"><span>Total nos caminhões</span><span className="tabular-nums">{moeda(totalCaminhoes)}</span></div>
                         </div>
                         <p className="text-xs text-gray-500">
-                            Não entram: {Object.entries(FIXOS).map(([k, f]) => `${f.curto} ${moeda(t.por[k]?.tot ?? 0)}`).join(' · ')}.
+                            Não entram: {Object.entries(FIXOS).map(([k, f]) => `${f.curto} ${moeda(t.por[k]?.tot ?? 0)}`).join(' · ')}{jaEmContas > 0 ? ` · já em Contas a Pagar (já contam no caminhão) ${moeda(jaEmContas)}` : ''}.
                         </p>
                         {t.nPend > 0 && (
                             <p className="text-sm text-amber-700 dark:text-amber-400 flex items-start gap-2"><AlertTriangle size={16} className="shrink-0 mt-0.5" /> Ainda há {t.nPend} pagamentos pendentes ({moeda(t.pendente)}). Eles ficam de fora até serem classificados — dá pra aplicar de novo depois.</p>
@@ -360,7 +372,7 @@ function VinculosModal({ caminhoes, vinculos, item, onFechar, onMudou }: {
                 </div>
                 <p className="text-xs text-gray-500">
                     Ensine o sistema uma vez e ele usa todo mês. <b>Placa</b>: carreta ou apelido citado na descrição (ex.: <i>FQA → POZ</i>).
-                    <b> Nome</b>: nome no extrato ou na descrição (ex.: <i>GIOVANNI → POZ</i>, <i>NU GALHO → Sócios</i>). Vale para os próximos extratos e para o botão &quot;Classificar pendentes&quot;.
+                    <b> Nome</b>: nome no extrato ou na descrição (ex.: <i>GIOVANNI → POZ</i>, <i>NU GALHO → Sócios</i>). Vale para os próximos extratos e para o botão &quot;Reclassificar automático&quot;.
                 </p>
                 {item && <p className="text-xs rounded-lg bg-gray-50 dark:bg-gray-900 px-3 py-2 text-gray-600 dark:text-gray-300">Pagamento: <b>{item.nome}</b> {item.descricao && `— ${item.descricao}`}</p>}
                 <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr_150px_auto] gap-2">

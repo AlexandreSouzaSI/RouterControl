@@ -133,31 +133,58 @@ export class ConciliacaoExtratoService {
                 status: 'PAGA',
                 pagoEm: { gte: new Date(Date.UTC(y, m - 1, 1) - 7 * 86400000), lt: new Date(Date.UTC(y, m, 1) + 7 * 86400000) },
             },
-            select: { id: true, descricao: true, valor: true, juros: true, pagoEm: true, caminhaoId: true, caminhao: { select: { placa: true } }, rateios: { select: { id: true } } },
+            select: {
+                id: true, descricao: true, valor: true, juros: true, pagoEm: true, favorecido: true, caminhaoId: true,
+                caminhao: { select: { placa: true } }, fornecedor: { select: { nome: true } },
+                rateios: { select: { caminhaoId: true, valor: true } },
+            },
         });
-        const usadas = new Set(itens.map((i) => i.contaPagar).filter(Boolean) as string[]);
+        // Só refaz o que é automático ou pendente; o que foi classificado à mão/pelo link fica.
+        const refazer = (i: { origem: string | null }) => i.origem !== 'MANUAL' && i.origem !== 'LINK';
+        const usadas = new Set(itens.filter((i) => !refazer(i)).map((i) => i.contaPagar).filter(Boolean) as string[]);
+        const palavrasNome = (s: string) => norm(s).split(/[^A-Z0-9]+/).filter((w) => w.length >= 4 && !['LTDA', 'PAGAMENTO', 'COMERCIO', 'SERVICOS', 'TRANSPORTES'].includes(w));
+        const valorIgual = (c: (typeof contas)[number], v: number) => Math.abs(cent(c.valor + (c.juros ?? 0)) - cent(v)) <= 1;
+        const perto = (c: (typeof contas)[number], d: Date) => !!c.pagoEm && Math.abs(c.pagoEm.getTime() - d.getTime()) <= 5 * 86400000;
 
         let n = 0;
         const updates: Prisma.PrismaPromise<unknown>[] = [];
         for (const it of itens) {
-            if ((it.partes as Parte[] | null)?.length) continue;
+            if (!refazer(it)) continue;
             const texto = norm(`${it.nome} ${it.descricao}`);
             const palavras = texto.split(/[^A-Z0-9]+/).filter(Boolean);
             let partes: Parte[] = [];
             let motivo: string | null = null;
-            let contaPagar: string | null = it.contaPagar;
+            let contaPagar: string | null = null;
 
-            // 1) Já está em Contas a Pagar (paga) com caminhão → não lança de novo.
-            const conta = contas.find((c) => !usadas.has(c.id)
-                && Math.abs(cent(c.valor + (c.juros ?? 0)) - cent(it.valor)) <= 1
-                && c.pagoEm && Math.abs(c.pagoEm.getTime() - it.data.getTime()) <= 5 * 86400000);
-            if (conta) {
+            // 1) Já está em Contas a Pagar (paga) COM caminhão: entra no card do
+            //    caminhão da conta, mas fica marcada pra não ser lançada de novo.
+            //    Mesmo valor, até 5 dias; com mais de uma candidata, só se o nome bater.
+            const cands = contas.filter((c) => !usadas.has(c.id) && valorIgual(c, it.valor) && perto(c, it.data));
+            const nomesItem = palavrasNome(it.nome);
+            const comNome = cands.filter((c) => {
+                const alvo = norm(`${c.descricao} ${c.fornecedor?.nome ?? ''} ${c.favorecido ?? ''}`);
+                // Nome tem que bater de verdade: 2 palavras (ou a única que o nome tem). "SILVA" sozinho não vale.
+                const iguais = nomesItem.filter((w) => alvo.includes(w)).length;
+                return iguais >= 2 || (nomesItem.length === 1 && iguais === 1);
+            });
+            const outrosMesmoValor = itens.filter((o) => o.id !== it.id && cent(o.valor) === cent(it.valor) && Math.abs(o.data.getTime() - it.data.getTime()) <= 5 * 86400000).length;
+            const conta = (comNome.length ? comNome : cands.length === 1 && outrosMesmoValor === 0 ? cands : [])
+                .sort((a, b) => Math.abs(a.pagoEm!.getTime() - it.data.getTime()) - Math.abs(b.pagoEm!.getTime() - it.data.getTime()))[0];
+            if (conta && (conta.caminhaoId || conta.rateios.length)) {
                 usadas.add(conta.id);
                 contaPagar = conta.id;
-                if (conta.caminhaoId || conta.rateios.length) {
-                    partes = [{ k: 'JA_LANCADO', v: it.valor }];
-                    motivo = `já está em Contas a Pagar: ${conta.descricao}${conta.caminhao ? ` (${conta.caminhao.placa})` : conta.rateios.length ? ' (dividida entre caminhões)' : ''}`;
-                }
+                const rs = conta.rateios.filter((r) => r.caminhaoId && ids.has(r.caminhaoId));
+                if (conta.caminhaoId && ids.has(conta.caminhaoId)) partes = [{ k: conta.caminhaoId, v: it.valor }];
+                else if (rs.length) {
+                    const tot = rs.reduce((s, r) => s + r.valor, 0) || 1;
+                    let resto = cent(it.valor);
+                    partes = rs.map((r, i) => {
+                        const v = i === rs.length - 1 ? resto : Math.round(cent(it.valor) * (r.valor / tot));
+                        resto -= v;
+                        return { k: r.caminhaoId as string, v: v / 100 };
+                    });
+                } else partes = [{ k: 'JA_LANCADO', v: it.valor }];
+                motivo = `já está em Contas a Pagar: ${conta.descricao}${conta.caminhao ? ` (${conta.caminhao.placa})` : ' (dividida entre caminhões)'}`;
             }
 
             // 2) Placas citadas ("RME", "FQL0363", "SEV E RME"...).
@@ -197,7 +224,7 @@ export class ConciliacaoExtratoService {
             }
 
             if (partes.length) n++;
-            if (partes.length || contaPagar !== it.contaPagar || sugestao !== it.sugestao) {
+            if (partes.length || it.partes && (it.partes as Parte[]).length || contaPagar !== it.contaPagar || sugestao !== it.sugestao || motivo !== it.motivo) {
                 updates.push(this.prisma.conciliacaoExtratoItem.update({
                     where: { id: it.id },
                     data: { partes: partes as unknown as Prisma.InputJsonValue, origem: partes.length ? 'AUTO' : null, motivo, contaPagar, sugestao },
@@ -236,7 +263,7 @@ export class ConciliacaoExtratoService {
     }
 
     // Valida e grava a classificação de vários itens (tela ou link).
-    async salvarItens(conciliacaoId: string, itensBody: { id: string; partes?: Parte[]; nota?: string | null }[], origem: 'MANUAL' | 'LINK', empresaId: string) {
+    async salvarItens(conciliacaoId: string, itensBody: { id: string; partes?: Parte[]; nota?: string | null; desvincular?: boolean }[], origem: 'MANUAL' | 'LINK', empresaId: string) {
         if (!Array.isArray(itensBody)) throw new BadRequestException('Nada pra salvar.');
         const [atuais, caminhoes] = await Promise.all([
             this.prisma.conciliacaoExtratoItem.findMany({ where: { conciliacaoId } }),
@@ -269,6 +296,8 @@ export class ConciliacaoExtratoService {
                 }
             }
             if (b.nota !== undefined && (b.nota ?? '') !== (it.nota ?? '')) data.nota = (b.nota ?? '').slice(0, 300) || null;
+            // "Não é a mesma conta": tira o vínculo com Contas a Pagar (aí entra no Aplicar).
+            if (b.desvincular === true && it.contaPagar) { data.contaPagar = null; if (data.motivo === undefined) data.motivo = null; }
             if (Object.keys(data).length) updates.push(this.prisma.conciliacaoExtratoItem.update({ where: { id: it.id }, data }));
         }
         if (updates.length) {
@@ -310,6 +339,7 @@ export class ConciliacaoExtratoService {
         const [y, m] = c.mes.split('-');
         const novos: Prisma.LancamentoCaminhaoCreateManyInput[] = [];
         for (const it of c.itens) {
+            if (it.contaPagar) continue; // já está em Contas a Pagar com caminhão: não lança de novo
             for (const p of (it.partes as Parte[] | null) ?? []) {
                 const pl = placa.get(p.k);
                 if (!pl) continue;
@@ -432,7 +462,7 @@ export class ConciliacaoExtratoService {
             this.prisma.conciliacaoExtratoItem.findMany({
                 where: { conciliacaoId: c.id },
                 orderBy: { ordem: 'asc' },
-                select: { id: true, ordem: true, data: true, hora: true, tipo: true, nome: true, descricao: true, valor: true, partes: true, origem: true, motivo: true, sugestao: true, nota: true },
+                select: { id: true, ordem: true, data: true, hora: true, tipo: true, nome: true, descricao: true, valor: true, partes: true, origem: true, motivo: true, sugestao: true, nota: true, contaPagar: true },
             }),
             this.caminhoes(c.empresaId),
         ]);

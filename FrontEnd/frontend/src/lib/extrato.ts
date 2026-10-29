@@ -15,6 +15,7 @@ export type ItemExtrato = {
     motivo?: string | null;
     sugestao?: string | null;
     nota?: string | null;
+    contaPagar?: string | null; // já está em Contas a Pagar com caminhão: não lança de novo
 };
 export type CaminhaoOpcao = { id: string; placa: string };
 
