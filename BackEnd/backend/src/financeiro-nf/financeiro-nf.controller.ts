@@ -343,6 +343,11 @@ export class FinanceiroNfController {
 
     // ---------------- Dashboard ----------------
 
+    @Get('dashboard-fiscal')
+    dashboardFiscal(@EmpresaAtual() empresaId: string, @Query('mes') mes?: string) {
+        return this.service.dashboardFiscal(empresaId, mes);
+    }
+
     @Get('dashboard')
     dashboardFinanceiro(@EmpresaAtual() empresaId: string, @Query('mes') mes?: string) {
         return this.service.dashboardFinanceiro(empresaId, mes);

@@ -981,7 +981,8 @@ export function Dashboard() {
             {modalNovaViagemAberto && (
                 <div
                     className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-                    onClick={aoClicarNoFundo}
+                    onMouseDown={(e) => { (e.currentTarget as HTMLElement).dataset.fundo = String(e.target === e.currentTarget); }}
+                    onClick={(e) => { if (e.currentTarget.dataset.fundo === 'true' && e.target === e.currentTarget) aoClicarNoFundo(); e.currentTarget.dataset.fundo = ''; }}
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
@@ -1130,7 +1131,8 @@ export function Dashboard() {
             {viagemEditando && (
                 <div
                     className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-                    onClick={fecharEdicaoViagem}
+                    onMouseDown={(e) => { (e.currentTarget as HTMLElement).dataset.fundo = String(e.target === e.currentTarget); }}
+                    onClick={(e) => { if (e.currentTarget.dataset.fundo === 'true' && e.target === e.currentTarget) fecharEdicaoViagem(); e.currentTarget.dataset.fundo = ''; }}
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}

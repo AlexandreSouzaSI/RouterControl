@@ -2009,6 +2009,51 @@ export class FinanceiroNfService {
             .map(({ status, chave }) => ({ status, ...statusContadores[chave] }))
             .filter((item) => item.quantidade > 0);
 
+        // ---- Pago no mês (Contas a Pagar quitadas no mês, com juros) ----
+        const pagasNoMes = await this.prisma.contaPagar.findMany({
+            where: { empresaId, status: 'PAGA', pagoEm: { gte: inicioMes, lt: fimMes } },
+            select: { valor: true, juros: true },
+        });
+        const pagoMes = {
+            total: pagasNoMes.reduce((s, c) => s + c.valor + (c.juros ?? 0), 0),
+            quantidade: pagasNoMes.length,
+        };
+
+        // ---- Contas a Receber ----
+        const [receberAbertas, recebidasNoMes, receberJanela] = await Promise.all([
+            this.prisma.contaReceber.findMany({ where: { empresaId, status: 'ABERTA' }, select: { valor: true, vencimento: true } }),
+            this.prisma.contaReceber.findMany({
+                where: { empresaId, status: 'RECEBIDA', recebidoEm: { gte: inicioMes, lt: fimMes } },
+                select: { valor: true, valorRecebido: true },
+            }),
+            this.prisma.contaReceber.findMany({
+                where: {
+                    empresaId, status: { not: 'CANCELADA' },
+                    OR: [{ recebidoEm: { gte: inicioJanela, lt: fimJanela } }, { vencimento: { gte: inicioJanela, lt: fimJanela } }],
+                },
+                select: { valor: true, valorRecebido: true, status: true, recebidoEm: true, vencimento: true },
+            }),
+        ]);
+        const somarReceber = (l: { valor: number }[]) => ({ total: l.reduce((s, c) => s + c.valor, 0), quantidade: l.length });
+        const receber = {
+            totalAberto: somarReceber(receberAbertas),
+            atrasadas: somarReceber(receberAbertas.filter((c) => { const v = new Date(c.vencimento); v.setHours(0, 0, 0, 0); return v < hoje; })),
+            mes: somarReceber(receberAbertas.filter((c) => c.vencimento >= inicioMes && c.vencimento < fimMes)),
+            recebidoMes: {
+                total: recebidasNoMes.reduce((s, c) => s + (c.valorRecebido ?? c.valor), 0),
+                quantidade: recebidasNoMes.length,
+            },
+        };
+        for (const g of graficoMensal as any[]) {
+            const { inicio, fim } = this.mesParaIntervalo(g.mes);
+            g.recebido = receberJanela
+                .filter((c) => c.status === 'RECEBIDA' && c.recebidoEm && c.recebidoEm >= inicio && c.recebidoEm < fim)
+                .reduce((s, c) => s + (c.valorRecebido ?? c.valor), 0);
+            g.aReceber = receberJanela
+                .filter((c) => c.status === 'ABERTA' && c.vencimento >= inicio && c.vencimento < fim)
+                .reduce((s, c) => s + c.valor, 0);
+        }
+
         return {
             mesReferencia: mesRef,
             entradas,
@@ -2016,9 +2061,63 @@ export class FinanceiroNfService {
             servicosPagos,
             receitas: { disponivel: false },
             contasPagar,
+            pagoMes,
+            receber,
             graficoMensal,
             graficoPorCategoria,
             graficoStatus,
+        };
+    }
+
+    // Dashboard Fiscal: NF de Entrada, NF de Transporte (CT-e/NF de carga) e
+    // NF de Serviço do mês + tendência dos últimos 6 meses.
+    async dashboardFiscal(empresaId: string, mesFiltro?: string) {
+        const hoje = new Date();
+        const mesRef = mesFiltro || `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+        const { inicio: inicioMes, fim: fimMes } = this.mesParaIntervalo(mesRef);
+        const [ano, m] = mesRef.split('-').map(Number);
+        const inicioJanela = new Date(ano, m - 6, 1);
+
+        const [entradasJ, servicosJ] = await Promise.all([
+            this.prisma.nfEntrada.findMany({
+                where: { empresaId, ignorado: false, dataEmissao: { gte: inicioJanela, lt: fimMes } },
+                select: { valor: true, dataEmissao: true, aceita: true, ehCarga: true },
+            }),
+            this.prisma.nfServico.findMany({
+                where: { empresaId, ignorado: false, dataEmissao: { gte: inicioJanela, lt: fimMes } },
+                select: { valor: true, dataEmissao: true, aceita: true },
+            }),
+        ]);
+
+        const resumo = (l: { valor: number | null; aceita: boolean }[]) => ({
+            total: l.reduce((s, i) => s + (i.valor || 0), 0),
+            quantidade: l.length,
+            aceitas: l.filter((i) => i.aceita).length,
+            pendentes: l.filter((i) => !i.aceita).length,
+        });
+        const noMes = <T extends { dataEmissao: Date | null }>(l: T[], ini: Date, fim: Date) => l.filter((i) => i.dataEmissao && i.dataEmissao >= ini && i.dataEmissao < fim);
+
+        const graficoMensal = Array.from({ length: 6 }, (_, i) => {
+            const d = new Date(ano, m - 1 - (5 - i), 1);
+            const chave = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            const { inicio, fim } = this.mesParaIntervalo(chave);
+            const ent = noMes(entradasJ, inicio, fim);
+            return {
+                mes: chave,
+                label: this.nomeMesCurto(chave),
+                entradas: ent.filter((e) => !e.ehCarga).reduce((s, e) => s + (e.valor || 0), 0),
+                transporte: ent.filter((e) => e.ehCarga).reduce((s, e) => s + (e.valor || 0), 0),
+                servicos: noMes(servicosJ, inicio, fim).reduce((s, e) => s + (e.valor || 0), 0),
+            };
+        });
+
+        const entMes = noMes(entradasJ, inicioMes, fimMes);
+        return {
+            mesReferencia: mesRef,
+            entradas: resumo(entMes.filter((e) => !e.ehCarga)),
+            transporte: resumo(entMes.filter((e) => e.ehCarga)),
+            servicos: resumo(noMes(servicosJ, inicioMes, fimMes)),
+            graficoMensal,
         };
     }
 

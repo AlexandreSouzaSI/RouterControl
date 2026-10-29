@@ -217,6 +217,7 @@ model Empresa {
 
   pagamentosAvisados PagamentoAvisado[]
   contasEnviadas     ContaEnviada[]
+  viagemPlanilhaAbas ViagemPlanilhaAba[]
 
   // Link secreto (sem login) pra o proprietário só enviar avisos de pagamento.
   tokenAvisoPagamento String? @unique
@@ -1519,6 +1520,41 @@ model ContaEnviada {
 
   @@index([empresaId, status])
   @@index([empresaId, codigoBarras])
+}
+
+// Controle de Viagens: planilha própria por aba (ex: "XCMG", "Diversos").
+// As colunas de cada aba são configuráveis (JSON) e cada viagem guarda os
+// valores em "dados" (JSON, chave = coluna).
+model ViagemPlanilhaAba {
+  id        String  @id @default(uuid())
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  nome    String
+  titulo  String?
+  ordem   Int     @default(0)
+  colunas Json // [{ key, label, tipo, calculo?, largura? }]
+
+  linhas ViagemPlanilhaLinha[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([empresaId, ordem])
+}
+
+model ViagemPlanilhaLinha {
+  id    String            @id @default(uuid())
+  abaId String
+  aba   ViagemPlanilhaAba @relation(fields: [abaId], references: [id], onDelete: Cascade)
+
+  dados Json
+  ordem Int  @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([abaId, ordem])
 }
 
 enum StatusContaReceber {

@@ -17,6 +17,8 @@ import { TrackingPage } from './pages/TrackingPage';
 import { DadosCapturados } from './pages/DadosCapturados';
 import { Fiscal } from './pages/Fiscal';
 import { DashboardFinanceiro } from './pages/DashboardFinanceiro';
+import { DashboardFiscal } from './pages/DashboardFiscal';
+import { ControleViagens } from './pages/ControleViagens';
 import { NfEntrada } from './pages/NfEntrada';
 import { NfTransporte } from './pages/NfTransporte';
 import { NfServico } from './pages/NfServico';
@@ -73,6 +75,8 @@ export default function App() {
                     <Route path="/Rotas" element={<TrackingPage />} />
                     <Route path="/dados-capturados" element={<DadosCapturados />} />
                     <Route path="/fiscal" element={<Fiscal />} />
+                    <Route path="/fiscal/dashboard" element={<DashboardFiscal />} />
+                    <Route path="/viagens/controle" element={<ControleViagens />} />
                     <Route path="/financeiro-nf/dashboard" element={<DashboardFinanceiro />} />
                     <Route path="/financeiro-nf/entrada" element={<NfEntrada />} />
                     <Route path="/financeiro-nf/transporte" element={<NfTransporte />} />

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Plus, Printer, Link2, Loader2, CheckCircle2, Trash2, Pencil, Landmark, X, History, Repeat, Clock, ArrowUpCircle } from 'lucide-react';
 import { api } from '../services/api';
+import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
 import { useAuth } from '../context/AuthContext';
 import { AbasContas } from '../components/AbasContas';
@@ -714,7 +715,7 @@ export function ContasPagar() {
             )}
 
             {modalImprimir && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setModalImprimir(false)}>
+                <Modal onFechar={() => setModalImprimir(false)} className="z-50 bg-black/50">
                     <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#111827] p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
                         <p className="font-semibold text-gray-900 dark:text-white">O que imprimir? (somente em aberto)</p>
                         {([['TODOS', 'Todas'], ['FORNECEDORES', 'Somente Fornecedores'], ['IMPOSTOS', 'Somente Impostos'], ['SOCIOS', 'Somente Sócios']] as const).map(([v, l]) => (
@@ -726,11 +727,11 @@ export function ContasPagar() {
                         <p className="text-xs text-gray-400">Abre a impressão — escolha "Salvar como PDF" no destino.</p>
                         <button onClick={() => setModalImprimir(false)} className="w-full text-sm text-gray-500">Cancelar</button>
                     </div>
-                </div>
+                </Modal>
             )}
 
             {modalLinkHoje && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setModalLinkHoje(false)}>
+                <Modal onFechar={() => setModalLinkHoje(false)} className="z-50 bg-black/50">
                     <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#111827] p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
                         <p className="font-semibold text-gray-900 dark:text-white">Link do proprietário — escolher o que pagar hoje</p>
                         <p className="text-xs text-gray-500">
@@ -753,7 +754,7 @@ export function ContasPagar() {
                             <button onClick={() => setModalLinkHoje(false)} className="ml-auto text-sm text-gray-500">Fechar</button>
                         </div>
                     </div>
-                </div>
+                </Modal>
             )}
 
             <FiltroMes
@@ -916,7 +917,7 @@ export function ContasPagar() {
                     )}
 
                     <button
-                        onClick={() => { limparForm(); setFormAberto((v) => !v); }}
+                        onClick={() => { limparForm(); setFormAberto(true); }}
                         className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition"
                     >
                         <Plus size={16} />
@@ -926,10 +927,14 @@ export function ContasPagar() {
             </div>
 
             {formAberto && (
-                <div className="p-5 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 space-y-4">
-                    <h3 className="font-semibold text-gray-900 dark:text-white text-sm">
-                        {editandoId ? 'Editar conta' : 'Nova conta a pagar'}
-                    </h3>
+                <Modal onFechar={() => { setFormAberto(false); limparForm(); }} className="z-50 bg-black/50">
+                <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto p-5 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 space-y-4 shadow-2xl">
+                    <div className="flex items-center justify-between">
+                        <h3 className="font-semibold text-gray-900 dark:text-white">
+                            {editandoId ? 'Editar conta' : 'Nova conta a pagar'}
+                        </h3>
+                        <button onClick={() => { setFormAberto(false); limparForm(); }} title="Fechar (Esc)" className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"><X size={18} /></button>
+                    </div>
 
                     <div className="grid sm:grid-cols-2 gap-3">
                         <div>
@@ -1079,7 +1084,7 @@ export function ContasPagar() {
                             Salvar
                         </button>
                     </div>
-                </div>
+                </div></Modal>
             )}
 
             {recorrencias.length > 0 && (
@@ -1321,7 +1326,7 @@ export function ContasPagar() {
             </div>
 
             {detalhe && (
-                <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setDetalhe(null)}>
+                <Modal onFechar={() => setDetalhe(null)} className="z-40 bg-black/40 backdrop-blur-sm">
                     <div className="w-full max-w-lg bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-start justify-between gap-3">
                             <div>
@@ -1406,11 +1411,11 @@ export function ContasPagar() {
                             </button>
                         </div>
                     </div>
-                </div>
+                </Modal>
             )}
 
             {contaPagamento && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                <Modal onFechar={fecharPagamento} className="z-50 bg-black/40 backdrop-blur-sm">
                     <div className="w-full max-w-sm bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 rounded-2xl p-5 space-y-4">
                         <div className="flex items-start justify-between">
                             <div>
@@ -1474,7 +1479,7 @@ export function ContasPagar() {
                             </button>
                         </div>
                     </div>
-                </div>
+                </Modal>
             )}
         </div>
     );

@@ -5,6 +5,7 @@ import { FiltroMes } from '../components/FiltroMes';
 import { ImportarCteModal } from '../components/ImportarCteModal';
 import { nomeMes } from '../lib/mes';
 import { api } from '../services/api';
+import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
 import { corPlaca, COR_GERAL } from '../lib/corPlaca';
 import { RateioCarretasModal, EtiquetaRateio } from '../components/RateioCarretasModal';
@@ -474,7 +475,7 @@ export function ContasReceber() {
             )}
 
             {formAberto && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setFormAberto(false)}>
+                <Modal onFechar={() => setFormAberto(false)} className="z-50 bg-black/50">
                     <form onSubmit={salvar} onClick={(e) => e.stopPropagation()} className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#111827] p-5 space-y-3">
                         <div className="flex items-center justify-between">
                             <p className="font-semibold text-gray-900 dark:text-white">{editId ? 'Editar conta a receber' : 'Nova conta a receber'}</p>
@@ -506,11 +507,11 @@ export function ContasReceber() {
                             {salvando ? 'Salvando...' : 'Salvar'}
                         </button>
                     </form>
-                </div>
+                </Modal>
             )}
 
             {recebendo && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setRecebendo(null)}>
+                <Modal onFechar={() => setRecebendo(null)} className="z-50 bg-black/50">
                     <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#111827] p-5 space-y-3">
                         <p className="font-semibold text-gray-900 dark:text-white">Registrar recebimento</p>
                         <p className="text-xs text-gray-500">{recebendo.descricao} · {moeda(recebendo.valor)}</p>
@@ -520,7 +521,7 @@ export function ContasReceber() {
                         </div>
                         <button onClick={confirmarRecebimento} className="w-full py-2.5 rounded-lg bg-green-600 text-white text-sm font-semibold">Confirmar</button>
                     </div>
-                </div>
+                </Modal>
             )}
         </div>
     );

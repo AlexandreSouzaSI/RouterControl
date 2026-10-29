@@ -133,7 +133,8 @@ function NovaEmpresaModal({ onClose, onCriada }: { onClose: () => void; onCriada
     return (
         <div
             className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            onClick={onClose}
+            onMouseDown={(e) => { (e.currentTarget as HTMLElement).dataset.fundo = String(e.target === e.currentTarget); }}
+            onClick={(e) => { if (e.currentTarget.dataset.fundo === 'true' && e.target === e.currentTarget) onClose(); e.currentTarget.dataset.fundo = ''; }}
         >
             <div
                 onClick={(e) => e.stopPropagation()}

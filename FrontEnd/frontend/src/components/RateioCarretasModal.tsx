@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { corPlaca } from '../lib/corPlaca';
+import { Modal } from './Modal';
 
 // Escolha de 1 ou mais carretas para uma conta. Com 2 ou mais, o valor é
 // dividido igualmente e a parcela de cada carreta vai para a aba Caminhões.
@@ -27,7 +28,7 @@ export function RateioCarretasModal({ caminhoes, valorTotal, inicial = [], titul
     const parcela = valorTotal && qtd >= 2 ? valorTotal / qtd : null;
 
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onFechar}>
+        <Modal onFechar={onFechar} className="z-[60] bg-black/50">
             <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#111827] p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between">
                     <p className="font-semibold text-gray-900 dark:text-white">{titulo ?? 'Para quais carretas?'}</p>
@@ -57,7 +58,7 @@ export function RateioCarretasModal({ caminhoes, valorTotal, inicial = [], titul
                     {qtd >= 2 ? `Dividir entre ${qtd} carretas` : 'Confirmar'}
                 </button>
             </div>
-        </div>
+        </Modal>
     );
 }
 

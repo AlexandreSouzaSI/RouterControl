@@ -13,6 +13,8 @@ import {
     ShieldAlert,
     Warehouse,
     Banknote,
+    ClipboardList,
+    PieChart,
     type LucideIcon,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
@@ -24,13 +26,17 @@ interface SidebarProps {
     onClose: () => void;
 }
 
+type EmpresaModulo = 'RASTREADOR' | 'FISCAL' | 'FINANCEIRO_NF';
+
 type MenuItem = {
     name: string;
     icon: LucideIcon;
     path: string;
+    // Item que depende de um módulo diferente do grupo (ex: NFs dentro de Fiscal
+    // usam a API do Financeiro/NF). Pessoa Física não vê itens com pfOculto.
+    modulo?: EmpresaModulo;
+    pfOculto?: boolean;
 };
-
-type EmpresaModulo = 'RASTREADOR' | 'FISCAL' | 'FINANCEIRO_NF';
 
 type MenuGroup = {
     titulo: string;
@@ -54,9 +60,12 @@ const grupos: MenuGroup[] = [
     },
     {
         titulo: 'Fiscal',
-        modulo: 'FISCAL',
         itens: [
-            { name: 'Fiscal', icon: FileText, path: '/fiscal' },
+            { name: 'Dashboard Fiscal', icon: PieChart, path: '/fiscal/dashboard', modulo: 'FINANCEIRO_NF', pfOculto: true },
+            { name: 'NF de Entrada', icon: FileText, path: '/financeiro-nf/entrada', modulo: 'FINANCEIRO_NF', pfOculto: true },
+            { name: 'NF de Transporte', icon: Truck, path: '/financeiro-nf/transporte', modulo: 'FINANCEIRO_NF', pfOculto: true },
+            { name: 'NF de Serviço', icon: FileCheck, path: '/financeiro-nf/servico', modulo: 'FINANCEIRO_NF', pfOculto: true },
+            { name: 'RPA / CIOT / CT-e', icon: FileText, path: '/fiscal', modulo: 'FISCAL' },
         ],
     },
     {
@@ -64,11 +73,14 @@ const grupos: MenuGroup[] = [
         modulo: 'FINANCEIRO_NF',
         itens: [
             { name: 'Dashboard', icon: LayoutGrid, path: '/financeiro-nf/dashboard' },
-            { name: 'NF de Entrada', icon: FileText, path: '/financeiro-nf/entrada' },
-            { name: 'NF de Transporte', icon: Truck, path: '/financeiro-nf/transporte' },
-            { name: 'NF de Serviço', icon: FileCheck, path: '/financeiro-nf/servico' },
             { name: 'Contas a Pagar', icon: Wallet, path: '/financeiro-nf/contas-pagar' },
-            { name: 'Contas a Receber', icon: Banknote, path: '/financeiro-nf/contas-receber' },
+            { name: 'Contas a Receber', icon: Banknote, path: '/financeiro-nf/contas-receber', pfOculto: true },
+        ],
+    },
+    {
+        titulo: 'Viagens',
+        itens: [
+            { name: 'Controle de Viagens', icon: ClipboardList, path: '/viagens/controle', pfOculto: true },
         ],
     },
     {
@@ -110,20 +122,15 @@ function Navegacao({ onNavigate }: { onNavigate?: () => void }) {
     const { usuario } = useAuth();
     const ehFisica = usuario?.empresaTipoPessoa === 'FISICA';
 
-    const gruposComModulo = usuario?.isAdminMaster
-        ? grupos
-        : grupos.filter((g) => !g.modulo || usuario?.modulosHabilitados?.includes(g.modulo));
+    const temModulo = (m?: EmpresaModulo) => !m || !!usuario?.isAdminMaster || !!usuario?.modulosHabilitados?.includes(m);
 
-    // Pessoa Física só usa Dashboard + Contas a Pagar — não faz sentido
-    // mostrar NF de Entrada/Transporte/Serviço (fluxo fiscal de carga) pra
-    // alguém controlando contas pessoais.
-    const gruposFiltrados = ehFisica
-        ? gruposComModulo.map((g) =>
-            g.titulo === 'Financeiro'
-                ? { ...g, itens: g.itens.filter((i) => i.name === 'Dashboard' || i.name === 'Contas a Pagar') }
-                : g,
-        )
-        : gruposComModulo;
+    // Grupo aparece se o módulo dele estiver habilitado e sobrar algum item.
+    // Pessoa Física só usa Dashboard + Contas a Pagar — NF, Contas a Receber
+    // e Controle de Viagens (fluxo de transportadora) ficam escondidos.
+    const gruposFiltrados = grupos
+        .filter((g) => temModulo(g.modulo))
+        .map((g) => ({ ...g, itens: g.itens.filter((i) => temModulo(i.modulo) && !(ehFisica && i.pfOculto)) }))
+        .filter((g) => g.itens.length > 0);
 
     const gruposVisiveis = usuario?.isAdminMaster ? [...gruposFiltrados, grupoAdmin] : gruposFiltrados;
 

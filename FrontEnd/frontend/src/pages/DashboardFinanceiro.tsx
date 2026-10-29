@@ -16,22 +16,21 @@ import { motion } from 'framer-motion';
 import {
     TrendingUp,
     Wallet,
-    FileText,
     HandCoins,
     CalendarClock,
     CalendarDays,
     CalendarRange,
     AlertTriangle,
-    Info,
-    ClipboardList,
+    Banknote,
+    Scale,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 // =============================================================================
-// Dashboard Financeiro — visão executiva do módulo Financeiro/NF: KPIs de
-// Entradas, Serviços Pagos, Receitas (ainda sem fonte de dado) e Contas a
-// Pagar por período, mais os gráficos de tendência, status e categoria.
+// Dashboard Financeiro — só o financeiro: Contas a Pagar, Contas a Receber,
+// pago x recebido no mês e os gráficos de tendência, status e categoria.
+// (As notas fiscais ficam no Dashboard Fiscal.)
 // =============================================================================
 
 function formatCurrency(value: number | null | undefined) {
@@ -73,7 +72,9 @@ type DashboardData = {
         atrasadas: Bucket;
         totalAberto: Bucket;
     };
-    graficoMensal: { mes: string; label: string; entradas: number; contasPagas: number; contasAbertas: number }[];
+    pagoMes?: Bucket;
+    receber?: { totalAberto: Bucket; atrasadas: Bucket; mes: Bucket; recebidoMes: Bucket };
+    graficoMensal: { mes: string; label: string; entradas: number; contasPagas: number; contasAbertas: number; recebido?: number; aReceber?: number }[];
     graficoPorCategoria: { categoria: string; valor: number }[];
     graficoStatus: { status: string; valor: number; quantidade: number }[];
 };
@@ -205,7 +206,7 @@ export function DashboardFinanceiro() {
                     <p className="text-sm text-gray-500 dark:text-gray-400">
                         {ehFisica
                             ? 'Visão geral das suas contas a pagar.'
-                            : 'Visão geral de entradas, serviços, receitas e contas a pagar.'}
+                            : 'Contas a pagar, contas a receber e o resultado do mês. As notas fiscais estão no Dashboard Fiscal.'}
                     </p>
                 </div>
 
@@ -226,49 +227,42 @@ export function DashboardFinanceiro() {
                 <p className="text-sm text-gray-400 py-12 text-center">Não foi possível carregar o dashboard.</p>
             ) : (
                 <>
-                    {!ehFisica && (dados.entradas.quantidade === 0 && dados.servicos.quantidade === 0 && dados.servicosPagos.quantidade === 0) && (
-                        <div className="flex items-start gap-3 p-4 rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800">
-                            <Info size={16} className="text-amber-500 shrink-0 mt-0.5" />
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                                Entradas e Serviços ainda estão zerados porque a busca automática de NF (Sefaz/ADN)
-                                está em construção. Os números de Contas a Pagar abaixo já refletem os lançamentos
-                                manuais existentes.
-                            </p>
-                        </div>
-                    )}
-
-                    {/* KPIs principais — Pessoa Física só usa Contas a Pagar, o resto
-                        (Entradas/Serviços/Receitas) não se aplica a esse tipo de empresa. */}
                     {!ehFisica && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-                            <KpiCard
-                                titulo="Entradas (NF)"
-                                valor={formatCurrency(dados.entradas.total)}
-                                subtitulo={`${dados.entradas.quantidade} NF · ${dados.entradas.aceitas} aceitas`}
-                                icone={FileText}
-                                cor="#3b82f6"
-                            />
-                            <KpiCard
-                                titulo="NF de Serviço"
-                                valor={formatCurrency(dados.servicos.total)}
-                                subtitulo={`${dados.servicos.quantidade} NF · ${dados.servicos.aceitas} aceitas`}
-                                icone={ClipboardList}
-                                cor="#0ea5e9"
-                            />
-                            <KpiCard
-                                titulo="Serviços Pagos"
-                                valor={formatCurrency(dados.servicosPagos.total)}
-                                subtitulo={`${dados.servicosPagos.quantidade} pagamento${dados.servicosPagos.quantidade === 1 ? '' : 's'}`}
-                                icone={HandCoins}
-                                cor="#22c55e"
-                            />
-                            <KpiCard titulo="Receitas" valor="" icone={TrendingUp} cor="#a855f7" indisponivel />
                             <KpiCard
                                 titulo="Contas a Pagar (aberto)"
                                 valor={formatCurrency(dados.contasPagar.totalAberto.total)}
                                 subtitulo={`${dados.contasPagar.totalAberto.quantidade} conta${dados.contasPagar.totalAberto.quantidade === 1 ? '' : 's'} em aberto`}
                                 icone={Wallet}
                                 cor="#f59e0b"
+                            />
+                            <KpiCard
+                                titulo="Pago no mês"
+                                valor={formatCurrency(dados.pagoMes?.total)}
+                                subtitulo={`${dados.pagoMes?.quantidade ?? 0} conta${dados.pagoMes?.quantidade === 1 ? '' : 's'} paga${dados.pagoMes?.quantidade === 1 ? '' : 's'}`}
+                                icone={HandCoins}
+                                cor="#ef4444"
+                            />
+                            <KpiCard
+                                titulo="A Receber (aberto)"
+                                valor={formatCurrency(dados.receber?.totalAberto.total)}
+                                subtitulo={`${dados.receber?.totalAberto.quantidade ?? 0} conta${dados.receber?.totalAberto.quantidade === 1 ? '' : 's'} · ${formatCurrency(dados.receber?.atrasadas.total)} atrasado`}
+                                icone={Banknote}
+                                cor="#3b82f6"
+                            />
+                            <KpiCard
+                                titulo="Recebido no mês"
+                                valor={formatCurrency(dados.receber?.recebidoMes.total)}
+                                subtitulo={`${dados.receber?.recebidoMes.quantidade ?? 0} recebimento${dados.receber?.recebidoMes.quantidade === 1 ? '' : 's'}`}
+                                icone={TrendingUp}
+                                cor="#22c55e"
+                            />
+                            <KpiCard
+                                titulo="Resultado do mês"
+                                valor={formatCurrency((dados.receber?.recebidoMes.total ?? 0) - (dados.pagoMes?.total ?? 0))}
+                                subtitulo="Recebido − pago no mês"
+                                icone={Scale}
+                                cor={(dados.receber?.recebidoMes.total ?? 0) - (dados.pagoMes?.total ?? 0) >= 0 ? '#22c55e' : '#ef4444'}
                             />
                         </div>
                     )}
@@ -302,7 +296,7 @@ export function DashboardFinanceiro() {
                         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">
                             {ehFisica
                                 ? 'Contas Pagas x Contas em aberto — últimos 6 meses'
-                                : 'Entradas x Contas Pagas x Contas em aberto — últimos 6 meses'}
+                                : 'Pago x A pagar x Recebido x A receber — últimos 6 meses'}
                         </h2>
 
                         <div className="w-full h-[300px]">
@@ -331,9 +325,10 @@ export function DashboardFinanceiro() {
                                         formatter={(value: any) => formatCurrency(Number(value))}
                                     />
                                     <Legend wrapperStyle={{ fontSize: 12, color: corEixo }} iconType="circle" iconSize={8} />
-                                    {!ehFisica && <Bar dataKey="entradas" name="Entradas" fill="#3b82f6" radius={[6, 6, 0, 0]} />}
-                                    <Bar dataKey="contasPagas" name="Contas Pagas" fill="#22c55e" radius={[6, 6, 0, 0]} />
-                                    <Bar dataKey="contasAbertas" name="Contas em aberto" fill="#f59e0b" radius={[6, 6, 0, 0]} />
+                                    <Bar dataKey="contasPagas" name="Contas pagas" fill="#ef4444" radius={[6, 6, 0, 0]} />
+                                    <Bar dataKey="contasAbertas" name="A pagar" fill="#f59e0b" radius={[6, 6, 0, 0]} />
+                                    {!ehFisica && <Bar dataKey="recebido" name="Recebido" fill="#22c55e" radius={[6, 6, 0, 0]} />}
+                                    {!ehFisica && <Bar dataKey="aReceber" name="A receber" fill="#3b82f6" radius={[6, 6, 0, 0]} />}
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>

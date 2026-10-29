@@ -12,12 +12,13 @@ import { FinanceiroModule } from './financeiro/financeiro.module';
 import { TrucksControlModule } from './integrations/trucks-control/trucks-control.module';
 import { AuthModule } from './auth/auth.module';
 import { FiscalModule } from './fiscal/fiscal.module';
+import { ControleViagensModule } from './controle-viagens/controle-viagens.module';
 import { FinanceiroNfModule } from './financeiro-nf/financeiro-nf.module';
 import { AdminModule } from './admin/admin.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), AuthModule, UploadModule, PrismaModule, RelatorioModule, RegraCaminhaoModule, CaminhaoModule, PagamentosModule, FinanceiroModule, TrucksControlModule, FiscalModule, FinanceiroNfModule, AdminModule, UsuariosModule],
+  imports: [ScheduleModule.forRoot(), AuthModule, UploadModule, PrismaModule, RelatorioModule, RegraCaminhaoModule, CaminhaoModule, PagamentosModule, FinanceiroModule, TrucksControlModule, FiscalModule, FinanceiroNfModule, AdminModule, UsuariosModule, ControleViagensModule],
   controllers: [AppController],
   providers: [AppService],
 })

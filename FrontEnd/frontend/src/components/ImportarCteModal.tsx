@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { FileUp, Loader2, X, CheckCircle2, Copy, Ban, AlertTriangle } from 'lucide-react';
 import { api } from '../services/api';
+import { Modal } from './Modal';
 
 // Importação em massa de XML de CT-e pra Contas a Receber. Manda os arquivos
 // em lotes (pra não estourar limite de upload) e junta o resultado.
@@ -73,7 +74,7 @@ export function ImportarCteModal({ aberto, onFechar, onImportado }: { aberto: bo
         );
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={fechar}>
+        <Modal onFechar={fechar} className="z-50 bg-black/50">
             <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-start justify-between gap-3">
                     <div>
@@ -129,6 +130,6 @@ export function ImportarCteModal({ aberto, onFechar, onImportado }: { aberto: bo
                     </div>
                 )}
             </div>
-        </div>
+        </Modal>
     );
 }
