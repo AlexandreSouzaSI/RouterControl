@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classificar pagamentos · Pix Set/2026</title>
+<style>
+:root{
+  --bg:#f4f5f7;--card:#fff;--ink:#16181d;--muted:#6b7280;--line:#e5e7eb;--soft:#f9fafb;
+  --accent:#2563eb;--ok:#059669;--warn:#d97706;--bad:#dc2626;--sel:#eff6ff;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1115;--card:#171a21;--ink:#e8eaed;--muted:#9aa1ad;--line:#2a2f3a;--soft:#1d212a;
+  --accent:#60a5fa;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--sel:#1e2a44;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);padding:12px 20px 10px}
+h1{font-size:17px;margin:0}
+.sub{color:var(--muted);font-size:12.5px;margin-top:2px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.acoes{display:flex;gap:6px;flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 10px}
+button:hover{border-color:var(--accent)}
+button.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.prog{height:6px;background:var(--line);border-radius:4px;margin:10px 0 10px;overflow:hidden}
+.prog>div{height:100%;background:var(--ok);transition:width .25s}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.cardt{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--c,#999);border-radius:10px;padding:8px 10px;cursor:pointer;min-width:0}
+.cardt.ativo{outline:2px solid var(--accent)}
+.cardt .n{font-weight:700;font-size:13px;display:flex;justify-content:space-between;gap:6px}
+.cardt .n small{font-weight:500;color:var(--muted)}
+.cardt .v{font-size:17px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cardt .d{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cardt.pend{--c:var(--warn)}
+main{padding:14px 20px 80px;max-width:1300px;margin:0 auto}
+.filtros{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.filtros input{flex:1;min-width:200px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--accent);color:#fff}
+.dica{font-size:12px;color:var(--muted);margin:0 0 10px}
+kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--card)}
+.lin{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;display:grid;grid-template-columns:28px 78px 1fr 130px;gap:10px;align-items:start}
+.lin.foco{border-color:var(--accent);background:var(--sel);box-shadow:0 0 0 1px var(--accent)}
+.lin.feito{opacity:.92}
+.lin .i{color:var(--muted);font-size:12px;padding-top:2px}
+.lin .dt{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.lin .nm{font-weight:600}
+.lin .ds{color:var(--muted);font-size:12.5px;margin-top:1px;word-break:break-word}
+.lin .val{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;font-size:15px}
+.btns{grid-column:3/5;display:flex;flex-wrap:wrap;gap:5px;margin-top:4px;align-items:center}
+.pl{padding:4px 9px;font-size:12.5px;font-weight:700;border-radius:7px;border:1px solid var(--line);background:var(--soft);color:var(--ink)}
+.pl .k{font-weight:500;color:var(--muted);font-size:10.5px;margin-left:3px}
+.pl.on{background:var(--c);border-color:var(--c);color:#fff}
+.pl.on .k{color:#ffffffb0}
+.pl.outro{font-weight:600}
+.sep{width:1px;height:20px;background:var(--line);margin:0 3px}
+select.car{font:inherit;font-size:12.5px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;background:var(--soft);color:var(--ink)}
+.res{grid-column:3/5;font-size:12.5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;color:#fff;background:var(--c);font-weight:700;font-size:12px}
+.sug{font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);padding:3px 8px}
+.nota{grid-column:3/5;width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--soft);color:var(--ink);font:inherit;font-size:12.5px}
+.conc{margin-top:8px;font-size:12.5px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:7px 10px;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
+.conc b{font-variant-numeric:tabular-nums}
+.conc .okk{color:var(--ok);font-weight:700}.conc .nok{color:var(--bad);font-weight:700}
+.seg button .ct{font-size:11px;opacity:.75;margin-left:4px}
+.auto{font-size:11px;color:var(--muted);border:1px dashed var(--line);border-radius:999px;padding:1px 7px}
+.vazio{text-align:center;color:var(--muted);padding:40px}
+/* modal dividir */
+.ov{position:fixed;inset:0;background:#0007;display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.mod{background:var(--card);border-radius:12px;width:min(460px,100%);padding:16px;max-height:90vh;overflow:auto}
+.mod h3{margin:0 0 4px;font-size:15px}
+.mod .lr{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)}
+.mod .lr label{flex:1;display:flex;gap:8px;align-items:center;font-weight:600}
+.mod .lr input[type=text]{width:120px;text-align:right;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--soft);color:var(--ink);font:inherit}
+.mod .rod{display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:8px}
+.st{font-size:12.5px;font-weight:600}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--c);display:inline-block}
+@media (max-width:700px){
+  header{padding:10px 16px;position:static}main{padding:12px 16px 80px}
+  .lin{grid-template-columns:1fr auto}.lin .i{display:none}.lin .dt{grid-column:1/3}
+  .btns,.res,.nota{grid-column:1/3}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <div>
+      <h1>Pagamentos · Extrato Sicredi Pix · Setembro/2026</h1>
+      <div class="sub" id="sub"></div>
+    </div>
+    <div class="acoes">
+      <button id="bSalvar" class="pri" title="Baixa um arquivo com a sua classificação, para continuar depois">💾 Salvar progresso</button>
+      <button id="bAbrir" title="Carrega um progresso salvo">📂 Abrir progresso</button>
+      <button id="bCsv">⬇ Exportar planilha (CSV)</button>
+      <input type="file" id="fArq" accept=".json" hidden>
+    </div>
+  </div>
+  <div class="prog"><div id="barra"></div></div>
+  <div class="cards" id="cards"></div>
+  <div class="conc" id="conc"></div>
+</header>
+<main>
+  <div class="filtros">
+    <input id="busca" placeholder="Buscar por nome, descrição ou valor…">
+    <div class="seg" id="seg">
+      <button data-f="pend" class="on">Pendentes<span class="ct"></span></button>
+      <button data-f="feitos">Classificados<span class="ct"></span></button>
+      <button data-f="todos">Todos<span class="ct"></span></button>
+      <button data-f="socio">Sócios / proprietários<span class="ct"></span></button>
+    </div>
+  </div>
+  <p class="dica">Clique no caminhão de cada pagamento. Atalhos no pagamento destacado: <kbd>1</kbd>–<kbd>8</kbd> caminhões, <kbd>G</kbd> geral/empresa, <kbd>P</kbd> sócios/proprietários, <kbd>N</kbd> não é despesa, <kbd>D</kbd> dividir, <kbd>S</kbd> aceitar sugestão, <kbd>0</kbd> limpar, <kbd>↑</kbd><kbd>↓</kbd> navegar. Clique num card para ver só os pagamentos dele. Os que já tinham placa na descrição do extrato vieram classificados (marcados como <span class="auto">do extrato</span>) — confira e altere se precisar.</p>
+  <div id="lista"></div>
+</main>
+<div id="modal"></div>
+
+<script>
+const DADOS = [{"id": 1, "data": "30/09/2026", "hora": "18:55", "nome": "VIGGA PROPRIEDADE INTELECTUAL LTDA", "desc": "", "v": 1073.72}, {"id": 2, "data": "30/09/2026", "hora": "18:55", "nome": "ELETRICA FT LTDA", "desc": "PGTO PARTE ELETRICA PLACA RME MOTORISTA ROBERTO", "v": 1670.0}, {"id": 3, "data": "30/09/2026", "hora": "18:20", "nome": "POSTO LABAREDA LTDA", "desc": "POSTO LABAREDA NF 5676", "v": 21767.75}, {"id": 4, "data": "30/09/2026", "hora": "18:20", "nome": "POSTO LABAREDA LTDA", "desc": "POSTO LABAREDA NF 5565", "v": 10452.07}, {"id": 5, "data": "30/09/2026", "hora": "18:20", "nome": "EXCEDFLEX", "desc": "EXCED ESCOLTA FATURA NF 22029 PARCELA 2 DE 3", "v": 3359.29}, {"id": 6, "data": "30/09/2026", "hora": "18:20", "nome": "Saqpay", "desc": "", "v": 4865.04}, {"id": 7, "data": "30/09/2026", "hora": "18:20", "nome": "EXCEDFLEX", "desc": "EXCED ESCOLTA FATURA NF 22221 PARCELA 1 DE 1", "v": 3613.59}, {"id": 8, "data": "30/09/2026", "hora": "18:20", "nome": "EXCEDFLEX", "desc": "EXCED ESCOLTA FATURA NF 22029 PARCELA 3 DE 3", "v": 3359.29}, {"id": 9, "data": "30/09/2026", "hora": "18:20", "nome": "LOBINHO ACESSORIOS", "desc": "R e S ACESSORIOS AUTOMOTIVOS L NF 5025 2 PARCELA PLACA", "v": 599.5}, {"id": 10, "data": "30/09/2026", "hora": "18:20", "nome": "MEGA EMBREAGENS", "desc": "MEGA COMERCIO E SERV. DE EMBREAGENS LTDA POZ6F28 NOTA FISCAL 29328", "v": 3001.66}, {"id": 11, "data": "30/09/2026", "hora": "18:20", "nome": "LOBINHO ACESSORIOS", "desc": "R e S ACESSORIOS AUTOMOTIVOS L NF 5146 1 PARCELA PLACA TCF1D34", "v": 1134.75}, {"id": 12, "data": "30/09/2026", "hora": "18:20", "nome": "MEGA EMBREAGENS", "desc": "MEGA COMERCIO E SERV. DE EMBREAGENS LTDA RFX4H06 NOTA FISCAL 29774 PARCELA 1", "v": 1833.33}, {"id": 13, "data": "30/09/2026", "hora": "18:20", "nome": "MEGA EMBREAGENS", "desc": "MEGA COMERCIO E SERV. DE EMBREAGENS LTDA POZ6F28 NOTA FISCAL 1463", "v": 560.0}, {"id": 14, "data": "30/09/2026", "hora": "18:20", "nome": "ELETRICA MARCHA LENTA", "desc": "AUTO ELETRICA MLR PLACA FQA COZINHA, LANTERNA MARALAMA, LAMPADAS", "v": 520.0}, {"id": 15, "data": "30/09/2026", "hora": "18:20", "nome": "Saulo juner de Andrade", "desc": "PGTO BORRACHARIA SAULO JUNER PLACA QPM MOTORISTA RUAN", "v": 140.0}, {"id": 16, "data": "30/09/2026", "hora": "17:09", "nome": "VIA MINAS LOGISTICA LTDA", "desc": "TRANSFERENCIA ENTRE CONTAS", "v": 5000.0}, {"id": 17, "data": "30/09/2026", "hora": "17:09", "nome": "VIA MINAS LOGISTICA LTDA", "desc": "TRANFERENCIA ENTRE CONTAS", "v": 1637.51}, {"id": 18, "data": "30/09/2026", "hora": "17:09", "nome": "TIAGO VALENTIM", "desc": "PGTO BORRACHEIRO PLACA EVU ROBERTO", "v": 70.0}, {"id": 19, "data": "30/09/2026", "hora": "17:04", "nome": "NU GALHO", "desc": "devolucao de emprestimo", "v": 34000.0}, {"id": 20, "data": "30/09/2026", "hora": "13:37", "nome": "EDILEIDE FERREIRA DE OLIVEIRA", "desc": "PGTO EPI PARA MOTORISTA JOAO BASTISTA PLACA SEZ", "v": 120.0}, {"id": 21, "data": "30/09/2026", "hora": "13:37", "nome": "CADORE , BIDOIA E CIA LTDA", "desc": "PGTO MATERIAL PARA AMARRACAO DE CARGA PLACA SEV", "v": 3280.0}, {"id": 22, "data": "30/09/2026", "hora": "11:56", "nome": "Saqpay", "desc": "", "v": 3298.62}, {"id": 23, "data": "30/09/2026", "hora": "10:41", "nome": "JAS MUNCK GUINDASTE E LOCACAO LTDA", "desc": "guincho SEZ", "v": 1500.0}, {"id": 24, "data": "30/09/2026", "hora": "08:29", "nome": "GIOVANNI DOS SANTOS GODINHO", "desc": "POZ vale motorista", "v": 500.0}, {"id": 25, "data": "29/09/2026", "hora": "22:12", "nome": "MARAJO CUIABA III", "desc": "", "v": 4295.45}, {"id": 26, "data": "29/09/2026", "hora": "14:49", "nome": "Izabela Carvalho Tunnes", "desc": "PGTO IMPRESSAO DE 2 FOLHAS POZ GEOVANE", "v": 6.0}, {"id": 27, "data": "29/09/2026", "hora": "14:35", "nome": "Izabela Carvalho Tunnes", "desc": "PGTO IMPRESSAO DE 2 FOLHAS MOVECTA PLACA RME ROBERTO", "v": 6.0}, {"id": 28, "data": "29/09/2026", "hora": "14:02", "nome": "AUTO POSTO REDENTOR LTDA", "desc": "PGTO AUTO POSTO REDENTOR PLACA RFX ISRAEL", "v": 2712.72}, {"id": 29, "data": "29/09/2026", "hora": "13:13", "nome": "AUTO POSTO CARGA PESADA DO GUARUJA LTDA", "desc": "PGTO AUTO POSTO CARGA PESADA SYR GILSON", "v": 3791.52}, {"id": 30, "data": "29/09/2026", "hora": "12:08", "nome": "WALLISSON TAMIETTI DE SIQUEIRA", "desc": "PGTO POSTO FISCAL LIBERACAO FRETE DINLOG", "v": 50.0}, {"id": 31, "data": "29/09/2026", "hora": "12:08", "nome": "LAERCIO LAUREANO DE SOUZA", "desc": "PGTO LAERCIO BORRACHEIRO PLACA POZ GEOVANE", "v": 20.0}, {"id": 32, "data": "29/09/2026", "hora": "11:53", "nome": "LAERCIO LAUREANO DE SOUZA", "desc": "PGTO LAERCIO CALIBRAGEM PLACA POZ GEOVANE", "v": 145.0}, {"id": 33, "data": "29/09/2026", "hora": "11:47", "nome": "LAERCIO LAUREANO DE SOUZA", "desc": "PGTO BORRACHARIA LAERCIO PLACA EVU ROBERTO", "v": 210.0}, {"id": 34, "data": "28/09/2026", "hora": "18:41", "nome": "ELO LOGISTICA", "desc": "ADT E SD E PEDAGIO REFERENTE A VIAGEM 12 ECOPORTO Santos X CAMPINAS", "v": 4709.2}, {"id": 35, "data": "28/09/2026", "hora": "18:41", "nome": "ELO LOGISTICA", "desc": "ADT E SD E PEDAGIO REFERENTE A VIAGEM 11 DPW Gja X JUNDIAI", "v": 4703.3}, {"id": 36, "data": "28/09/2026", "hora": "18:41", "nome": "SO PORTO BR", "desc": "SO PORTO BR LTDA PERIODO DO DIA 0909 A 2409", "v": 3405.0}, {"id": 37, "data": "28/09/2026", "hora": "18:41", "nome": "TRANSPORTADORA CLASSE A LTDA", "desc": "ALUGUEL CARRETA PLACA SIO 8E70", "v": 6000.0}, {"id": 38, "data": "28/09/2026", "hora": "18:41", "nome": "RECATEC RECAPAGEM DE PNEUS", "desc": "RECAPAGEM RECATEC RECUPERAÇÃO DE PNEUS PLACA FQM4596 NF 7790", "v": 1438.33}, {"id": 39, "data": "28/09/2026", "hora": "16:51", "nome": "AUTO MECANICA BRITO", "desc": "troca de oleo rfx", "v": 3234.2}, {"id": 40, "data": "28/09/2026", "hora": "16:25", "nome": "JOAO BATISTA COELHO", "desc": "manutencao carreta fqa", "v": 80.0}, {"id": 41, "data": "28/09/2026", "hora": "16:22", "nome": "TIAGO VALENTIM", "desc": "manutencao da carreta asw", "v": 70.0}, {"id": 42, "data": "28/09/2026", "hora": "15:08", "nome": "ORNELAS COMERCIO E IMPORTACAO", "desc": "rastreador SYR", "v": 2500.0}, {"id": 43, "data": "28/09/2026", "hora": "14:32", "nome": "NILZA DA SILVA FREITAS", "desc": "", "v": 61.5}, {"id": 44, "data": "28/09/2026", "hora": "13:31", "nome": "JN AUTO POSTO", "desc": "abastecimento SEV", "v": 3786.56}, {"id": 45, "data": "28/09/2026", "hora": "11:15", "nome": "SERGIO DA SILVA FERREIRA", "desc": "abastecimento TCF", "v": 2756.0}, {"id": 46, "data": "28/09/2026", "hora": "10:34", "nome": "Celso Storck Hoff", "desc": "peca rme", "v": 35.0}, {"id": 47, "data": "28/09/2026", "hora": "10:05", "nome": "ISRAEL VIEIRA DA SILVA", "desc": "reembolso eletrica rfx", "v": 250.0}, {"id": 48, "data": "28/09/2026", "hora": "09:40", "nome": "MARCO ANTONIO DE SOUZA", "desc": "emprestimo para marco", "v": 33000.0}, {"id": 49, "data": "27/09/2026", "hora": "13:06", "nome": "JOAO BATISTA COELHO", "desc": "concerto carreta gjp e fqa", "v": 245.0}, {"id": 50, "data": "27/09/2026", "hora": "11:37", "nome": "GIOVANNI DOS SANTOS GODINHO", "desc": "vale giovani poz", "v": 500.0}, {"id": 51, "data": "26/09/2026", "hora": "15:33", "nome": "GIOVANNI DOS SANTOS GODINHO", "desc": "vale motorista POZ", "v": 500.0}, {"id": 52, "data": "26/09/2026", "hora": "13:31", "nome": "FELIPE CARVALHO SANTOS LEONARDO", "desc": "ajuda para descarregar as tampas SEV", "v": 150.0}, {"id": 53, "data": "25/09/2026", "hora": "21:26", "nome": "WILLIAN DOS SANTOS MACHADO", "desc": "comissão Willian", "v": 1000.0}, {"id": 54, "data": "25/09/2026", "hora": "20:43", "nome": "NU GALHO", "desc": "", "v": 7000.0}, {"id": 55, "data": "25/09/2026", "hora": "20:42", "nome": "NU GALHO", "desc": "", "v": 10000.0}, {"id": 56, "data": "25/09/2026", "hora": "20:08", "nome": "SERGIO DA SILVA FERREIRA", "desc": "TCF", "v": 3107.94}, {"id": 57, "data": "25/09/2026", "hora": "20:07", "nome": "GILSON ALVES DA SILVA", "desc": "abastecimento SYR", "v": 2444.6}, {"id": 58, "data": "25/09/2026", "hora": "18:55", "nome": "18.039.742 LUIZ WALDENEY BARBOSA GUIMARAES", "desc": "comissao dos fretes de sorrizo e retorno", "v": 4000.0}, {"id": 59, "data": "25/09/2026", "hora": "18:52", "nome": "IGOR NIQUELINOS SILVANO", "desc": "ajuda te de tampa do SEV", "v": 250.0}, {"id": 60, "data": "25/09/2026", "hora": "16:59", "nome": "Eustáquio José de Souza", "desc": "mecanico SEZ", "v": 300.0}, {"id": 61, "data": "25/09/2026", "hora": "16:54", "nome": "AUTO CARGAS", "desc": "", "v": 10902.06}, {"id": 62, "data": "25/09/2026", "hora": "16:12", "nome": "Celso Storck Hoff", "desc": "manutenção gjp e fqa", "v": 1815.0}, {"id": 63, "data": "25/09/2026", "hora": "13:59", "nome": "AUTO POSTO REDENTOR LTDA", "desc": "abastecimento rfx", "v": 4294.69}, {"id": 64, "data": "25/09/2026", "hora": "13:05", "nome": "IGOR NIQUELINOS SILVANO", "desc": "uber dos meninos para carregar a tampa", "v": 50.0}, {"id": 65, "data": "25/09/2026", "hora": "07:48", "nome": "AUTO POSTO CARGA PESADA DO GUARUJA LTDA", "desc": "abastecimento rme", "v": 4018.37}, {"id": 66, "data": "24/09/2026", "hora": "14:33", "nome": "POSTO LABAREDA LTDA", "desc": "PGTO POSTO LABAREDA NF 5565", "v": 10000.0}, {"id": 67, "data": "24/09/2026", "hora": "11:03", "nome": "Erik Batista Aparecido Costa", "desc": "manutencao de rodas carretas EVU", "v": 1550.0}, {"id": 68, "data": "23/09/2026", "hora": "21:58", "nome": "ISRAEL VIEIRA DA SILVA", "desc": "passagem motorista rfx", "v": 120.0}, {"id": 69, "data": "23/09/2026", "hora": "20:23", "nome": "FELIPE RODRIGUES DAVI", "desc": "pagamento para abater o que deve o juan", "v": 5000.0}, {"id": 70, "data": "23/09/2026", "hora": "19:37", "nome": "Saqpay", "desc": "abastecimento SEV", "v": 2809.98}, {"id": 71, "data": "23/09/2026", "hora": "19:16", "nome": "BSOFT INTERNETWORKS", "desc": "", "v": 1719.02}, {"id": 72, "data": "23/09/2026", "hora": "19:16", "nome": "LOBINHO ACESSORIOS", "desc": "R e S ACESSORIOS AUTOMOTIVOS L NF 5143 PARCELA PLACA SEV6G75", "v": 465.0}, {"id": 73, "data": "23/09/2026", "hora": "19:16", "nome": "LOBINHO ACESSORIOS", "desc": "R e S ACESSORIOS AUTOMOTIVOS L NF 5144 PARCELA PLACA SYR4H04", "v": 333.0}, {"id": 74, "data": "23/09/2026", "hora": "19:16", "nome": "LOBINHO ACESSORIOS", "desc": "R e S ACESSORIOS AUTOMOTIVOS L NF 5127A PLACA CU", "v": 447.0}, {"id": 75, "data": "23/09/2026", "hora": "19:16", "nome": "LOBINHO ACESSORIOS", "desc": "R e S ACESSORIOS AUTOMOTIVOS L NF 5145 1 PARCELA PLACA QPM7278", "v": 1020.0}, {"id": 76, "data": "23/09/2026", "hora": "19:16", "nome": "LOBINHO ACESSORIOS", "desc": "R e S ACESSORIOS AUTOMOTIVOS L NF 5112A PLACA SIO", "v": 320.0}, {"id": 77, "data": "23/09/2026", "hora": "18:18", "nome": "KR ACESSORIOS", "desc": "peca Sev", "v": 129.0}, {"id": 78, "data": "23/09/2026", "hora": "14:10", "nome": "Saqpay", "desc": "abastecimentos rme", "v": 4354.76}, {"id": 79, "data": "23/09/2026", "hora": "11:13", "nome": "João Cavalheiro Filho", "desc": "PGTO REFERENTE A COMISSAO DO CTE 424 THATO", "v": 690.0}, {"id": 80, "data": "23/09/2026", "hora": "11:13", "nome": "Douglas Gregorio De Assis Junior", "desc": "PGTO COMISSAO REFERENTE AO CTE 424 THATO", "v": 2000.0}, {"id": 81, "data": "23/09/2026", "hora": "09:45", "nome": "AUTO MECANICA BRITO", "desc": "manutencao RFX", "v": 1170.0}, {"id": 82, "data": "23/09/2026", "hora": "08:38", "nome": "Saqpay", "desc": "abastecimento Syr", "v": 3647.2}, {"id": 83, "data": "22/09/2026", "hora": "20:07", "nome": "POSTO ALDO", "desc": "abastecimento tcf", "v": 2984.78}, {"id": 84, "data": "22/09/2026", "hora": "19:24", "nome": "JUAN CARLOS TRINDADE", "desc": "", "v": 12000.0}, {"id": 85, "data": "22/09/2026", "hora": "16:59", "nome": "Roberto Ferreira de Souza", "desc": "", "v": 3000.0}, {"id": 86, "data": "21/09/2026", "hora": "19:39", "nome": "KR ACESSORIOS", "desc": "eletricista e retrovisor rfx", "v": 659.0}, {"id": 87, "data": "21/09/2026", "hora": "18:21", "nome": "SERGIO DA SILVA FERREIRA", "desc": "ADT PAGAMENTO MOTORISTA SERGIO", "v": 3000.0}, {"id": 88, "data": "21/09/2026", "hora": "18:21", "nome": "WELLINGTON MOREIRA DOS SANTOS", "desc": "VIRA DE CONTAINER DOS MOTORISTAS JOAO, ROBERTO, SERGIO, WILLIAN", "v": 850.0}, {"id": 89, "data": "21/09/2026", "hora": "18:21", "nome": "WELLINGTON MOREIRA DOS SANTOS", "desc": "PAGAMENTO PRESTADOR DE SERVIÇO PROGRAMADOR WELLIGTON DIF DE SALARIO", "v": 1200.0}, {"id": 90, "data": "21/09/2026", "hora": "18:21", "nome": "GILSON ALVES DA SILVA", "desc": "ADT PAGAMENTO MOTORISTA Gilson Alves Da Silva", "v": 3000.0}, {"id": 91, "data": "21/09/2026", "hora": "18:21", "nome": "JOAO BATISTA COELHO", "desc": "ADT PAGAMENTO MOTORISTA JOAO BATISTA COELHO", "v": 3000.0}, {"id": 92, "data": "21/09/2026", "hora": "18:21", "nome": "WALLISSON TAMIETTI DE SIQUEIRA", "desc": "ADT PAGAMENTO MOTORISTA WALLISSON", "v": 3000.0}, {"id": 93, "data": "21/09/2026", "hora": "18:21", "nome": "ISRAEL VIEIRA DA SILVA", "desc": "ADT PAGAMENTO MOTORISTA ISRAEL", "v": 3000.0}, {"id": 94, "data": "21/09/2026", "hora": "18:21", "nome": "Ruan Augusto Corrêa Teodoro da Silva", "desc": "ADT PAGAMENTO MOTORISTA RUAN", "v": 3000.0}, {"id": 95, "data": "21/09/2026", "hora": "16:24", "nome": "KR PECAS E ACESSORIOS LTDA", "desc": "eletricista TCF", "v": 179.0}, {"id": 96, "data": "21/09/2026", "hora": "16:22", "nome": "KR PECAS E ACESSORIOS LTDA", "desc": "eleteicista SEV", "v": 220.0}, {"id": 97, "data": "21/09/2026", "hora": "16:04", "nome": "JOAO BATISTA COELHO", "desc": "uniforme motorista joao SEV", "v": 50.0}, {"id": 98, "data": "21/09/2026", "hora": "14:55", "nome": "Saqpay", "desc": "abastecimento SEV", "v": 5220.25}, {"id": 99, "data": "21/09/2026", "hora": "09:50", "nome": "ORNELAS RESENDE TORRES TRANSPORTE E LOGISTICA", "desc": "preatacao do SYR", "v": 25264.09}, {"id": 100, "data": "21/09/2026", "hora": "08:43", "nome": "PRIME ASSESSORIA AUTOMOBILISTI", "desc": "documentos da carrwta EVU", "v": 695.0}, {"id": 101, "data": "20/09/2026", "hora": "15:15", "nome": "Saqpay", "desc": "abastecimento rme", "v": 2845.57}, {"id": 102, "data": "19/09/2026", "hora": "20:06", "nome": "AUTO POSTO VIADUTO LTDA", "desc": "abastecimento tcf", "v": 2542.63}, {"id": 103, "data": "19/09/2026", "hora": "14:10", "nome": "AUTO PECAS VASCONCELOS", "desc": "bobina rme", "v": 62.0}, {"id": 104, "data": "19/09/2026", "hora": "10:58", "nome": "ANDRE TADEU PEREIRA DA SILVA", "desc": "vale motorista andre", "v": 1000.0}, {"id": 105, "data": "18/09/2026", "hora": "20:08", "nome": "TRUCKPAG MEIOS DE PAGAMENTO S/A", "desc": "TRUCK PAG ABASTECIMENTO fatura 2968115 PARCELA 2", "v": 25001.16}, {"id": 106, "data": "18/09/2026", "hora": "14:22", "nome": "Saqpay", "desc": "abastecimento rme", "v": 2454.08}, {"id": 107, "data": "18/09/2026", "hora": "13:07", "nome": "AUTO POSTO VIADUTO LTDA", "desc": "abastecimento TCF", "v": 3395.0}, {"id": 108, "data": "17/09/2026", "hora": "18:58", "nome": "LEONARDO SILVA CORREIA", "desc": "acerto leo syr", "v": 4212.67}, {"id": 109, "data": "17/09/2026", "hora": "18:55", "nome": "AUTO PECAS VASCONCELOS", "desc": "rfx", "v": 55.0}, {"id": 110, "data": "17/09/2026", "hora": "14:51", "nome": "AUTO POSTO REDENTOR LTDA", "desc": "abastecimento SEV", "v": 3428.81}, {"id": 111, "data": "17/09/2026", "hora": "10:35", "nome": "AUTO POSTO NEW ANCHIETA LTDA", "desc": "abastecimento SYR", "v": 1722.96}, {"id": 112, "data": "17/09/2026", "hora": "10:26", "nome": "DEPOSITO DO ALEMAO", "desc": "desingripante rfx", "v": 30.0}, {"id": 113, "data": "16/09/2026", "hora": "20:30", "nome": "POSTO COMETA", "desc": "abastecimento SEZ", "v": 3555.12}, {"id": 114, "data": "16/09/2026", "hora": "19:44", "nome": "Roberto Ferreira de Souza", "desc": "PAGAMENTO MOTORISTA ROBERTO DIFERENÇA 3 DIAS", "v": 210.0}, {"id": 115, "data": "16/09/2026", "hora": "19:05", "nome": "HENRIQUE MIGUEL DE SOUSA", "desc": "solda carreta FLQ0363", "v": 1000.0}, {"id": 116, "data": "16/09/2026", "hora": "17:16", "nome": "Leandro Simões Alves", "desc": "borracheira SEV", "v": 140.0}, {"id": 117, "data": "15/09/2026", "hora": "21:41", "nome": "Saqpay", "desc": "abastecimento RME", "v": 4553.4}, {"id": 118, "data": "15/09/2026", "hora": "19:49", "nome": "AUTO POSTO REDENTOR LTDA", "desc": "abastecimento rfx", "v": 4609.03}, {"id": 119, "data": "15/09/2026", "hora": "19:38", "nome": "João Cavalheiro Filho", "desc": "comissao tratto", "v": 690.0}, {"id": 120, "data": "15/09/2026", "hora": "16:51", "nome": "LAIS DA COSTA NEVES", "desc": "PAGAMENTO PRESTADOR DE SERVIÇO COMERCIAL LAIS COMERCIAL XCMG", "v": 2046.0}, {"id": 121, "data": "15/09/2026", "hora": "16:51", "nome": "JOSE ANTONIO VIEIRA DE MORAES", "desc": "ALUGUEL DE CARRETA RFX PAGAMENTO MENSAL", "v": 6000.0}, {"id": 122, "data": "15/09/2026", "hora": "14:33", "nome": "Maria Gildete Da Silva", "desc": "manutencao carreta SIO", "v": 300.0}, {"id": 123, "data": "15/09/2026", "hora": "13:43", "nome": "WELLINGTON MOREIRA DOS SANTOS", "desc": "antecipacao dos canteiners SEV,SEZ E RFX", "v": 500.0}, {"id": 124, "data": "15/09/2026", "hora": "12:06", "nome": "LECHMAN TERMINAIS", "desc": "antecipacao SEZ", "v": 100.0}, {"id": 125, "data": "15/09/2026", "hora": "11:38", "nome": "CLAUDIA SOCORRO DO CARMO PEREIRA", "desc": "Alinhamento caretas FQL0363 FQM4596", "v": 720.0}, {"id": 126, "data": "15/09/2026", "hora": "11:36", "nome": "EDILEIDE FERREIRA DE OLIVEIRA", "desc": "uniforme para dividir nas placas RME E RFX", "v": 380.0}, {"id": 127, "data": "15/09/2026", "hora": "10:54", "nome": "MOVECTA", "desc": "no show SYR", "v": 700.0}, {"id": 128, "data": "14/09/2026", "hora": "19:24", "nome": "Izabela Carvalho Tunnes", "desc": "folha RME", "v": 45.0}, {"id": 129, "data": "14/09/2026", "hora": "18:57", "nome": "MM COMPANY PARTICIPACOES LTDA", "desc": "PRESTAÇÃO VOLVO FH POZ 3 de 21 Mm Company Participacoes Ltda", "v": 30000.0}, {"id": 130, "data": "14/09/2026", "hora": "15:53", "nome": "Osmar Fabiano Souza", "desc": "embuchamento todas placas IRC", "v": 590.0}, {"id": 131, "data": "14/09/2026", "hora": "15:37", "nome": "DENIS MACRAU MARQUES", "desc": "tapete SEV", "v": 237.0}, {"id": 132, "data": "14/09/2026", "hora": "15:05", "nome": "Saqpay", "desc": "abatecimento SEV", "v": 4700.14}, {"id": 133, "data": "14/09/2026", "hora": "13:22", "nome": "Leandro Simões Alves", "desc": "calibragem SEZ", "v": 100.0}, {"id": 134, "data": "14/09/2026", "hora": "10:35", "nome": "EDENILSON DONIZETTI DE SOUZA", "desc": "peca da caixa POZ", "v": 2200.0}, {"id": 135, "data": "14/09/2026", "hora": "10:29", "nome": "THIAGO PARREIRAS GADONI", "desc": "pneu poz", "v": 9600.0}, {"id": 136, "data": "12/09/2026", "hora": "21:26", "nome": "Saqpay", "desc": "abastecimento SEZ", "v": 4065.1}, {"id": 137, "data": "12/09/2026", "hora": "17:54", "nome": "WENDER NELSON LIMA RIBEIRO", "desc": "guincho mais ajudante", "v": 600.0}, {"id": 138, "data": "12/09/2026", "hora": "10:41", "nome": "Izabela Carvalho Tunnes", "desc": "xerox rfx", "v": 6.0}, {"id": 139, "data": "12/09/2026", "hora": "10:35", "nome": "Celso Storck Hoff", "desc": "mangueira SEZ", "v": 100.0}, {"id": 140, "data": "12/09/2026", "hora": "10:19", "nome": "Celso Storck Hoff", "desc": "tinta para pintar a carreta das duas carreta asx", "v": 252.0}, {"id": 141, "data": "12/09/2026", "hora": "10:17", "nome": "Celso Storck Hoff", "desc": "mangueira SEZ", "v": 170.0}, {"id": 142, "data": "12/09/2026", "hora": "10:14", "nome": "Lucas Bezerra da Silva", "desc": "antecipacao do terminal SEV", "v": 250.0}, {"id": 143, "data": "11/09/2026", "hora": "21:05", "nome": "WENDER NELSON LIMA RIBEIRO", "desc": "dividir em todas placas", "v": 200.0}, {"id": 144, "data": "11/09/2026", "hora": "19:49", "nome": "OPCAO 1 PECAS", "desc": "peca rfx", "v": 42.5}, {"id": 145, "data": "11/09/2026", "hora": "19:34", "nome": "RODOPOSTO MAIRIPORA LTDA", "desc": "abatecimento TCF", "v": 3526.43}, {"id": 146, "data": "11/09/2026", "hora": "17:12", "nome": "AUTO ELETRICO CRUZ DE MALTA LTDA", "desc": "lanterna rfx", "v": 78.0}, {"id": 147, "data": "11/09/2026", "hora": "17:09", "nome": "ERIK BATISTA APARECIDO COSTA", "desc": "serralheiro placa 30M SIO", "v": 200.0}, {"id": 148, "data": "11/09/2026", "hora": "16:52", "nome": "WALLISSON TAMIETTI DE SIQUEIRA", "desc": "PAGAMENTO MOTORISTA WALLISSON DIFERENÇA DE COMISSÃO", "v": 390.0}, {"id": 149, "data": "11/09/2026", "hora": "16:52", "nome": "GILMAR DE SA", "desc": "SD REFERENTE AO CTE 424 CLIENTE THATO PAGAMENTO", "v": 5100.0}, {"id": 150, "data": "11/09/2026", "hora": "15:54", "nome": "TRUCKPAG MEIOS DE PAGAMENTO S/A", "desc": "TRUCK PAG ABASTECIMENTO fatura 2968115 PARCELA 1", "v": 5000.0}, {"id": 151, "data": "11/09/2026", "hora": "15:40", "nome": "WENDER NELSON LIMA RIBEIRO", "desc": "ajudante dividir para todos caminhoes", "v": 100.0}, {"id": 152, "data": "10/09/2026", "hora": "21:57", "nome": "RODOPOSTO MAIRIPORA LTDA", "desc": "abastecimento qpm", "v": 3951.85}, {"id": 153, "data": "10/09/2026", "hora": "19:56", "nome": "Ruan Augusto Corrêa Teodoro da Silva", "desc": "diezel QPM", "v": 749.0}, {"id": 154, "data": "10/09/2026", "hora": "19:55", "nome": "NU GALHO", "desc": "devolucao de emprestimo", "v": 1500.0}, {"id": 155, "data": "10/09/2026", "hora": "19:51", "nome": "NU GALHO", "desc": "devolucao de emprestimo", "v": 6800.0}, {"id": 156, "data": "10/09/2026", "hora": "19:46", "nome": "NU GALHO", "desc": "devolucao de empréstimo", "v": 13400.0}, {"id": 157, "data": "10/09/2026", "hora": "19:44", "nome": "JUAN CARLOS TRINDADE", "desc": "devolucao de emprestimo", "v": 4500.0}, {"id": 158, "data": "10/09/2026", "hora": "19:10", "nome": "Roberto Ferreira de Souza", "desc": "vale Roberto motorista", "v": 300.0}, {"id": 159, "data": "10/09/2026", "hora": "19:03", "nome": "Roberto Ferreira de Souza", "desc": "despesa transporte RME", "v": 100.0}, {"id": 160, "data": "10/09/2026", "hora": "16:35", "nome": "ELIAS DOS SANTOS MORAES", "desc": "mangueira RME", "v": 270.0}, {"id": 161, "data": "10/09/2026", "hora": "16:32", "nome": "AUTO ELETRICO CRUZ DE MALTA LTDA", "desc": "eletrica engate da carreta rfx", "v": 751.62}, {"id": 162, "data": "10/09/2026", "hora": "15:33", "nome": "ESTADO DE RONDONIA", "desc": "agregado tratto", "v": 3840.0}, {"id": 163, "data": "10/09/2026", "hora": "15:02", "nome": "DONORTE EQUIPADORA LTDA", "desc": "corote SEZ", "v": 120.0}, {"id": 164, "data": "10/09/2026", "hora": "12:15", "nome": "E-FRETE", "desc": "", "v": 1294.0}, {"id": 165, "data": "10/09/2026", "hora": "10:38", "nome": "ROGERIO SIDNEI CANALLI", "desc": "descida serra SEZ", "v": 350.0}, {"id": 166, "data": "09/09/2026", "hora": "23:12", "nome": "JOAO BATISTA COELHO", "desc": "abastecimento SEZ", "v": 3913.52}, {"id": 167, "data": "09/09/2026", "hora": "21:06", "nome": "Ruan Augusto Corrêa Teodoro da Silva", "desc": "vale ruan", "v": 1800.0}, {"id": 168, "data": "09/09/2026", "hora": "21:03", "nome": "JOSE ANTONIO VIEIRA DE MORAES", "desc": "ALUGUEL DE CARRETA QPM PAGAMENTO MENSAL", "v": 6000.0}, {"id": 169, "data": "09/09/2026", "hora": "11:51", "nome": "ORNELAS COMERCIO E IMPORTACAO", "desc": "PGTO ORNELAS COMERCIO E IMPORTACAO LTDA PNEU NF 1188 3 PARCELAS", "v": 12711.84}, {"id": 170, "data": "08/09/2026", "hora": "20:35", "nome": "JOAO BATISTA COELHO", "desc": "multa atraso de containers SEZ", "v": 280.0}, {"id": 171, "data": "05/09/2026", "hora": "21:54", "nome": "LEONARDO SILVA CORREIA", "desc": "PAGAMENTO MOTORISTA Motorista LEONARDO", "v": 2448.23}, {"id": 172, "data": "05/09/2026", "hora": "21:54", "nome": "GILSON ALVES DA SILVA", "desc": "PAGAMENTO MOTORISTA Motorista GILSON", "v": 2448.23}, {"id": 173, "data": "05/09/2026", "hora": "21:54", "nome": "WALLISSON TAMIETTI DE SIQUEIRA", "desc": "PAGAMENTO MOTORISTA Motorista WALLISSON", "v": 2104.23}, {"id": 174, "data": "05/09/2026", "hora": "21:54", "nome": "JOAO BATISTA COELHO", "desc": "PAGAMENTO MOTORISTA Motorista JOAO BATISTA", "v": 2124.23}, {"id": 175, "data": "05/09/2026", "hora": "21:54", "nome": "ISRAEL VIEIRA DA SILVA", "desc": "PAGAMENTO MOTORISTA Motorista ISRAEL", "v": 2052.09}, {"id": 176, "data": "05/09/2026", "hora": "21:54", "nome": "Ruan Augusto Corrêa Teodoro da Silva", "desc": "PAGAMENTO MOTORISTA Motorista RUAN", "v": 1836.47}, {"id": 177, "data": "05/09/2026", "hora": "21:54", "nome": "Roberto Ferreira de Souza", "desc": "PAGAMENTO MOTORISTA Motorista ROBERTO", "v": 739.69}, {"id": 178, "data": "05/09/2026", "hora": "18:35", "nome": "SERGIO DA SILVA FERREIRA", "desc": "pagamento sergio tcf", "v": 2448.23}, {"id": 179, "data": "05/09/2026", "hora": "15:06", "nome": "SAQPAY", "desc": "", "v": 3231.41}, {"id": 180, "data": "05/09/2026", "hora": "14:13", "nome": "William De Souza Gomes", "desc": "borracharia RME", "v": 100.0}, {"id": 181, "data": "05/09/2026", "hora": "12:47", "nome": "SAQPAY", "desc": "", "v": 2032.62}, {"id": 182, "data": "05/09/2026", "hora": "11:59", "nome": "SAQPAY", "desc": "", "v": 1429.97}, {"id": 183, "data": "04/09/2026", "hora": "18:04", "nome": "WALLISSON TAMIETTI DE SIQUEIRA", "desc": "PAGAMENTO MOTORISTA Motorista WALLISSON", "v": 1927.77}, {"id": 184, "data": "04/09/2026", "hora": "18:04", "nome": "SERGIO DA SILVA FERREIRA", "desc": "PAGAMENTO MOTORISTA Motorista SERGIO", "v": 5574.89}, {"id": 185, "data": "04/09/2026", "hora": "18:04", "nome": "JOAO BATISTA COELHO", "desc": "PAGAMENTO MOTORISTA Motorista JOAO BATISTA", "v": 2950.8}, {"id": 186, "data": "04/09/2026", "hora": "18:04", "nome": "MARCOS VINICIUS MAGALHAES MATTOS", "desc": "PAGAMENTO PRESTADOR DE SERVIÇO EMISSOR Marcos Vinicios NF", "v": 2500.0}, {"id": 187, "data": "04/09/2026", "hora": "18:04", "nome": "LEONARDO SILVA CORREIA", "desc": "PAGAMENTO MOTORISTA Motorista LEONARDO", "v": 6426.58}, {"id": 188, "data": "04/09/2026", "hora": "18:04", "nome": "WELLINGTON MOREIRA DOS SANTOS", "desc": "PAGAMENTO PRESTADOR DE SERVIÇO PROGRAMADOR WELLIGTON", "v": 3800.0}, {"id": 189, "data": "04/09/2026", "hora": "18:04", "nome": "Ruan Augusto Corrêa Teodoro da Silva", "desc": "PAGAMENTO MOTORISTA Motorista RUAN", "v": 4301.83}, {"id": 190, "data": "04/09/2026", "hora": "18:04", "nome": "GILSON ALVES DA SILVA", "desc": "PAGAMENTO MOTORISTA Motorista GILSON", "v": 5911.97}, {"id": 191, "data": "04/09/2026", "hora": "18:04", "nome": "FLASH APP", "desc": "", "v": 1350.0}, {"id": 192, "data": "04/09/2026", "hora": "18:04", "nome": "Samuel Moreira De Lima", "desc": "PAGAMENTO PRESTADOR DE SERVIÇO COMERCIAL SAMUEL VENTANA", "v": 4270.91}, {"id": 193, "data": "04/09/2026", "hora": "18:04", "nome": "Veridiana Antunes Moura", "desc": "PAGAMENTO FUNCIONARIO FINANCEIRO VERIDIANA ANTUNES", "v": 4500.0}, {"id": 194, "data": "04/09/2026", "hora": "18:04", "nome": "ISRAEL VIEIRA DA SILVA", "desc": "PAGAMENTO MOTORISTA Motorista ISRAEL", "v": 3136.33}, {"id": 195, "data": "04/09/2026", "hora": "18:04", "nome": "ROYAL ASSESSORIA", "desc": "PAGAMENTO PRESTADOR DE SERVIÇO COMERCIAL ROYAL ACESSORIAS JOABSON XCMG", "v": 1395.0}, {"id": 196, "data": "04/09/2026", "hora": "18:04", "nome": "Roberto Ferreira de Souza", "desc": "PAGAMENTO MOTORISTA Motorista ROBERTO", "v": 445.43}, {"id": 197, "data": "04/09/2026", "hora": "12:50", "nome": "RODOPOSTO BANDEIRANTES 81 LTDA", "desc": "RFX abastecimento", "v": 4845.84}, {"id": 198, "data": "04/09/2026", "hora": "11:57", "nome": "CASA SIMOES", "desc": "lona SEV E RME", "v": 431.8}, {"id": 199, "data": "04/09/2026", "hora": "10:45", "nome": "Celso Storck Hoff", "desc": "cintas para carregamento SEV,RME e SEV", "v": 2180.0}, {"id": 200, "data": "03/09/2026", "hora": "18:45", "nome": "SAQPAY", "desc": "", "v": 3917.53}, {"id": 201, "data": "03/09/2026", "hora": "16:17", "nome": "CAMPEAO 38", "desc": "abastecimento rfx", "v": 1434.15}, {"id": 202, "data": "03/09/2026", "hora": "14:20", "nome": "LAERCIO LAUREANO DE SOUZA", "desc": "calibragem rfx,sio e evo", "v": 120.0}, {"id": 203, "data": "03/09/2026", "hora": "13:39", "nome": "SILPA PECAS E EQUIPAMENTOS LTDA", "desc": "colocar gastos para todos cavalos", "v": 4473.5}, {"id": 204, "data": "03/09/2026", "hora": "13:36", "nome": "MN LOCACAO DE MAQUINAS E EQUIPAMENTOS LTDA", "desc": "parafuso POZ", "v": 100.0}, {"id": 205, "data": "03/09/2026", "hora": "13:28", "nome": "TRANS CARRIER", "desc": "aluguel das duas carretas CUA", "v": 5000.0}, {"id": 206, "data": "03/09/2026", "hora": "12:52", "nome": "HENRIQUE MIGUEL DE SOUSA", "desc": "solda carreta axs7g23", "v": 250.0}, {"id": 207, "data": "03/09/2026", "hora": "10:47", "nome": "GILMAR DE SA", "desc": "adiantamento agregado tratto", "v": 11900.0}, {"id": 208, "data": "03/09/2026", "hora": "07:03", "nome": "ERIK BATISTA APARECIDO COSTA", "desc": "solda carreta irc", "v": 500.0}, {"id": 209, "data": "02/09/2026", "hora": "20:48", "nome": "ESTADO DE RONDONIA", "desc": "ICMS TRATTO", "v": 3840.0}, {"id": 210, "data": "02/09/2026", "hora": "17:37", "nome": "Marinho da Cruz Sousa", "desc": "eletricista SEV", "v": 178.0}, {"id": 211, "data": "02/09/2026", "hora": "16:01", "nome": "POSTO DE MOLAS BAIDEK", "desc": "molas TCF", "v": 1500.0}, {"id": 212, "data": "02/09/2026", "hora": "15:09", "nome": "MAIS SOLUCOES LOGISTICA LTDA", "desc": "abastecimento e sem parar pago pela mais TCF", "v": 13456.47}, {"id": 213, "data": "02/09/2026", "hora": "14:11", "nome": "DIEGO LIMA NASCIMENTO GOMES", "desc": "borracharia SYR", "v": 200.0}, {"id": 214, "data": "02/09/2026", "hora": "10:11", "nome": "JUAN CARLOS TRINDADE", "desc": "", "v": 15000.0}, {"id": 215, "data": "01/09/2026", "hora": "17:50", "nome": "MOISES SERGEL", "desc": "SD REFERENTE AO CTE 416 THATO MOISES", "v": 5100.0}, {"id": 216, "data": "01/09/2026", "hora": "17:31", "nome": "E-FRETE", "desc": "frete tratto pedagio", "v": 1294.9}, {"id": 217, "data": "01/09/2026", "hora": "17:29", "nome": "Izabela Carvalho Tunnes", "desc": "", "v": 18.0}, {"id": 218, "data": "01/09/2026", "hora": "14:16", "nome": "Marcos Vinicius Magalhaes Mattos", "desc": "", "v": 40.8}];
+const CONJ = [{"cav": "POZ", "placa": "POZ-6F28", "carretas": ["FQA-4231", "GJP-6400"], "motorista": "Giovanni dos Santos Godinho", "nomes": ["GIOVANNI", "GEOVANE", "GIOVANI"]}, {"cav": "QPM", "placa": "QPM-7278", "carretas": ["FQF-6321", "FQI-8702"], "motorista": "Flávio Gomes de Almeida", "nomes": ["FLAVIO"]}, {"cav": "RFX", "placa": "RFX-4H06", "carretas": ["EVO-4633", "SIO-8E70"], "motorista": "Israel Vieira da Silva", "nomes": ["ISRAEL"]}, {"cav": "RME", "placa": "RME-9B20", "carretas": ["EVU-9E78", "EVU-9E79", "EVU-9E80"], "motorista": "Roberto Ferreira de Souza", "nomes": ["ROBERTO"]}, {"cav": "SEV", "placa": "SEV-6G75", "carretas": ["FQM-4596", "FQL-0363"], "motorista": "Sérgio da Silva Ferreira", "nomes": ["SERGIO"]}, {"cav": "SEZ", "placa": "SEZ-8G61", "carretas": ["IRC-3A85", "IRC-3B39", "IRC-3B07"], "motorista": "João Batista Coelho", "nomes": ["JOAO BATISTA"]}, {"cav": "SYR", "placa": "SYR-4H04", "carretas": ["ASW-4C92", "ASW-4C94"], "motorista": "Gilson Alves da Silva", "nomes": ["GILSON"]}, {"cav": "TCF", "placa": "TCF-1D34", "carretas": ["ASX-7G23", "ASX-7G22"], "motorista": "Wallisson Tamietti de Siqueira", "nomes": ["WALLISSON"]}];  // [{cav, placa, carretas:[...], motorista, nomes:[...]}]
+const INICIAL = {"2": {"partes": [{"k": "RME", "v": 1670.0}], "auto": "placa RME"}, "10": {"partes": [{"k": "POZ", "v": 3001.66}], "auto": "placa POZ"}, "11": {"partes": [{"k": "TCF", "v": 1134.75}], "auto": "placa TCF"}, "12": {"partes": [{"k": "RFX", "v": 1833.33}], "auto": "placa RFX"}, "13": {"partes": [{"k": "POZ", "v": 560.0}], "auto": "placa POZ"}, "14": {"partes": [{"k": "FQA", "v": 520.0}], "auto": "placa FQA"}, "15": {"partes": [{"k": "QPM", "v": 140.0}], "auto": "placa QPM"}, "18": {"partes": [{"k": "EVU", "v": 70.0}], "auto": "placa EVU"}, "20": {"partes": [{"k": "SEZ", "v": 120.0}], "auto": "placa SEZ"}, "21": {"partes": [{"k": "SEV", "v": 3280.0}], "auto": "placa SEV"}, "23": {"partes": [{"k": "SEZ", "v": 1500.0}], "auto": "placa SEZ"}, "24": {"partes": [{"k": "POZ", "v": 500.0}], "auto": "placa POZ"}, "26": {"partes": [{"k": "POZ", "v": 6.0}], "auto": "placa POZ"}, "27": {"partes": [{"k": "RME", "v": 6.0}], "auto": "placa RME"}, "28": {"partes": [{"k": "RFX", "v": 2712.72}], "auto": "placa RFX"}, "29": {"partes": [{"k": "SYR", "v": 3791.52}], "auto": "placa SYR"}, "31": {"partes": [{"k": "POZ", "v": 20.0}], "auto": "placa POZ"}, "32": {"partes": [{"k": "POZ", "v": 145.0}], "auto": "placa POZ"}, "33": {"partes": [{"k": "EVU", "v": 210.0}], "auto": "placa EVU"}, "37": {"partes": [{"k": "SIO", "v": 6000.0}], "auto": "placa SIO"}, "38": {"partes": [{"k": "FQM", "v": 1438.33}], "auto": "placa FQM"}, "39": {"partes": [{"k": "RFX", "v": 3234.2}], "auto": "placa RFX"}, "40": {"partes": [{"k": "FQA", "v": 80.0}], "auto": "placa FQA"}, "41": {"partes": [{"k": "ASW", "v": 70.0}], "auto": "placa ASW"}, "42": {"partes": [{"k": "SYR", "v": 2500.0}], "auto": "placa SYR"}, "44": {"partes": [{"k": "SEV", "v": 3786.56}], "auto": "placa SEV"}, "45": {"partes": [{"k": "TCF", "v": 2756.0}], "auto": "placa TCF"}, "46": {"partes": [{"k": "RME", "v": 35.0}], "auto": "placa RME"}, "47": {"partes": [{"k": "RFX", "v": 250.0}], "auto": "placa RFX"}, "49": {"partes": [{"k": "GJP", "v": 245.0}], "auto": "placa GJP/FQA"}, "50": {"partes": [{"k": "POZ", "v": 500.0}], "auto": "placa POZ"}, "51": {"partes": [{"k": "POZ", "v": 500.0}], "auto": "placa POZ"}, "52": {"partes": [{"k": "SEV", "v": 150.0}], "auto": "placa SEV"}, "56": {"partes": [{"k": "TCF", "v": 3107.94}], "auto": "placa TCF"}, "57": {"partes": [{"k": "SYR", "v": 2444.6}], "auto": "placa SYR"}, "59": {"partes": [{"k": "SEV", "v": 250.0}], "auto": "placa SEV"}, "60": {"partes": [{"k": "SEZ", "v": 300.0}], "auto": "placa SEZ"}, "62": {"partes": [{"k": "GJP", "v": 1815.0}], "auto": "placa GJP/FQA"}, "63": {"partes": [{"k": "RFX", "v": 4294.69}], "auto": "placa RFX"}, "65": {"partes": [{"k": "RME", "v": 4018.37}], "auto": "placa RME"}, "67": {"partes": [{"k": "EVU", "v": 1550.0}], "auto": "placa EVU"}, "68": {"partes": [{"k": "RFX", "v": 120.0}], "auto": "placa RFX"}, "70": {"partes": [{"k": "SEV", "v": 2809.98}], "auto": "placa SEV"}, "72": {"partes": [{"k": "SEV", "v": 465.0}], "auto": "placa SEV"}, "73": {"partes": [{"k": "SYR", "v": 333.0}], "auto": "placa SYR"}, "74": {"partes": [], "nota": "Placa CUA no extrato: carreta sem conjunto definido — escolha o cavalo"}, "75": {"partes": [{"k": "QPM", "v": 1020.0}], "auto": "placa QPM"}, "76": {"partes": [{"k": "SIO", "v": 320.0}], "auto": "placa SIO"}, "77": {"partes": [{"k": "SEV", "v": 129.0}], "auto": "placa SEV"}, "78": {"partes": [{"k": "RME", "v": 4354.76}], "auto": "placa RME"}, "81": {"partes": [{"k": "RFX", "v": 1170.0}], "auto": "placa RFX"}, "82": {"partes": [{"k": "SYR", "v": 3647.2}], "auto": "placa SYR"}, "83": {"partes": [{"k": "TCF", "v": 2984.78}], "auto": "placa TCF"}, "86": {"partes": [{"k": "RFX", "v": 659.0}], "auto": "placa RFX"}, "95": {"partes": [{"k": "TCF", "v": 179.0}], "auto": "placa TCF"}, "96": {"partes": [{"k": "SEV", "v": 220.0}], "auto": "placa SEV"}, "97": {"partes": [{"k": "SEV", "v": 50.0}], "auto": "placa SEV"}, "98": {"partes": [{"k": "SEV", "v": 5220.25}], "auto": "placa SEV"}, "99": {"partes": [{"k": "SYR", "v": 25264.09}], "auto": "placa SYR"}, "100": {"partes": [{"k": "EVU", "v": 695.0}], "auto": "placa EVU"}, "101": {"partes": [{"k": "RME", "v": 2845.57}], "auto": "placa RME"}, "102": {"partes": [{"k": "TCF", "v": 2542.63}], "auto": "placa TCF"}, "103": {"partes": [{"k": "RME", "v": 62.0}], "auto": "placa RME"}, "106": {"partes": [{"k": "RME", "v": 2454.08}], "auto": "placa RME"}, "107": {"partes": [{"k": "TCF", "v": 3395.0}], "auto": "placa TCF"}, "108": {"partes": [{"k": "SYR", "v": 4212.67}], "auto": "placa SYR"}, "109": {"partes": [{"k": "RFX", "v": 55.0}], "auto": "placa RFX"}, "110": {"partes": [{"k": "SEV", "v": 3428.81}], "auto": "placa SEV"}, "111": {"partes": [{"k": "SYR", "v": 1722.96}], "auto": "placa SYR"}, "112": {"partes": [{"k": "RFX", "v": 30.0}], "auto": "placa RFX"}, "113": {"partes": [{"k": "SEZ", "v": 3555.12}], "auto": "placa SEZ"}, "115": {"partes": [{"k": "FQL", "v": 1000.0}], "auto": "placa FQL"}, "116": {"partes": [{"k": "SEV", "v": 140.0}], "auto": "placa SEV"}, "117": {"partes": [{"k": "RME", "v": 4553.4}], "auto": "placa RME"}, "118": {"partes": [{"k": "RFX", "v": 4609.03}], "auto": "placa RFX"}, "121": {"partes": [{"k": "RFX", "v": 6000.0}], "auto": "placa RFX"}, "122": {"partes": [{"k": "SIO", "v": 300.0}], "auto": "placa SIO"}, "123": {"partes": [{"k": "SEV", "v": 166.66}, {"k": "SEZ", "v": 166.66}, {"k": "RFX", "v": 166.68}], "auto": "placas SEV/SEZ/RFX → dividido igual"}, "124": {"partes": [{"k": "SEZ", "v": 100.0}], "auto": "placa SEZ"}, "125": {"partes": [{"k": "FQL", "v": 720.0}], "auto": "placa FQL/FQM"}, "126": {"partes": [{"k": "RME", "v": 190.0}, {"k": "RFX", "v": 190.0}], "auto": "placas RME/RFX → dividido igual"}, "127": {"partes": [{"k": "SYR", "v": 700.0}], "auto": "placa SYR"}, "128": {"partes": [{"k": "RME", "v": 45.0}], "auto": "placa RME"}, "129": {"partes": [{"k": "POZ", "v": 30000.0}], "auto": "placa POZ"}, "130": {"partes": [{"k": "IRC", "v": 590.0}], "auto": "placa IRC"}, "131": {"partes": [{"k": "SEV", "v": 237.0}], "auto": "placa SEV"}, "132": {"partes": [{"k": "SEV", "v": 4700.14}], "auto": "placa SEV"}, "133": {"partes": [{"k": "SEZ", "v": 100.0}], "auto": "placa SEZ"}, "134": {"partes": [{"k": "POZ", "v": 2200.0}], "auto": "placa POZ"}, "135": {"partes": [{"k": "POZ", "v": 9600.0}], "auto": "placa POZ"}, "136": {"partes": [{"k": "SEZ", "v": 4065.1}], "auto": "placa SEZ"}, "138": {"partes": [{"k": "RFX", "v": 6.0}], "auto": "placa RFX"}, "139": {"partes": [{"k": "SEZ", "v": 100.0}], "auto": "placa SEZ"}, "140": {"partes": [{"k": "AXS", "v": 252.0}], "auto": "placa AXS"}, "141": {"partes": [{"k": "SEZ", "v": 170.0}], "auto": "placa SEZ"}, "142": {"partes": [{"k": "SEV", "v": 250.0}], "auto": "placa SEV"}, "143": {"partes": [{"k": "POZ", "v": 25.0}, {"k": "QPM", "v": 25.0}, {"k": "RFX", "v": 25.0}, {"k": "RME", "v": 25.0}, {"k": "SEV", "v": 25.0}, {"k": "SEZ", "v": 25.0}, {"k": "SYR", "v": 25.0}, {"k": "TCF", "v": 25.0}], "auto": "\"todas as placas\" → dividido nos 8"}, "144": {"partes": [{"k": "RFX", "v": 42.5}], "auto": "placa RFX"}, "145": {"partes": [{"k": "TCF", "v": 3526.43}], "auto": "placa TCF"}, "146": {"partes": [{"k": "RFX", "v": 78.0}], "auto": "placa RFX"}, "147": {"partes": [{"k": "SIO", "v": 200.0}], "auto": "placa SIO"}, "151": {"partes": [{"k": "POZ", "v": 12.5}, {"k": "QPM", "v": 12.5}, {"k": "RFX", "v": 12.5}, {"k": "RME", "v": 12.5}, {"k": "SEV", "v": 12.5}, {"k": "SEZ", "v": 12.5}, {"k": "SYR", "v": 12.5}, {"k": "TCF", "v": 12.5}], "auto": "\"todas as placas\" → dividido nos 8"}, "152": {"partes": [{"k": "QPM", "v": 3951.85}], "auto": "placa QPM"}, "153": {"partes": [{"k": "QPM", "v": 749.0}], "auto": "placa QPM"}, "159": {"partes": [{"k": "RME", "v": 100.0}], "auto": "placa RME"}, "160": {"partes": [{"k": "RME", "v": 270.0}], "auto": "placa RME"}, "161": {"partes": [{"k": "RFX", "v": 751.62}], "auto": "placa RFX"}, "163": {"partes": [{"k": "SEZ", "v": 120.0}], "auto": "placa SEZ"}, "165": {"partes": [{"k": "SEZ", "v": 350.0}], "auto": "placa SEZ"}, "166": {"partes": [{"k": "SEZ", "v": 3913.52}], "auto": "placa SEZ"}, "168": {"partes": [{"k": "QPM", "v": 6000.0}], "auto": "placa QPM"}, "170": {"partes": [{"k": "SEZ", "v": 280.0}], "auto": "placa SEZ"}, "178": {"partes": [{"k": "TCF", "v": 2448.23}], "auto": "placa TCF"}, "180": {"partes": [{"k": "RME", "v": 100.0}], "auto": "placa RME"}, "197": {"partes": [{"k": "RFX", "v": 4845.84}], "auto": "placa RFX"}, "198": {"partes": [{"k": "SEV", "v": 215.9}, {"k": "RME", "v": 215.9}], "auto": "placas SEV/RME → dividido igual"}, "199": {"partes": [{"k": "SEV", "v": 1090.0}, {"k": "RME", "v": 1090.0}], "auto": "placas SEV/RME → dividido igual"}, "201": {"partes": [{"k": "RFX", "v": 1434.15}], "auto": "placa RFX"}, "202": {"partes": [{"k": "RFX", "v": 120.0}], "auto": "placa RFX/SIO/EVO"}, "203": {"partes": [{"k": "POZ", "v": 559.18}, {"k": "QPM", "v": 559.18}, {"k": "RFX", "v": 559.18}, {"k": "RME", "v": 559.18}, {"k": "SEV", "v": 559.18}, {"k": "SEZ", "v": 559.18}, {"k": "SYR", "v": 559.18}, {"k": "TCF", "v": 559.24}], "auto": "\"todas as placas\" → dividido nos 8"}, "204": {"partes": [{"k": "POZ", "v": 100.0}], "auto": "placa POZ"}, "205": {"partes": [], "nota": "Placa CUA no extrato: carreta sem conjunto definido — escolha o cavalo"}, "206": {"partes": [{"k": "AXS", "v": 250.0}], "auto": "placa AXS"}, "208": {"partes": [{"k": "IRC", "v": 500.0}], "auto": "placa IRC"}, "210": {"partes": [{"k": "SEV", "v": 178.0}], "auto": "placa SEV"}, "211": {"partes": [{"k": "TCF", "v": 1500.0}], "auto": "placa TCF"}, "212": {"partes": [{"k": "TCF", "v": 13456.47}], "auto": "placa TCF"}, "213": {"partes": [{"k": "SYR", "v": 200.0}], "auto": "placa SYR"}};
+const EXTRATO = {"pagamentos": 691001.97, "nPag": 218, "recebimentos": 689768.3}; // totais do cabeçalho do extrato
+const CORES = ['#2563eb','#059669','#d97706','#dc2626','#7c3aed','#0891b2','#db2777','#65a30d'];
+const EXTRA = {GERAL:{nome:'Geral / empresa',curto:'Geral',cor:'#475569',tecla:'G'}, SOCIO:{nome:'Sócios / proprietários',curto:'Sócios',cor:'#b45309',tecla:'P'}, NAO:{nome:'Não é despesa',cor:'#9ca3af',tecla:'N'}};
+CONJ.forEach((c,i)=>c.cor=CORES[i%CORES.length]);
+const cavDe = {}; CONJ.forEach(c=>{cavDe[c.cav]=c.cav; c.carretas.forEach(p=>{cavDe[p]=c.cav; cavDe[p.slice(0,3)]=c.cav;});});
+cavDe['AXS']='TCF'; // "AXS7G23" no extrato = ASX-7G23
+const corDe = k => (CONJ.find(c=>c.cav===cavDe[k])||{}).cor || (EXTRA[k]||{}).cor || '#999';
+const brl = v => v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const num = t => { t=String(t||'').trim(); if(!t) return 0; const n=Number(t.includes(',')?t.replace(/\./g,'').replace(',','.'):t); return isFinite(n)?n:0; };
+const fmt = v => v.toFixed(2).replace('.',',');
+const norm = s => s.normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase();
+
+// classificação: id -> {partes:[{k, v}], nota}
+let cls = JSON.parse(JSON.stringify(INICIAL));
+let filtro='pend', cardFiltro=null, foco=0, mudou=false;
+
+// sugestão por nome do motorista
+DADOS.forEach(d=>{
+  const t = norm(d.nome+' '+d.desc);
+  const ach = CONJ.filter(c=>c.nomes.some(n=>new RegExp('\\b'+n+'\\b').test(t)));
+  d.sug = ach.length===1 ? ach[0].cav : null;
+  d.sugMot = ach.length===1 ? ach[0].motorista : null;
+});
+
+function partesDe(id){ return (cls[id]&&cls[id].partes)||[]; }
+function setCls(id, partes){
+  if(!partes||!partes.length){ if(cls[id]&&cls[id].nota){cls[id].partes=[];} else delete cls[id]; }
+  else { cls[id] = {...(cls[id]||{}), partes}; delete cls[id].auto; }
+  mudou=true; render();
+}
+
+function totais(){
+  const t={}; let feito=0, vFeito=0;
+  CONJ.forEach(c=>t[c.cav]={tot:0,n:0,cav:0,car:{}});
+  Object.keys(EXTRA).forEach(k=>t[k]={tot:0,n:0});
+  DADOS.forEach(d=>{
+    const ps=partesDe(d.id); if(!ps.length) return;
+    feito++; vFeito=Math.round((vFeito+d.v)*100)/100;
+    ps.forEach(p=>{
+      const g = cavDe[p.k] || p.k; const o=t[g]; o.tot=Math.round((o.tot+p.v)*100)/100; o.n++;
+      if(cavDe[p.k]){ if(p.k===g) o.cav+=p.v; else o.car[p.k]=(o.car[p.k]||0)+p.v; }
+    });
+  });
+  return {t,feito,vFeito};
+}
+
+function render(){
+  const {t,feito,vFeito} = totais();
+  const total = DADOS.reduce((s,d)=>s+d.v,0);
+  document.getElementById('sub').textContent =
+    `${DADOS.length} pagamentos · ${brl(total)} · classificados ${feito} (${brl(vFeito)}) · faltam ${DADOS.length-feito} (${brl(total-vFeito)})`;
+  document.getElementById('barra').style.width = (feito/DADOS.length*100)+'%';
+
+  // cards
+  let h = '';
+  CONJ.forEach((c,i)=>{
+    const o=t[c.cav]; const cars=Object.entries(o.car).map(([p,v])=>`${p} ${brl(v)}`).join(' · ');
+    h += `<div class="cardt ${cardFiltro===c.cav?'ativo':''}" style="--c:${c.cor}" data-card="${c.cav}">
+      <div class="n">${c.cav} <small>${i+1}</small></div>
+      <div class="v">${brl(o.tot)}</div>
+      <div class="d" title="${cars}">${o.n} lanç.${cars?' · carretas: '+cars:''}</div></div>`;
+  });
+  Object.entries(EXTRA).forEach(([k,e])=>{
+    const o=t[k];
+    h += `<div class="cardt ${cardFiltro===k?'ativo':''}" style="--c:${e.cor}" data-card="${k}">
+      <div class="n">${e.nome} <small>${e.tecla}</small></div><div class="v">${brl(o.tot)}</div><div class="d">${o.n} lanç.</div></div>`;
+  });
+  h += `<div class="cardt pend ${cardFiltro==='PEND'?'ativo':''}" data-card="PEND"><div class="n">Falta classificar</div>
+    <div class="v">${brl(total-vFeito)}</div><div class="d">${DADOS.length-feito} pagamentos</div></div>`;
+  document.getElementById('cards').innerHTML = h;
+
+  // conciliação com o extrato
+  const sCam = Math.round(CONJ.reduce((s,c)=>s+t[c.cav].tot,0)*100)/100;
+  const pend = Math.round((total-vFeito)*100)/100;
+  const soma = Math.round((sCam+t.GERAL.tot+t.SOCIO.tot+t.NAO.tot+pend)*100)/100;
+  const dif = Math.round((EXTRATO.pagamentos-soma)*100)/100;
+  document.getElementById('conc').innerHTML =
+    `<span>Conciliação:</span> Caminhões <b>${brl(sCam)}</b> + Geral <b>${brl(t.GERAL.tot)}</b> + Sócios <b>${brl(t.SOCIO.tot)}</b> + Não é despesa <b>${brl(t.NAO.tot)}</b> + Pendente <b>${brl(pend)}</b> = <b>${brl(soma)}</b>
+     <span>· Total de pagamentos no extrato <b>${brl(EXTRATO.pagamentos)}</b> (${EXTRATO.nPag})</span>
+     ${Math.abs(dif)<0.005?'<span class="okk">✓ Bate</span>':`<span class="nok">✗ Diferença ${brl(dif)}</span>`}
+     <span style="color:var(--muted)">· Recebimentos ${brl(EXTRATO.recebimentos)} · Saldo do período ${brl(EXTRATO.recebimentos-EXTRATO.pagamentos)}</span>`;
+  const cnt={pend:0,feitos:0,todos:DADOS.length,socio:0};
+  DADOS.forEach(d=>{const ps=partesDe(d.id); if(ps.length) cnt.feitos++; else cnt.pend++; if(ps.some(p=>p.k==='SOCIO')) cnt.socio++;});
+  document.querySelectorAll('#seg button').forEach(b=>b.querySelector('.ct').textContent=cnt[b.dataset.f]);
+
+  // lista
+  const q = norm(document.getElementById('busca').value.trim());
+  const vis = visiveis(q);
+  if(foco>=vis.length) foco=Math.max(0,vis.length-1);
+  const L = document.getElementById('lista');
+  if(!vis.length){ L.innerHTML = `<div class="vazio">${filtro==='pend'&&!q&&!cardFiltro?'🎉 Tudo classificado! Salve o progresso ou exporte a planilha.':'Nenhum pagamento neste filtro.'}</div>`; return; }
+  L.innerHTML = vis.map((d,ix)=>linha(d,ix)).join('');
+}
+
+function visiveis(q){
+  return DADOS.filter(d=>{
+    const ps=partesDe(d.id);
+    if(cardFiltro==='PEND'){ if(ps.length) return false; }
+    else if(cardFiltro){ if(!ps.some(p=>(cavDe[p.k]||p.k)===cardFiltro)) return false; }
+    else if(filtro==='pend' && ps.length) return false;
+    else if(filtro==='feitos' && !ps.length) return false;
+    else if(filtro==='socio' && !ps.some(p=>p.k==='SOCIO')) return false;
+    if(q && !norm(d.nome+' '+d.desc+' '+d.data+' '+fmt(d.v)+' '+d.v).includes(q)) return false;
+    return true;
+  });
+}
+
+function linha(d,ix){
+  const ps=partesDe(d.id); const sel=ps.length===1?ps[0].k:null; const div=ps.length>1;
+  let b='';
+  CONJ.forEach((c,i)=>{ b+=`<button class="pl ${sel===c.cav?'on':''}" style="--c:${c.cor}" data-a="set" data-k="${c.cav}" data-id="${d.id}" title="${c.placa} · ${c.motorista}">${c.cav}<span class="k">${i+1}</span></button>`; });
+  const carSel = sel && cavDe[sel] && sel!==cavDe[sel] ? sel : '';
+  b+=`<select class="car" data-a="car" data-id="${d.id}" title="Lançar direto numa carreta"><option value="">Carreta…</option>${
+    CONJ.map(c=>`<optgroup label="${c.cav}">${c.carretas.map(p=>`<option value="${p}" ${carSel===p?'selected':''}>${p}</option>`).join('')}</optgroup>`).join('')}</select>`;
+  b+=`<span class="sep"></span>`;
+  b+=`<button class="pl outro ${div?'on':''}" style="--c:#0f766e" data-a="div" data-id="${d.id}">Dividir<span class="k">D</span></button>`;
+  Object.entries(EXTRA).forEach(([k,e])=>{ b+=`<button class="pl outro ${sel===k?'on':''}" style="--c:${e.cor}" data-a="set" data-k="${k}" data-id="${d.id}" title="${e.nome}">${e.curto||e.nome}<span class="k">${e.tecla}</span></button>`; });
+  if(ps.length) b+=`<button class="pl outro" data-a="limpar" data-id="${d.id}" title="Limpar (0)">✕</button>`;
+  if(d.sug && !ps.length) b+=`<button class="sug" data-a="set" data-k="${d.sug}" data-id="${d.id}" title="Motorista ${d.sugMot}">Sugestão: ${d.sug} (${d.sugMot.split(' ')[0]}) <kbd>S</kbd></button>`;
+  const res = ps.length ? `<div class="res">→ ${ps.map(p=>`<span class="tag" style="--c:${corDe(p.k)}">${(EXTRA[p.k]||{}).nome||p.k}${div?' '+brl(p.v):''}</span>`).join('')}</div>` : '';
+  const nota = (cls[d.id]&&cls[d.id].nota)||'';
+  const auto = cls[d.id]&&cls[d.id].auto;
+  const resF = ps.length ? res.replace('</div>', (auto?`<span class="auto" title="${esc(auto)}">do extrato · ${esc(auto)}</span>`:'')+'</div>') : res;
+  return `<div class="lin ${ix===foco?'foco':''} ${ps.length?'feito':''}" data-ix="${ix}" data-id="${d.id}">
+    <div class="i">${d.id}</div>
+    <div class="dt">${d.data.slice(0,5)}<br>${d.hora}</div>
+    <div><div class="nm">${esc(d.nome)}</div><div class="ds">${esc(d.desc)||'<i>sem descrição</i>'}</div></div>
+    <div class="val">${brl(d.v)}</div>
+    <div class="btns">${b}</div>${resF}
+    <input class="nota" data-a="nota" data-id="${d.id}" placeholder="Observação (opcional)" value="${esc(nota)}">
+  </div>`;
+}
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const byId = id => DADOS.find(d=>d.id==id);
+
+// eventos
+document.addEventListener('click',e=>{
+  const card=e.target.closest('[data-card]');
+  if(card){ const k=card.dataset.card; cardFiltro = cardFiltro===k?null:k; foco=0; render(); return; }
+  const el=e.target.closest('[data-a]'); if(!el||el.tagName==='SELECT'||el.tagName==='INPUT') return;
+  const id=+el.dataset.id, d=byId(id);
+  const lin=el.closest('.lin'); if(lin) foco=+lin.dataset.ix;
+  if(el.dataset.a==='set'){ const atual=partesDe(id); const k=el.dataset.k;
+    setCls(id, atual.length===1&&atual[0].k===k ? [] : [{k,v:d.v}]); }
+  else if(el.dataset.a==='limpar') setCls(id,[]);
+  else if(el.dataset.a==='div') abrirDividir(d);
+});
+document.addEventListener('change',e=>{
+  const el=e.target;
+  if(el.dataset.a==='car'){ const id=+el.dataset.id; if(el.value) setCls(id,[{k:el.value,v:byId(id).v}]); }
+  if(el.dataset.a==='nota'){ const id=+el.dataset.id; cls[id]={partes:partesDe(id),...(cls[id]||{}),nota:el.value}; if(!el.value&&!partesDe(id).length) delete cls[id]; mudou=true; }
+});
+document.getElementById('busca').addEventListener('input',()=>{foco=0;render();});
+document.getElementById('seg').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  filtro=b.dataset.f; cardFiltro=null; foco=0;
+  document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b)); render();
+});
+document.addEventListener('keydown',e=>{
+  if(document.getElementById('modal').innerHTML) { if(e.key==='Escape') fecharModal(); return; }
+  if(['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+  const vis=visiveis(norm(document.getElementById('busca').value.trim())); const d=vis[foco]; if(!d) return;
+  const k=e.key.toUpperCase();
+  const vaiProx = ()=>{ /* no filtro "pendentes" o item some e o próximo assume o foco */ if((filtro!=='pend'&&filtro!=='socio')||cardFiltro) foco=Math.min(foco+1,vis.length-1); };
+  if(e.key==='ArrowDown'||k==='J'){ foco=Math.min(foco+1,vis.length-1); render(); rolar(); e.preventDefault(); return; }
+  if(e.key==='ArrowUp'||k==='K'){ foco=Math.max(foco-1,0); render(); rolar(); e.preventDefault(); return; }
+  let partes=null;
+  if(/^[1-8]$/.test(e.key) && CONJ[+e.key-1]) partes=[{k:CONJ[+e.key-1].cav,v:d.v}];
+  else if(k==='G') partes=[{k:'GERAL',v:d.v}];
+  else if(k==='N') partes=[{k:'NAO',v:d.v}];
+  else if(k==='P') partes=[{k:'SOCIO',v:d.v}];
+  else if(k==='S' && d.sug) partes=[{k:d.sug,v:d.v}];
+  else if(e.key==='0') { setCls(d.id,[]); return; }
+  else if(k==='D') { abrirDividir(d); e.preventDefault(); return; }
+  if(partes){ vaiProx(); setCls(d.id,partes); rolar(); }
+});
+function rolar(){ const el=document.querySelector('.lin.foco'); if(el){ const r=el.getBoundingClientRect(); const topo=document.querySelector('header').offsetHeight; if(r.top<topo+10||r.bottom>innerHeight-10) window.scrollTo({top:scrollY+r.top-topo-20,behavior:'smooth'}); } }
+
+// dividir
+function abrirDividir(d){
+  const atual=partesDe(d.id); const mapa={}; atual.forEach(p=>mapa[p.k]=p.v);
+  const opc=[...CONJ.map(c=>({k:c.cav,nome:c.cav+' · '+c.motorista.split(' ')[0],cor:c.cor})),{k:'GERAL',nome:'Geral / empresa',cor:EXTRA.GERAL.cor},{k:'SOCIO',nome:'Sócios / proprietários',cor:EXTRA.SOCIO.cor}];
+  document.getElementById('modal').innerHTML = `<div class="ov" id="ov"><div class="mod">
+    <h3>Dividir ${brl(d.v)}</h3><div class="sub" style="margin-bottom:8px">${esc(d.nome)} — ${esc(d.desc)}</div>
+    ${opc.map(o=>`<div class="lr"><label><input type="checkbox" data-ck="${o.k}" ${mapa[o.k]!=null?'checked':''}><span class="dot" style="--c:${o.cor}"></span>${o.nome}</label>
+      <input type="text" inputmode="decimal" data-vl="${o.k}" value="${mapa[o.k]!=null?fmt(mapa[o.k]):''}" placeholder="0,00"></div>`).join('')}
+    <div class="rod"><div><button id="dIgual">Dividir igual</button> <button id="dResto" title="Coloca o que falta no último marcado">O resto</button></div><span class="st" id="dSt"></span></div>
+    <div class="rod"><button id="dCanc">Cancelar</button><button class="pri" id="dOk">Confirmar</button></div>
+  </div></div>`;
+  const M=document.getElementById('modal');
+  const marcados=()=>[...M.querySelectorAll('[data-ck]:checked')].map(x=>x.dataset.ck);
+  const vl=k=>M.querySelector(`[data-vl="${k}"]`);
+  const status=()=>{ const ks=marcados(); const s=ks.reduce((a,k)=>a+num(vl(k).value),0); const f=Math.round((d.v-s)*100)/100;
+    const st=document.getElementById('dSt'); const ok=ks.length>=2&&Math.abs(f)<0.01;
+    st.textContent = ks.length<2?'Marque 2 ou mais': ok?'Fechou ✓': f>0?`Falta ${brl(f)}`:`Passou ${brl(-f)}`;
+    st.style.color = ok?'var(--ok)':'var(--warn)'; document.getElementById('dOk').disabled=!ok; return ok; };
+  const igual=()=>{ const ks=marcados(); if(!ks.length) return; const c=Math.round(d.v*100), b=Math.floor(c/ks.length);
+    ks.forEach((k,i)=>vl(k).value=fmt((i===ks.length-1?c-b*(ks.length-1):b)/100)); status(); };
+  M.querySelectorAll('[data-ck]').forEach(ck=>ck.addEventListener('change',()=>{ if(!ck.checked) vl(ck.dataset.ck).value=''; igual(); }));
+  let ultimo=null;
+  M.querySelectorAll('[data-vl]').forEach(i=>i.addEventListener('input',()=>{ ultimo=i.dataset.vl; const ck=M.querySelector(`[data-ck="${i.dataset.vl}"]`); if(i.value&&!ck.checked) ck.checked=true; status(); }));
+  document.getElementById('dIgual').onclick=igual;
+  document.getElementById('dResto').onclick=()=>{ const ks=marcados(); if(ks.length<2) return;
+    // completa o campo vazio (ou o que você NÃO digitou por último)
+    const u=ks.find(k=>k!==ultimo&&!num(vl(k).value)) || [...ks].reverse().find(k=>k!==ultimo) || ks[ks.length-1];
+    const s=ks.filter(k=>k!==u).reduce((a,k)=>a+num(vl(k).value),0); vl(u).value=fmt(Math.max(0,Math.round((d.v-s)*100)/100)); status(); };
+  document.getElementById('dCanc').onclick=fecharModal;
+  let downNoFundo=false;
+  const ov=document.getElementById('ov');
+  ov.addEventListener('mousedown',e=>downNoFundo=e.target===ov);
+  ov.addEventListener('click',e=>{ if(e.target===ov&&downNoFundo) fecharModal(); });
+  document.getElementById('dOk').onclick=()=>{ if(!status()) return; setCls(d.id, marcados().map(k=>({k,v:num(vl(k).value)}))); fecharModal(); };
+  status();
+}
+function fecharModal(){ document.getElementById('modal').innerHTML=''; }
+
+// salvar / abrir / exportar
+function baixar(nome, conteudo, tipo){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([conteudo],{type:tipo})); a.download=nome; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
+document.getElementById('bSalvar').onclick=()=>{ baixar('classificacao-pix-set2026.json', JSON.stringify({versao:1,cls},null,1),'application/json'); mudou=false; };
+document.getElementById('bAbrir').onclick=()=>document.getElementById('fArq').click();
+document.getElementById('fArq').onchange=async e=>{ const f=e.target.files[0]; if(!f) return;
+  try{ const j=JSON.parse(await f.text()); cls={...JSON.parse(JSON.stringify(INICIAL)),...(j.cls||{})}; mudou=false; render(); alert('Progresso carregado: '+Object.keys(cls).length+' pagamentos classificados.'); }
+  catch{ alert('Arquivo inválido.'); } e.target.value=''; };
+document.getElementById('bCsv').onclick=()=>{
+  const L=[['Data','Hora','Nome','Descricao','Valor do pagamento','Caminhao (cavalo)','Placa lancada','Valor atribuido','Observacao']];
+  DADOS.forEach(d=>{ const ps=partesDe(d.id); const nota=(cls[d.id]&&cls[d.id].nota)||'';
+    if(!ps.length) L.push([d.data,d.hora,d.nome,d.desc,fmt(d.v),'PENDENTE','','',nota]);
+    ps.forEach(p=>L.push([d.data,d.hora,d.nome,d.desc,fmt(d.v),(EXTRA[p.k]||{}).nome||cavDe[p.k],EXTRA[p.k]?'':p.k,fmt(p.v),nota||(cls[d.id].auto?'do extrato: '+cls[d.id].auto:'')])); });
+  L.push([]); L.push(['RESUMO']);
+  const {t}=totais(); CONJ.forEach(c=>L.push(['','','',c.cav+' ('+c.placa+')','','','',fmt(t[c.cav].tot)]));
+  Object.entries(EXTRA).forEach(([k,e])=>L.push(['','','',e.nome,'','','',fmt(t[k].tot)]));
+  const vF=DADOS.reduce((s,d)=>s+(partesDe(d.id).length?d.v:0),0), tt=DADOS.reduce((s,d)=>s+d.v,0);
+  L.push(['','','','Pendente','','','',fmt(tt-vF)]);
+  L.push(['','','','TOTAL (bate com o extrato: '+fmt(EXTRATO.pagamentos)+')','','','',fmt(tt)]);
+  const csv='﻿'+L.map(r=>r.map(x=>{x=String(x??''); return /[;"\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(';')).join('\r\n');
+  baixar('classificacao-pix-set2026.csv',csv,'text/csv;charset=utf-8');
+};
+window.addEventListener('beforeunload',e=>{ if(mudou){ e.preventDefault(); e.returnValue=''; } });
+render();
+</script>
+</body>
+</html>

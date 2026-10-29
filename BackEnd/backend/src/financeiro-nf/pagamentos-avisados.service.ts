@@ -196,6 +196,7 @@ export class PagamentosAvisadosService {
             criarConta?: boolean;
             valorPago?: number | string;
             caminhaoIds?: string[];
+            valores?: (number | string)[];
             grupo?: string;
             observacao?: string;
         },
@@ -262,7 +263,7 @@ export class PagamentosAvisadosService {
 
         // Pagamento para 2+ carretas: divide o valor e grava a parcela de cada uma.
         if (contaPagarId && Array.isArray(body.caminhaoIds) && body.caminhaoIds.length > 0) {
-            await this.financeiro.ratearContasPagar(empresaId, [contaPagarId], body.caminhaoIds);
+            await this.financeiro.ratearContasPagar(empresaId, [contaPagarId], body.caminhaoIds, body.valores, true);
         }
 
         return this.prisma.pagamentoAvisado.update({

@@ -269,7 +269,8 @@ export class CaminhaoService {
             descricao: l.descricao,
             valor: Number(l.valor),
             data: l.data,
-            origem: 'MANUAL' as const,
+            // Despesa gravada pela Conciliação do Extrato: só sai por lá (desfazer).
+            origem: (l.conciliacaoExtratoId ? 'EXTRATO' : 'MANUAL') as 'EXTRATO' | 'MANUAL',
         }));
 
         if (!caminhao) return manuais.filter((l) => dentroDaFaixa(l.data, faixa));
@@ -379,6 +380,9 @@ export class CaminhaoService {
 
         if (!lancamento) {
             throw new NotFoundException('Lançamento não encontrado.');
+        }
+        if (lancamento.conciliacaoExtratoId) {
+            throw new BadRequestException('Esta despesa veio da Conciliação do Extrato. Corrija a classificação por lá e aplique de novo.');
         }
 
         await this.prisma.lancamentoCaminhao.delete({ where: { id: lancamentoId } });

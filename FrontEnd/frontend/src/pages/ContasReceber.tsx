@@ -86,9 +86,9 @@ export function ContasReceber() {
     const [aplicando, setAplicando] = useState(false);
     const [modalRateio, setModalRateio] = useState(false);
 
-    async function ratear(caminhaoIds: string[]) {
+    async function ratear(caminhaoIds: string[], valores?: number[]) {
         try {
-            await api.patch('/financeiro-nf/contas-receber/ratear', { ids: Array.from(selecionadas), caminhaoIds });
+            await api.patch('/financeiro-nf/contas-receber/ratear', { ids: Array.from(selecionadas), caminhaoIds, valores });
             setModalRateio(false);
             setSelecionadas(new Set());
             await carregar();
@@ -468,6 +468,8 @@ export function ContasReceber() {
                 <RateioCarretasModal
                     caminhoes={caminhoes}
                     valorTotal={selecionadas.size === 1 ? contas.find((c) => selecionadas.has(c.id))?.valor : undefined}
+                    inicial={(() => { const u = selecionadas.size === 1 ? contas.find((c) => selecionadas.has(c.id)) : undefined; return (u?.rateios?.length ?? 0) >= 2 ? u!.rateios!.map((r) => r.caminhaoId) : u?.caminhao?.id ? [u.caminhao.id] : []; })()}
+                    inicialValores={(() => { const u = selecionadas.size === 1 ? contas.find((c) => selecionadas.has(c.id)) : undefined; return (u?.rateios?.length ?? 0) >= 2 ? u!.rateios!.map((r) => r.valor) : undefined; })()}
                     titulo={`Dividir ${selecionadas.size} conta${selecionadas.size > 1 ? 's' : ''} entre carretas`}
                     onConfirmar={ratear}
                     onFechar={() => setModalRateio(false)}

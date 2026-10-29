@@ -142,6 +142,7 @@ export function ContasPagarConciliar() {
     // Carretas escolhidas por transação (2+ = valor dividido entre elas)
     const [caminhoes, setCaminhoes] = useState<{ id: string; placa: string }[]>([]);
     const [carretasEscolha, setCarretasEscolha] = useState<Record<string, string[]>>({});
+    const [valoresEscolha, setValoresEscolha] = useState<Record<string, number[] | undefined>>({});
     const [rateioFit, setRateioFit] = useState<string | null>(null);
 
     useEffect(() => {
@@ -244,7 +245,7 @@ export function ContasPagarConciliar() {
         if (restante > 0.01) setSaldoRestante((atual) => ({ ...atual, [transacao.fitId]: restante }));
         const carretas = carretasEscolha[transacao.fitId];
         if (carretas && carretas.length > 0) {
-            await api.patch('/financeiro-nf/contas-pagar/ratear', { ids: [contaId], caminhaoIds: carretas });
+            await api.patch('/financeiro-nf/contas-pagar/ratear', { ids: [contaId], caminhaoIds: carretas, valores: valoresEscolha[transacao.fitId], proporcional: true });
         }
         setStatusLinha((atual) => ({ ...atual, [transacao.fitId]: 'CONFIRMED' }));
     }
@@ -525,7 +526,8 @@ export function ContasPagarConciliar() {
                     caminhoes={caminhoes}
                     valorTotal={Math.abs(transacoes.find((t) => t.fitId === rateioFit)?.amount ?? 0)}
                     inicial={carretasEscolha[rateioFit] ?? []}
-                    onConfirmar={(ids) => { setCarretasEscolha((e) => ({ ...e, [rateioFit]: ids })); setRateioFit(null); }}
+                    inicialValores={valoresEscolha[rateioFit]}
+                    onConfirmar={(ids, valores) => { setCarretasEscolha((e) => ({ ...e, [rateioFit]: ids })); setValoresEscolha((e) => ({ ...e, [rateioFit]: valores })); setRateioFit(null); }}
                     onFechar={() => setRateioFit(null)}
                 />
             )}

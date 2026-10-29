@@ -93,6 +93,7 @@ export function ContaPaga() {
     const [obs, setObs] = useState('');
     const [valorPagoInput, setValorPagoInput] = useState('');
     const [carretasConc, setCarretasConc] = useState<string[]>([]);
+    const [valoresConc, setValoresConc] = useState<number[] | undefined>(undefined);
     const [modalRateio, setModalRateio] = useState(false);
     const [grupoNova, setGrupoNova] = useState<'FORNECEDORES' | 'IMPOSTOS' | 'SOCIOS'>('FORNECEDORES');
     const numero = (t: string) => Number(t.replace(/\./g, '').replace(',', '.')) || 0;
@@ -150,6 +151,7 @@ export function ContaPaga() {
         setValorPagoInput(aviso && aviso.valor > 0 ? String(aviso.valor).replace('.', ',') : '');
         setGrupoNova('FORNECEDORES');
         setCarretasConc([]);
+        setValoresConc(undefined);
         const r = await api.get(`/financeiro-nf/pagamentos-avisados/${id}/sugestoes`);
         setSugestoes(r.data);
     }
@@ -162,6 +164,7 @@ export function ContaPaga() {
                 grupo: grupoNova,
                 valorPago: numero(valorPagoInput) || undefined,
                 caminhaoIds: carretasConc.length > 0 ? carretasConc : undefined,
+                valores: carretasConc.length >= 2 ? valoresConc : undefined,
                 observacao: obs,
             });
             setAbertoId(null);
@@ -354,7 +357,8 @@ export function ContaPaga() {
                     caminhoes={caminhoes}
                     valorTotal={numero(valorPagoInput) || undefined}
                     inicial={carretasConc}
-                    onConfirmar={(ids) => { setCarretasConc(ids); setModalRateio(false); }}
+                    inicialValores={valoresConc}
+                    onConfirmar={(ids, valores) => { setCarretasConc(ids); setValoresConc(valores); setModalRateio(false); }}
                     onFechar={() => setModalRateio(false)}
                 />
             )}

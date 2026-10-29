@@ -1,4 +1,4 @@
-import { dividirIgualmente } from './rateio.util';
+import { montarRateio } from './rateio.util';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
@@ -589,12 +589,33 @@ export class FinanceiroNfService {
 
         // Cada item já sai com valorPago/saldoDevedor calculados — evita a
         // tela ter que somar os pagamentos toda vez que renderiza a lista.
+        // Contas que vieram de um boleto/nota enviado em "Lançar contas": a tela
+        // mostra o botão de ver o documento.
+        const enviados = contas.length
+            ? await this.prisma.contaEnviada.findMany({
+                where: { empresaId, status: 'LANCADA', contaPagarIds: { hasSome: contas.map((c) => c.id) } },
+                select: { id: true, contaPagarIds: true, arquivoNome: true, tipoDocumento: true },
+            })
+            : [];
+        const docPorConta = new Map<string, { id: string; nome: string | null; tipo: string | null }>();
+        for (const e of enviados) for (const cid of e.contaPagarIds) docPorConta.set(cid, { id: e.id, nome: e.arquivoNome, tipo: e.tipoDocumento });
+
         const items = contas.map((conta) => {
             const valorPago = conta.pagamentos.reduce((soma, p) => soma + p.valor, 0);
-            return { ...conta, valorPago, saldoDevedor: Math.max(0, conta.valor - valorPago) };
+            return { ...conta, valorPago, saldoDevedor: Math.max(0, conta.valor - valorPago), documento: docPorConta.get(conta.id) ?? null };
         });
 
         return { items, total, page, pageSize };
+    }
+
+    // Arquivo (boleto/nota) que originou a conta, quando ela veio de "Lançar contas".
+    async documentoContaPagar(id: string, empresaId: string) {
+        const e = await this.prisma.contaEnviada.findFirst({
+            where: { empresaId, contaPagarIds: { has: id } },
+            select: { arquivo: true, arquivoNome: true, arquivoMime: true },
+        });
+        if (!e?.arquivo) throw new NotFoundException('Esta conta não tem boleto ou nota anexado.');
+        return e;
     }
 
     // Cards do dashboard: quanto (saldo devedor) e quantas contas pendentes
@@ -672,8 +693,9 @@ export class FinanceiroNfService {
     }
 
     // Rateio: 0 carretas = tira; 1 = vincula direto; 2+ = divide o valor
-    // (valor + juros) igualmente e grava a parcela de cada uma.
-    async ratearContasPagar(empresaId: string, ids: string[], caminhaoIds: string[]) {
+    // (valor + juros) e grava a parcela de cada uma — igual, ou pelos valores
+    // informados por caminhão (`valores`, mesma ordem de caminhaoIds).
+    async ratearContasPagar(empresaId: string, ids: string[], caminhaoIds: string[], valores?: (number | string)[], proporcional = false) {
         if (!Array.isArray(ids) || ids.length === 0) throw new BadRequestException('Selecione ao menos uma conta.');
         const unicos = Array.from(new Set(caminhaoIds ?? []));
         if (unicos.length > 0) {
@@ -684,16 +706,23 @@ export class FinanceiroNfService {
             where: { empresaId, id: { in: ids } },
             select: { id: true, valor: true, juros: true },
         });
-        for (const c of contas) {
+        // Valida antes de mexer em qualquer conta (tudo ou nada).
+        const planos = contas.map((c) => {
+            try {
+                return { c, partes: unicos.length >= 2 ? montarRateio(c.valor + (c.juros ?? 0), caminhaoIds, valores, contas.length === 1 && !proporcional) : [] };
+            } catch (e: any) {
+                throw new BadRequestException(e?.message ?? 'Divisão inválida.');
+            }
+        });
+        for (const { c, partes } of planos) {
             await this.prisma.contaPagarRateio.deleteMany({ where: { contaPagarId: c.id } });
-            if (unicos.length >= 2) {
-                const partes = dividirIgualmente(c.valor + (c.juros ?? 0), unicos.length);
+            if (partes.length >= 2) {
                 await this.prisma.contaPagarRateio.createMany({
-                    data: unicos.map((caminhaoId, i) => ({ contaPagarId: c.id, caminhaoId, valor: partes[i] })),
+                    data: partes.map((p) => ({ contaPagarId: c.id, caminhaoId: p.caminhaoId, valor: p.valor })),
                 });
                 await this.prisma.contaPagar.update({ where: { id: c.id }, data: { caminhaoId: null } });
             } else {
-                await this.prisma.contaPagar.update({ where: { id: c.id }, data: { caminhaoId: unicos[0] ?? null } });
+                await this.prisma.contaPagar.update({ where: { id: c.id }, data: { caminhaoId: partes[0]?.caminhaoId ?? unicos[0] ?? null } });
             }
         }
         return { atualizadas: contas.length };

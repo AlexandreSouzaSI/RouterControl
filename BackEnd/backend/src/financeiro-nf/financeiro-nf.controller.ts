@@ -226,6 +226,14 @@ export class FinanceiroNfController {
         return this.service.registrarPagamento(id, empresaId, body as any);
     }
 
+    @Get('contas-pagar/:id/documento')
+    async documentoContaPagar(@Param('id') id: string, @EmpresaAtual() empresaId: string, @Res() res: Response) {
+        const d = await this.service.documentoContaPagar(id, empresaId);
+        res.setHeader('Content-Type', d.arquivoMime ?? 'application/octet-stream');
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(d.arquivoNome ?? 'documento')}"`);
+        res.send(Buffer.from(d.arquivo as Uint8Array));
+    }
+
     @Get('contas-pagar/:id/pagamentos')
     listarPagamentos(@Param('id') id: string, @EmpresaAtual() empresaId: string) {
         return this.service.listarPagamentos(id, empresaId);
@@ -253,8 +261,8 @@ export class FinanceiroNfController {
 
     // Divide o valor entre 2+ carretas (ou vincula 1 / remove).
     @Patch('contas-pagar/ratear')
-    ratearContasPagar(@EmpresaAtual() empresaId: string, @Body() body: { ids: string[]; caminhaoIds: string[] }) {
-        return this.service.ratearContasPagar(empresaId, body.ids, body.caminhaoIds ?? []);
+    ratearContasPagar(@EmpresaAtual() empresaId: string, @Body() body: { ids: string[]; caminhaoIds: string[]; valores?: (number | string)[]; proporcional?: boolean }) {
+        return this.service.ratearContasPagar(empresaId, body.ids, body.caminhaoIds ?? [], body.valores, !!body.proporcional);
     }
 
     // Edição em massa: grupo, carreta e/ou categoria das contas marcadas.

@@ -239,6 +239,9 @@ export class ContasEnviadasService {
             codigoBarras?: string;
             observacao?: string;
             parcelas?: ParcelaEntrada[];
+            // Divisão entre 2+ caminhões (valores opcionais = igual; vale pra cada parcela, na proporção)
+            rateioCaminhaoIds?: string[];
+            rateioValores?: (number | string)[];
         },
     ) {
         const item = await this.prisma.contaEnviada.findFirst({ where: { id, empresaId }, select: SEM_ARQUIVO });
@@ -280,12 +283,15 @@ export class ContasEnviadasService {
                 formaPagamento: forma,
                 fornecedorId: fornecedor?.id,
                 categoriaId: body.categoriaId || undefined,
-                caminhaoId: body.caminhaoId || undefined,
+                caminhaoId: (body.rateioCaminhaoIds?.length ?? 0) >= 2 ? undefined : body.caminhaoId || undefined,
                 codigoBarras: p.codigoBarras || (parcelas.length === 1 ? codigoGeral || undefined : undefined),
                 observacao: obs,
                 grupo: body.grupo,
             });
             ids.push(conta.id);
+            if ((body.rateioCaminhaoIds?.length ?? 0) >= 2) {
+                await this.financeiro.ratearContasPagar(empresaId, [conta.id], body.rateioCaminhaoIds!, body.rateioValores, true);
+            }
         }
 
         await this.prisma.contaEnviada.update({

@@ -6,7 +6,7 @@ import { CteLido, lerXmlCte, normalizarPlaca } from './cte-xml.util';
 
 export type ArquivoXml = { nome: string; conteudo: string };
 type ItemImportacao = { arquivo: string; cte?: string; motivo?: string; valor?: number; cliente?: string; placa?: string | null };
-import { dividirIgualmente } from './rateio.util';
+import { montarRateio } from './rateio.util';
 
 type Filtros = {
     situacao?: string; // abertas (padrão) | recebidas | todas
@@ -202,7 +202,7 @@ export class ContasReceberService {
         return Array.from(mapa.values());
     }
 
-    async ratear(empresaId: string, ids: string[], caminhaoIds: string[]) {
+    async ratear(empresaId: string, ids: string[], caminhaoIds: string[], valores?: (number | string)[], proporcional = false) {
         if (!Array.isArray(ids) || ids.length === 0) throw new BadRequestException('Selecione ao menos uma conta.');
         const unicos = Array.from(new Set(caminhaoIds ?? []));
         if (unicos.length > 0) {
@@ -210,16 +210,22 @@ export class ContasReceberService {
             if (ok !== unicos.length) throw new NotFoundException('Caminhão não encontrado.');
         }
         const contas = await this.prisma.contaReceber.findMany({ where: { empresaId, id: { in: ids } }, select: { id: true, valor: true } });
-        for (const c of contas) {
+        const planos = contas.map((c) => {
+            try {
+                return { c, partes: unicos.length >= 2 ? montarRateio(c.valor, caminhaoIds, valores, contas.length === 1 && !proporcional) : [] };
+            } catch (e: any) {
+                throw new BadRequestException(e?.message ?? 'Divisão inválida.');
+            }
+        });
+        for (const { c, partes } of planos) {
             await this.prisma.contaReceberRateio.deleteMany({ where: { contaReceberId: c.id } });
-            if (unicos.length >= 2) {
-                const partes = dividirIgualmente(c.valor, unicos.length);
+            if (partes.length >= 2) {
                 await this.prisma.contaReceberRateio.createMany({
-                    data: unicos.map((caminhaoId, i) => ({ contaReceberId: c.id, caminhaoId, valor: partes[i] })),
+                    data: partes.map((p) => ({ contaReceberId: c.id, caminhaoId: p.caminhaoId, valor: p.valor })),
                 });
                 await this.prisma.contaReceber.update({ where: { id: c.id }, data: { caminhaoId: null } });
             } else {
-                await this.prisma.contaReceber.update({ where: { id: c.id }, data: { caminhaoId: unicos[0] ?? null } });
+                await this.prisma.contaReceber.update({ where: { id: c.id }, data: { caminhaoId: partes[0]?.caminhaoId ?? unicos[0] ?? null } });
             }
         }
         return { atualizadas: contas.length };

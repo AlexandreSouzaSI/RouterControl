@@ -34,8 +34,8 @@ export class ContasReceberController {
     }
 
     @Patch('ratear')
-    ratear(@EmpresaAtual() empresaId: string, @Body() body: { ids: string[]; caminhaoIds: string[] }) {
-        return this.service.ratear(empresaId, body.ids, body.caminhaoIds ?? []);
+    ratear(@EmpresaAtual() empresaId: string, @Body() body: { ids: string[]; caminhaoIds: string[]; valores?: (number | string)[]; proporcional?: boolean }) {
+        return this.service.ratear(empresaId, body.ids, body.caminhaoIds ?? [], body.valores, !!body.proporcional);
     }
 
     @Patch('editar-em-massa')

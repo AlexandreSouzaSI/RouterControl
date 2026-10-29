@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Plus, Printer, Link2, Loader2, CheckCircle2, Trash2, Pencil, Landmark, X, History, Repeat, Clock, ArrowUpCircle } from 'lucide-react';
+import { Plus, Printer, Link2, Loader2, CheckCircle2, Trash2, Pencil, Landmark, X, History, Repeat, Clock, ArrowUpCircle, FileText, Copy, Check } from 'lucide-react';
 import { api } from '../services/api';
 import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
@@ -57,7 +57,51 @@ type ContaPagar = {
     juros?: number;
     queuedForPaymentAt?: string | null;
     grupo?: Grupo;
+    codigoBarras?: string | null;
+    pixChave?: string | null;
+    pixTipoChave?: string | null;
+    pixQrCode?: string | null;
+    banco?: string | null;
+    agencia?: string | null;
+    conta?: string | null;
+    favorecido?: string | null;
+    documento?: { id: string; nome: string | null; tipo: string | null } | null;
 };
+
+// Linha digitável legível (boleto bancário 47 dígitos / concessionária 48).
+function formatarLinhaDigitavel(cod?: string | null) {
+    const d = (cod ?? '').replace(/\D/g, '');
+    if (d.length === 47) return `${d.slice(0, 5)}.${d.slice(5, 10)} ${d.slice(10, 15)}.${d.slice(15, 21)} ${d.slice(21, 26)}.${d.slice(26, 32)} ${d.slice(32, 33)} ${d.slice(33)}`;
+    if (d.length === 48) return d.match(/.{1,12}/g)!.map((b) => `${b.slice(0, 11)}-${b.slice(11)}`).join(' ');
+    return cod ?? '';
+}
+
+function BotaoCopiar({ texto, rotulo = 'Copiar' }: { texto: string; rotulo?: string }) {
+    const [ok, setOk] = useState(false);
+    async function copiar() {
+        try {
+            await navigator.clipboard.writeText(texto);
+        } catch {
+            const t = document.createElement('textarea'); t.value = texto; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove();
+        }
+        setOk(true); setTimeout(() => setOk(false), 1800);
+    }
+    return (
+        <button type="button" onClick={copiar}
+            className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition ${ok ? 'bg-green-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+            {ok ? <><Check size={13} /> Copiado</> : <><Copy size={13} /> {rotulo}</>}
+        </button>
+    );
+}
+
+async function abrirDocumentoConta(contaId: string) {
+    try {
+        const r = await api.get(`/financeiro-nf/contas-pagar/${contaId}/documento`, { responseType: 'blob' });
+        window.open(URL.createObjectURL(r.data), '_blank');
+    } catch {
+        alert('Não foi possível abrir o documento.');
+    }
+}
 
 const CARRETAS = ['POZ', 'QPM', 'RFX', 'RME', 'SEV', 'SEZ', 'SYR', 'TCF'];
 
@@ -194,9 +238,9 @@ export function ContasPagar() {
     const [massaCaminhao, setMassaCaminhao] = useState('');
     const [modalRateio, setModalRateio] = useState(false);
 
-    async function ratear(caminhaoIds: string[]) {
+    async function ratear(caminhaoIds: string[], valores?: number[]) {
         try {
-            await api.patch('/financeiro-nf/contas-pagar/ratear', { ids: Array.from(selecionadas), caminhaoIds });
+            await api.patch('/financeiro-nf/contas-pagar/ratear', { ids: Array.from(selecionadas), caminhaoIds, valores });
             setModalRateio(false);
             setSelecionadas(new Set());
             await carregar();
@@ -274,7 +318,14 @@ export function ContasPagar() {
     const [fornecedorNome, setFornecedorNome] = useState('');
     const [categoriaNome, setCategoriaNome] = useState('');
     const [caminhaoId, setCaminhaoId] = useState('');
+    // Divisão da conta do formulário entre 2+ caminhões (valores opcionais = igual).
+    const [formRateio, setFormRateio] = useState<{ ids: string[]; valores?: number[] } | null>(null);
+    const [editandoTinhaRateio, setEditandoTinhaRateio] = useState(false);
+    const [modalRateioForm, setModalRateioForm] = useState(false);
     const [observacao, setObservacao] = useState('');
+    const [codigoBarras, setCodigoBarras] = useState('');
+    const [pixChave, setPixChave] = useState('');
+    const [pixTipoChave, setPixTipoChave] = useState('');
 
     // Recorrência (todo dia X do mês, ou todo dia da semana seg-sex) — só
     // disponível pra conta nova (não dá pra "virar" uma conta já existente
@@ -440,6 +491,11 @@ export function ContasPagar() {
     }, []);
 
     function limparForm() {
+        setFormRateio(null);
+        setEditandoTinhaRateio(false);
+        setCodigoBarras('');
+        setPixChave('');
+        setPixTipoChave('');
         setDescricao('');
         setValor('');
         setVencimento(hojeISO());
@@ -467,6 +523,12 @@ export function ContasPagar() {
         setFornecedorNome(conta.fornecedor?.nome ?? '');
         setCategoriaNome(conta.categoria?.nome ?? '');
         setCaminhaoId(conta.caminhao?.id ?? '');
+        setCodigoBarras(conta.codigoBarras ?? '');
+        setPixChave(conta.pixChave ?? '');
+        setPixTipoChave(conta.pixTipoChave ?? '');
+        const rs = conta.rateios ?? [];
+        setFormRateio(rs.length >= 2 ? { ids: rs.map((r) => r.caminhaoId), valores: rs.map((r) => r.valor) } : null);
+        setEditandoTinhaRateio(rs.length >= 2);
         setObservacao(conta.observacao ?? '');
         setFormGrupo(conta.grupo ?? 'FORNECEDORES');
         setFormAberto(true);
@@ -506,15 +568,28 @@ export function ContasPagar() {
                 formaPagamento,
                 fornecedorId,
                 categoriaId,
-                caminhaoId: !ehFisica ? (caminhaoId || undefined) : undefined,
+                caminhaoId: !ehFisica && !(formRateio && formRateio.ids.length >= 2) ? (caminhaoId || undefined) : undefined,
                 observacao: observacao || undefined,
                 grupo: formGrupo,
+                codigoBarras: codigoBarras.replace(/\D/g, '') || (editandoId ? '' : undefined),
+                pixChave: pixChave.trim() || (editandoId ? '' : undefined),
+                pixTipoChave: pixTipoChave || undefined,
             };
 
+            let contaId = editandoId;
             if (editandoId) {
                 await api.patch(`/financeiro-nf/contas-pagar/${editandoId}`, payload);
             } else {
-                await api.post('/financeiro-nf/contas-pagar', payload);
+                contaId = (await api.post('/financeiro-nf/contas-pagar', payload)).data?.id ?? null;
+            }
+
+            // Divisão entre caminhões (ou desfaz a divisão que existia).
+            if (contaId && !ehFisica) {
+                if (formRateio && formRateio.ids.length >= 2) {
+                    await api.patch('/financeiro-nf/contas-pagar/ratear', { ids: [contaId], caminhaoIds: formRateio.ids, valores: formRateio.valores });
+                } else if (editandoTinhaRateio) {
+                    await api.patch('/financeiro-nf/contas-pagar/ratear', { ids: [contaId], caminhaoIds: caminhaoId ? [caminhaoId] : [] });
+                }
             }
 
             limparForm();
@@ -704,15 +779,37 @@ export function ContasPagar() {
                 )}
             </div>
 
-            {modalRateio && (
+            {modalRateioForm && (
                 <RateioCarretasModal
                     caminhoes={caminhoes}
-                    valorTotal={contas.filter((c) => selecionadas.has(c.id)).length === 1 ? contas.find((c) => selecionadas.has(c.id))?.valor : undefined}
+                    valorTotal={Number(String(valor).replace(',', '.')) || undefined}
+                    inicial={formRateio?.ids ?? (caminhaoId ? [caminhaoId] : [])}
+                    inicialValores={formRateio?.valores}
+                    titulo="Dividir esta conta entre caminhões"
+                    onConfirmar={(ids, valores) => {
+                        if (ids.length >= 2) setFormRateio({ ids, valores });
+                        else { setFormRateio(null); setCaminhaoId(ids[0] ?? ''); }
+                        setModalRateioForm(false);
+                    }}
+                    onFechar={() => setModalRateioForm(false)}
+                />
+            )}
+
+            {modalRateio && (() => {
+                const unica = selecionadas.size === 1 ? contas.find((c) => selecionadas.has(c.id)) : undefined;
+                const rs = unica?.rateios ?? [];
+                return (
+                <RateioCarretasModal
+                    caminhoes={caminhoes}
+                    valorTotal={unica ? unica.valor + (unica.juros ?? 0) : undefined}
+                    inicial={rs.length >= 2 ? rs.map((r) => r.caminhaoId) : unica?.caminhao?.id ? [unica.caminhao.id] : []}
+                    inicialValores={rs.length >= 2 ? rs.map((r) => r.valor) : undefined}
                     titulo={`Dividir ${selecionadas.size} conta${selecionadas.size > 1 ? 's' : ''} entre carretas`}
                     onConfirmar={ratear}
                     onFechar={() => setModalRateio(false)}
                 />
-            )}
+                );
+            })()}
 
             {modalImprimir && (
                 <Modal onFechar={() => setModalImprimir(false)} className="z-50 bg-black/50">
@@ -1010,9 +1107,49 @@ export function ContasPagar() {
                             </div>
                             <div>
                                 <label className={labelClasse}>Caminhão</label>
-                                <select value={caminhaoId} onChange={(e) => setCaminhaoId(e.target.value)} className={campoClasse}>
-                                    <option value="">Não vinculado</option>
-                                    {caminhoes.map((c) => <option key={c.id} value={c.id}>{c.placa}</option>)}
+                                {formRateio && formRateio.ids.length >= 2 ? (
+                                    <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40">
+                                        {formRateio.ids.map((id, i) => {
+                                            const placa = caminhoes.find((c) => c.id === id)?.placa ?? '?';
+                                            const v = formRateio.valores?.[i] ?? (Number(valor) || 0) / formRateio.ids.length;
+                                            return <span key={id} className={`px-1.5 py-0.5 rounded border text-[11px] font-bold ${corPlaca(placa)}`}>{placa} {formatCurrency(v)}</span>;
+                                        })}
+                                        <button type="button" onClick={() => setModalRateioForm(true)} className="ml-auto text-xs text-blue-600 hover:underline">Alterar</button>
+                                        <button type="button" onClick={() => setFormRateio(null)} className="text-xs text-red-500 hover:underline">Remover</button>
+                                    </div>
+                                ) : (
+                                    <div className="flex gap-2">
+                                        <select value={caminhaoId} onChange={(e) => setCaminhaoId(e.target.value)} className={campoClasse}>
+                                            <option value="">Não vinculado</option>
+                                            {caminhoes.map((c) => <option key={c.id} value={c.id}>{c.placa}</option>)}
+                                        </select>
+                                        <button type="button" onClick={() => setModalRateioForm(true)} title="Dividir o valor entre vários caminhões"
+                                            className="shrink-0 px-3 rounded-lg border border-gray-300 dark:border-gray-700 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 whitespace-nowrap">
+                                            Dividir
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {(tipo === 'BOLETO' || formaPagamento === 'BOLETO' || codigoBarras) && (
+                        <div>
+                            <label className={labelClasse}>Código de barras / linha digitável do boleto</label>
+                            <input value={codigoBarras} onChange={(e) => setCodigoBarras(e.target.value)} className={`${campoClasse} font-mono`} placeholder="Cole aqui a linha digitável" />
+                        </div>
+                    )}
+                    {(tipo === 'PIX' || formaPagamento === 'PIX' || pixChave) && (
+                        <div className="grid sm:grid-cols-3 gap-3">
+                            <div className="sm:col-span-2">
+                                <label className={labelClasse}>Chave Pix</label>
+                                <input value={pixChave} onChange={(e) => setPixChave(e.target.value)} className={campoClasse} placeholder="CPF, CNPJ, e-mail, telefone ou aleatória" />
+                            </div>
+                            <div>
+                                <label className={labelClasse}>Tipo da chave</label>
+                                <select value={pixTipoChave} onChange={(e) => setPixTipoChave(e.target.value)} className={campoClasse}>
+                                    <option value="">—</option>
+                                    {['CPF', 'CNPJ', 'EMAIL', 'TELEFONE', 'ALEATORIA'].map((t) => <option key={t} value={t}>{t === 'ALEATORIA' ? 'Aleatória' : t === 'EMAIL' ? 'E-mail' : t === 'TELEFONE' ? 'Telefone' : t}</option>)}
                                 </select>
                             </div>
                         </div>
@@ -1272,6 +1409,11 @@ export function ContasPagar() {
                                                             <History size={16} />
                                                         </button>
                                                     )}
+                                                    {c.documento && (
+                                                        <button onClick={() => abrirDocumentoConta(c.id)} title={c.documento.tipo === 'BOLETO' ? 'Ver boleto' : 'Ver documento'} className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition">
+                                                            <FileText size={16} />
+                                                        </button>
+                                                    )}
                                                     <button onClick={() => editar(c)} title="Editar" className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
                                                         <Pencil size={16} />
                                                     </button>
@@ -1357,6 +1499,68 @@ export function ContasPagar() {
                                 </div>
                             ))}
                         </dl>
+
+                        {(detalhe.codigoBarras || detalhe.pixChave || detalhe.pixQrCode || detalhe.favorecido || detalhe.banco || detalhe.documento) && (
+                            <div className="rounded-xl border border-blue-200 dark:border-blue-500/30 bg-blue-50/60 dark:bg-blue-500/5 p-3 space-y-3">
+                                <div className="flex items-center justify-between gap-2">
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">Dados para pagamento</p>
+                                    {detalhe.documento && (
+                                        <button onClick={() => abrirDocumentoConta(detalhe.id)}
+                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-blue-300 dark:border-blue-500/40 text-blue-700 dark:text-blue-300 bg-white dark:bg-transparent hover:bg-blue-50">
+                                            <FileText size={13} /> {detalhe.documento.tipo === 'BOLETO' ? 'Ver boleto' : 'Ver documento'}
+                                        </button>
+                                    )}
+                                </div>
+                                {detalhe.codigoBarras && (
+                                    <div>
+                                        <p className="text-xs text-gray-500 mb-1">Código de barras (linha digitável)</p>
+                                        <div className="flex items-center gap-2">
+                                            <code className="flex-1 min-w-0 break-all px-2.5 py-2 rounded-lg bg-white dark:bg-[#0B1120] border border-gray-200 dark:border-gray-700 text-[13px] font-mono text-gray-900 dark:text-white">{formatarLinhaDigitavel(detalhe.codigoBarras)}</code>
+                                            <BotaoCopiar texto={detalhe.codigoBarras.replace(/\D/g, '')} />
+                                        </div>
+                                    </div>
+                                )}
+                                {detalhe.pixChave && (
+                                    <div>
+                                        <p className="text-xs text-gray-500 mb-1">Chave Pix{detalhe.pixTipoChave ? ` (${detalhe.pixTipoChave.toLowerCase()})` : ''}</p>
+                                        <div className="flex items-center gap-2">
+                                            <code className="flex-1 min-w-0 break-all px-2.5 py-2 rounded-lg bg-white dark:bg-[#0B1120] border border-gray-200 dark:border-gray-700 text-[13px] font-mono text-gray-900 dark:text-white">{detalhe.pixChave}</code>
+                                            <BotaoCopiar texto={detalhe.pixChave} />
+                                        </div>
+                                    </div>
+                                )}
+                                {detalhe.pixQrCode && (
+                                    <div>
+                                        <p className="text-xs text-gray-500 mb-1">Pix copia e cola</p>
+                                        <div className="flex items-center gap-2">
+                                            <code className="flex-1 min-w-0 truncate px-2.5 py-2 rounded-lg bg-white dark:bg-[#0B1120] border border-gray-200 dark:border-gray-700 text-[12px] font-mono text-gray-900 dark:text-white">{detalhe.pixQrCode}</code>
+                                            <BotaoCopiar texto={detalhe.pixQrCode} />
+                                        </div>
+                                    </div>
+                                )}
+                                {(detalhe.favorecido || detalhe.banco || detalhe.agencia || detalhe.conta) && (() => {
+                                    const linhas = [
+                                        detalhe.favorecido && `Favorecido: ${detalhe.favorecido}`,
+                                        detalhe.banco && `Banco: ${detalhe.banco}`,
+                                        detalhe.agencia && `Agência: ${detalhe.agencia}`,
+                                        detalhe.conta && `Conta: ${detalhe.conta}`,
+                                    ].filter(Boolean) as string[];
+                                    return (
+                                        <div className="flex items-start gap-2">
+                                            <div className="flex-1 text-sm text-gray-800 dark:text-gray-200 space-y-0.5">{linhas.map((l) => <p key={l}>{l}</p>)}</div>
+                                            <BotaoCopiar texto={linhas.join('\n')} />
+                                        </div>
+                                    );
+                                })()}
+                                <div className="flex items-center justify-between text-sm pt-1 border-t border-blue-100 dark:border-blue-500/20">
+                                    <span className="text-gray-500">Valor a pagar · vence {new Date(detalhe.vencimento).toLocaleDateString('pt-BR')}</span>
+                                    <span className="inline-flex items-center gap-2 font-bold text-gray-900 dark:text-white">
+                                        {formatCurrency(detalhe.saldoDevedor ?? detalhe.valor)}
+                                        <BotaoCopiar texto={(detalhe.saldoDevedor ?? detalhe.valor).toFixed(2).replace('.', ',')} rotulo="Valor" />
+                                    </span>
+                                </div>
+                            </div>
+                        )}
 
                         {detalhe.observacao && (
                             <div>

@@ -218,6 +218,8 @@ model Empresa {
   pagamentosAvisados PagamentoAvisado[]
   contasEnviadas     ContaEnviada[]
   viagemPlanilhaAbas ViagemPlanilhaAba[]
+  conciliacoesExtrato ConciliacaoExtrato[]
+  conciliacaoVinculos ConciliacaoVinculo[]
 
   // Link secreto (sem login) pra o proprietário só enviar avisos de pagamento.
   tokenAvisoPagamento String? @unique
@@ -1229,11 +1231,17 @@ model LancamentoCaminhao {
   valor     Decimal                @db.Decimal(10, 2)
   data      DateTime               @default(now())
 
+  // Preenchido quando a despesa veio da Conciliação do Extrato (botão
+  // "Aplicar nos caminhões"). Reaplicar/desfazer apaga só estes.
+  conciliacaoExtratoId String?
+  conciliacaoExtrato   ConciliacaoExtrato? @relation(fields: [conciliacaoExtratoId], references: [id], onDelete: Cascade)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([empresaId, placa])
   @@index([tipo])
+  @@index([conciliacaoExtratoId])
 }
 
 // Certificado digital (e-CNPJ) da empresa, usado pra autenticar via mTLS
@@ -1626,4 +1634,90 @@ model ContaReceberRateio {
 
   @@unique([contaReceberId, caminhaoId])
   @@index([caminhaoId])
+}
+
+// =============================================================================
+// Conciliação do Extrato: o extrato do mês (Sicredi completo + relatório de
+// Pix) vira uma lista de pagamentos; cada um é classificado (caminhão, geral,
+// sócios, não é despesa, já lançado). Pode ser classificado por um link
+// público. "Aplicar" grava as partes de caminhão como LancamentoCaminhao.
+// =============================================================================
+enum StatusConciliacaoExtrato {
+  ABERTA
+  APLICADA
+}
+
+model ConciliacaoExtrato {
+  id        String  @id @default(uuid())
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  mes      String // AAAA-MM
+  banco    String?
+  arquivos String[]
+
+  totalPagamentos   Float
+  totalRecebimentos Float
+  nPagamentos       Int
+  nRecebimentos     Int
+  saldoAnterior     Float?
+  saldoFinal        Float?
+
+  status            StatusConciliacaoExtrato @default(ABERTA)
+  pendenteReaplicar Boolean                  @default(false)
+  aplicadoEm        DateTime?
+  aplicadoPor       String?
+
+  token          String?   @unique
+  linkEnviadoEm  DateTime?
+  linkEnviadoPor String?
+
+  criadoPor String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  itens       ConciliacaoExtratoItem[]
+  lancamentos LancamentoCaminhao[]
+
+  @@index([empresaId, mes])
+}
+
+model ConciliacaoExtratoItem {
+  id            String             @id @default(uuid())
+  conciliacaoId String
+  conciliacao   ConciliacaoExtrato @relation(fields: [conciliacaoId], references: [id], onDelete: Cascade)
+
+  ordem     Int
+  data      DateTime
+  hora      String?
+  tipo      String // PIX | BOLETO | TRANSFERENCIA | TARIFA | DEBITO | OUTRO
+  nome      String
+  documento String?
+  descricao String
+  valor     Float
+
+  // [{ k, v }] — k = id do caminhão ou GERAL | SOCIO | NAO | JA_LANCADO. Vazio = pendente.
+  partes     Json    @default("[]")
+  origem     String? // AUTO | LINK | MANUAL
+  motivo     String? // por que foi classificado automaticamente
+  sugestao   String? // k sugerido (nome do motorista etc.)
+  nota       String?
+  contaPagar String? // conta a pagar que parece ser este mesmo pagamento
+
+  @@index([conciliacaoId])
+}
+
+// "FQA" → caminhão do POZ; "GIOVANNI" → POZ; "NU GALHO" → SOCIO.
+model ConciliacaoVinculo {
+  id        String  @id @default(uuid())
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  termo   String // maiúsculo, sem acento
+  tipo    String // PLACA (palavra na descrição) | NOME (nome/descrição contém)
+  destino String // id do caminhão ou GERAL | SOCIO | NAO
+
+  createdAt DateTime @default(now())
+
+  @@unique([empresaId, termo])
 }

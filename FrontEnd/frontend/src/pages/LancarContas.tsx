@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import { AbasContas } from '../components/AbasContas';
 import { useAuth } from '../context/AuthContext';
 import { corPlaca } from '../lib/corPlaca';
+import { RateioCarretasModal } from '../components/RateioCarretasModal';
 
 // =============================================================================
 // Lançar Contas — boletos e notas enviados (pelo link ou aqui) chegam como
@@ -83,6 +84,7 @@ type Parcela = { valor: string; vencimento: string };
 type Form = {
     fornecedor: string; descricao: string; categoriaId: string; caminhaoId: string; grupo: string;
     tipo: string; formaPagamento: string; codigoBarras: string; observacao: string; parcelas: Parcela[];
+    rateioIds: string[]; rateioValores?: number[]; // 2+ caminhões = conta dividida
 };
 
 const formDe = (e: Envio): Form => ({
@@ -95,6 +97,7 @@ const formDe = (e: Envio): Form => ({
     formaPagamento: e.tipoDocumento === 'BOLETO' ? 'BOLETO' : 'PIX',
     codigoBarras: e.codigoBarras ?? '',
     observacao: '',
+    rateioIds: [],
     parcelas: e.parcelas?.length
         ? e.parcelas.map((p) => ({ valor: p.valor.toFixed(2).replace('.', ','), vencimento: p.vencimento }))
         : [{ valor: e.valor ? e.valor.toFixed(2).replace('.', ',') : '', vencimento: e.vencimento ?? hojeISO() }],
@@ -190,6 +193,7 @@ export function LancarContas() {
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [lancando, setLancando] = useState(false);
     const [nParcelas, setNParcelas] = useState('2');
+    const [modalRateio, setModalRateio] = useState(false);
 
     async function abrirArquivo(id: string, nova = true) {
         const r = await api.get(`/financeiro-nf/contas-enviadas/${id}/arquivo`, { responseType: 'blob' });
@@ -236,8 +240,12 @@ export function LancarContas() {
         if (!form) return;
         setLancando(true);
         try {
+            const { rateioIds, rateioValores, ...resto } = form;
+            const dividida = rateioIds.length >= 2;
             const r = await api.patch(`/financeiro-nf/contas-enviadas/${envio.id}/lancar`, {
-                ...form,
+                ...resto,
+                caminhaoId: dividida ? '' : resto.caminhaoId,
+                ...(dividida ? { rateioCaminhaoIds: rateioIds, rateioValores } : {}),
                 parcelas: form.parcelas.map((p) => ({ valor: numero(p.valor), vencimento: p.vencimento })),
             });
             alert(`${r.data.criadas} conta${r.data.criadas === 1 ? '' : 's'} a pagar criada${r.data.criadas === 1 ? '' : 's'}.`);
@@ -262,6 +270,22 @@ export function LancarContas() {
 
     return (
         <div className="space-y-5">
+            {modalRateio && form && (
+                <RateioCarretasModal
+                    caminhoes={caminhoes}
+                    valorTotal={totalParcelas || undefined}
+                    inicial={form.rateioIds.length >= 2 ? form.rateioIds : form.caminhaoId ? [form.caminhaoId] : []}
+                    inicialValores={form.rateioIds.length >= 2 ? form.rateioValores : undefined}
+                    titulo="Dividir esta conta entre caminhões"
+                    onConfirmar={(ids, valores) => {
+                        setForm((f) => (f ? (ids.length >= 2
+                            ? { ...f, rateioIds: ids, rateioValores: valores }
+                            : { ...f, rateioIds: [], rateioValores: undefined, caminhaoId: ids[0] ?? '' }) : f));
+                        setModalRateio(false);
+                    }}
+                    onFechar={() => setModalRateio(false)}
+                />
+            )}
             <AbasContas ativa="lancar" />
             <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Lançar Contas</h1>
@@ -419,10 +443,28 @@ export function LancarContas() {
                                     </div>
                                     <div>
                                         <label className={rotulo}>Caminhão</label>
-                                        <select className={campo} value={form.caminhaoId} onChange={(ev) => set('caminhaoId', ev.target.value)}>
-                                            <option value="">Geral (sem caminhão)</option>
-                                            {caminhoes.map((c) => <option key={c.id} value={c.id}>{c.placa}</option>)}
-                                        </select>
+                                        {form.rateioIds.length >= 2 ? (
+                                            <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40">
+                                                {form.rateioIds.map((id, i) => {
+                                                    const placa = caminhoes.find((c) => c.id === id)?.placa ?? '?';
+                                                    const v = form.rateioValores?.[i] ?? totalParcelas / form.rateioIds.length;
+                                                    return <span key={id} className={`px-1.5 py-0.5 rounded border text-[11px] font-bold ${corPlaca(placa)}`}>{placa} {moeda(v)}</span>;
+                                                })}
+                                                <button type="button" onClick={() => setModalRateio(true)} className="ml-auto text-xs text-blue-600 hover:underline">Alterar</button>
+                                                <button type="button" onClick={() => setForm((f) => (f ? { ...f, rateioIds: [], rateioValores: undefined } : f))} className="text-xs text-red-500 hover:underline">Remover</button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex gap-2">
+                                                <select className={campo} value={form.caminhaoId} onChange={(ev) => set('caminhaoId', ev.target.value)}>
+                                                    <option value="">Geral (sem caminhão)</option>
+                                                    {caminhoes.map((c) => <option key={c.id} value={c.id}>{c.placa}</option>)}
+                                                </select>
+                                                <button type="button" onClick={() => setModalRateio(true)} title="Dividir o valor entre vários caminhões"
+                                                    className="shrink-0 px-3 rounded-lg border border-gray-300 dark:border-gray-700 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 whitespace-nowrap">
+                                                    Dividir
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                     <div>
                                         <label className={rotulo}>Quadro</label>
