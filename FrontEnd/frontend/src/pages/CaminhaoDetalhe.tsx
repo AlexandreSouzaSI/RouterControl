@@ -43,7 +43,7 @@ type Lancamento = {
     descricao: string;
     valor: string | number;
     data: string;
-    origem?: 'MANUAL' | 'CONTA_PAGAR' | 'CONTA_RECEBER' | 'EXTRATO';
+    origem?: 'MANUAL' | 'CONTA_PAGAR' | 'CONTA_RECEBER' | 'EXTRATO' | 'ANTECIPACAO';
     status?: 'ABERTA' | 'PAGA' | 'VENCIDA' | 'CANCELADA' | 'PARCIAL';
 };
 
@@ -337,7 +337,7 @@ export function CaminhaoDetalhe() {
                                                 <span className="text-sm font-semibold text-blue-700 dark:text-blue-400">
                                                     {formatCurrency(Number(l.valor))}
                                                 </span>
-                                                {l.origem === 'CONTA_RECEBER' ? (
+                                                {l.origem === 'CONTA_RECEBER' || l.origem === 'ANTECIPACAO' ? (
                                                     <Link
                                                         to="/financeiro-nf/contas-receber"
                                                         title="Ver em Contas a Receber"
@@ -386,10 +386,10 @@ export function CaminhaoDetalhe() {
                                                 <span className="text-sm font-semibold text-red-700 dark:text-red-400">
                                                     {formatCurrency(Number(l.valor))}
                                                 </span>
-                                                {l.origem === 'CONTA_PAGAR' || l.origem === 'EXTRATO' ? (
+                                                {l.origem === 'CONTA_PAGAR' || l.origem === 'EXTRATO' || l.origem === 'ANTECIPACAO' ? (
                                                     <Link
-                                                        to={l.origem === 'EXTRATO' ? '/financeiro-nf/conciliacao-extrato' : '/financeiro-nf/contas-pagar'}
-                                                        title={l.origem === 'EXTRATO' ? 'Veio da Conciliação do Extrato' : 'Ver em Contas a Pagar'}
+                                                        to={l.origem === 'EXTRATO' ? '/financeiro-nf/conciliacao-extrato' : l.origem === 'ANTECIPACAO' ? '/financeiro-nf/contas-receber' : '/financeiro-nf/contas-pagar'}
+                                                        title={l.origem === 'EXTRATO' ? 'Veio da Conciliação do Extrato' : l.origem === 'ANTECIPACAO' ? 'Taxa da antecipação (Contas a Receber → Antecipação)' : 'Ver em Contas a Pagar'}
                                                         className="p-1 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition"
                                                     >
                                                         <Landmark size={14} />

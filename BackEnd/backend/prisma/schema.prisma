@@ -56,6 +56,7 @@ model Caminhao {
   contasReceber       ContaReceber[]
   rateiosPagar        ContaPagarRateio[]
   rateiosReceber      ContaReceberRateio[]
+  antecipacoes        AntecipacaoRecebivelParte[]
   uploadPeriods       UploadPeriod[]
   tripRecords         TripRecord[]
   stopRecords         StopRecord[]
@@ -220,6 +221,7 @@ model Empresa {
   viagemPlanilhaAbas ViagemPlanilhaAba[]
   conciliacoesExtrato ConciliacaoExtrato[]
   conciliacaoVinculos ConciliacaoVinculo[]
+  antecipacoesRecebiveis AntecipacaoRecebivel[]
 
   // Link secreto (sem login) pra o proprietário só enviar avisos de pagamento.
   tokenAvisoPagamento String? @unique
@@ -1720,4 +1722,47 @@ model ConciliacaoVinculo {
   createdAt DateTime @default(now())
 
   @@unique([empresaId, termo])
+}
+
+// =============================================================================
+// Antecipação de recebíveis: alguém adianta X (ex.: 80 mil) e recebe de volta
+// X + taxa num vencimento. Cada caminhão ganha sua parte como RECEITA na data
+// do adiantamento; os próximos CT-es recebidos dele, até completar essa parte,
+// NÃO contam de novo (já foram antecipados). Na tela do caminhão a despesa é só
+// a taxa. A devolução (X + taxa) vira uma Conta a Pagar ao credor, sem caminhão.
+// =============================================================================
+model AntecipacaoRecebivel {
+  id        String  @id @default(uuid())
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  credor          String
+  valor           Float
+  taxa            Float // em R$
+  taxaPercentual  Float?
+  dataRecebimento DateTime
+  vencimento      DateTime
+  observacao      String?
+
+  contaPagarId String? @unique // Conta a Pagar da devolução (valor + taxa)
+
+  criadoPor String?
+  createdAt DateTime @default(now())
+
+  partes AntecipacaoRecebivelParte[]
+
+  @@index([empresaId])
+}
+
+model AntecipacaoRecebivelParte {
+  id            String               @id @default(uuid())
+  antecipacaoId String
+  antecipacao   AntecipacaoRecebivel @relation(fields: [antecipacaoId], references: [id], onDelete: Cascade)
+  caminhaoId    String
+  caminhao      Caminhao             @relation(fields: [caminhaoId], references: [id], onDelete: Cascade)
+  valor         Float // parte do valor antecipado
+  taxa          Float // parte da taxa
+
+  @@index([caminhaoId])
+  @@index([antecipacaoId])
 }

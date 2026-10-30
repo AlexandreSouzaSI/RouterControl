@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Landmark, Loader2, CheckCircle2, Trash2, Pencil, Undo2, X, FileUp } from 'lucide-react';
+import { Plus, Landmark, Loader2, CheckCircle2, Trash2, Pencil, Undo2, X, FileUp, HandCoins } from 'lucide-react';
 import { FiltroMes } from '../components/FiltroMes';
 import { ImportarCteModal } from '../components/ImportarCteModal';
+import { AntecipacoesModal } from '../components/AntecipacoesModal';
 import { nomeMes } from '../lib/mes';
 import { api } from '../services/api';
 import { Modal } from '../components/Modal';
@@ -80,6 +81,7 @@ export function ContasReceber() {
     // '' = todos os meses; AAAA-MM = só aquele mês (recebidas pela data do recebimento, abertas pelo vencimento)
     const [mes, setMes] = useState('');
     const [importarAberto, setImportarAberto] = useState(false);
+    const [antecipacoesAberto, setAntecipacoesAberto] = useState(false);
 
     const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
     const [massaCaminhao, setMassaCaminhao] = useState('');
@@ -256,6 +258,10 @@ export function ContasReceber() {
                 <button onClick={() => setImportarAberto(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-200 text-sm font-medium">
                     <FileUp size={16} /> Importar XML de CT-e
                 </button>
+                <button onClick={() => setAntecipacoesAberto(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white dark:bg-[#111827] border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-200 text-sm font-medium">
+                    <HandCoins size={16} /> Antecipação de recebíveis
+                </button>
+                {antecipacoesAberto && <AntecipacoesModal caminhoes={caminhoes} onFechar={() => setAntecipacoesAberto(false)} />}
                 <button onClick={abrirNova} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium">
                     <Plus size={16} /> Nova Conta a Receber
                 </button>

@@ -12,11 +12,13 @@ import { ContasEnviadasController, ContasEnviadasPublicController } from './cont
 import { ContasEnviadasService } from './contas-enviadas.service';
 import { ConciliacaoExtratoController, ConciliacaoExtratoPublicController } from './conciliacao-extrato.controller';
 import { ConciliacaoExtratoService } from './conciliacao-extrato.service';
+import { AntecipacoesController } from './antecipacoes.controller';
+import { AntecipacoesService } from './antecipacoes.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Module({
-    controllers: [FinanceiroNfController, PagamentosAvisadosController, PagamentosAvisadosPublicController, PagarHojeController, PagarHojePublicController, ContasReceberController, ContasEnviadasController, ContasEnviadasPublicController, ConciliacaoExtratoController, ConciliacaoExtratoPublicController],
-    providers: [FinanceiroNfService, PagamentosAvisadosService, PagarHojeService, ContasReceberService, ContasEnviadasService, ConciliacaoExtratoService, CertificadoDigitalService, PrismaService],
+    controllers: [FinanceiroNfController, PagamentosAvisadosController, PagamentosAvisadosPublicController, PagarHojeController, PagarHojePublicController, ContasReceberController, ContasEnviadasController, ContasEnviadasPublicController, ConciliacaoExtratoController, ConciliacaoExtratoPublicController, AntecipacoesController],
+    providers: [FinanceiroNfService, PagamentosAvisadosService, PagarHojeService, ContasReceberService, ContasEnviadasService, ConciliacaoExtratoService, AntecipacoesService, CertificadoDigitalService, PrismaService],
     exports: [FinanceiroNfService, CertificadoDigitalService],
 })
 export class FinanceiroNfModule { }

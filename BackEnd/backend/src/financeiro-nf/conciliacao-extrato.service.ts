@@ -234,6 +234,8 @@ export class ConciliacaoExtratoService {
                 rateios: { select: { caminhaoId: true, valor: true } },
             },
         });
+        // Devolução de antecipação de recebíveis: a taxa já está nos caminhões pela antecipação.
+        const devolucoes = new Set((await this.prisma.antecipacaoRecebivel.findMany({ where: { empresaId, contaPagarId: { not: null } }, select: { contaPagarId: true } })).map((a) => a.contaPagarId as string));
         // Só refaz o que é automático ou pendente; o que foi classificado à mão/pelo link fica.
         const refazer = (i: { origem: string | null }) => i.origem !== 'MANUAL' && i.origem !== 'LINK';
         const usadas = new Set(itens.filter((i) => !refazer(i)).map((i) => i.contaPagar).filter(Boolean) as string[]);
@@ -267,7 +269,12 @@ export class ConciliacaoExtratoService {
             const outrosMesmoValor = itens.filter((o) => o.id !== it.id && cent(o.valor) === cent(it.valor) && Math.abs(o.data.getTime() - it.data.getTime()) <= 5 * 86400000).length;
             const conta = (comNome.length ? comNome : cands.length === 1 && outrosMesmoValor === 0 ? cands : [])
                 .sort((a, b) => Math.abs(a.pagoEm!.getTime() - it.data.getTime()) - Math.abs(b.pagoEm!.getTime() - it.data.getTime()))[0];
-            if (conta && (conta.caminhaoId || conta.rateios.length)) {
+            if (conta && devolucoes.has(conta.id)) {
+                usadas.add(conta.id);
+                contaPagar = conta.id;
+                partes = [{ k: 'JA_LANCADO', v: it.valor }];
+                motivo = `devolução de antecipação de recebíveis (${conta.descricao}) — nos caminhões já entra só a taxa`;
+            } else if (conta && (conta.caminhaoId || conta.rateios.length)) {
                 usadas.add(conta.id);
                 contaPagar = conta.id;
                 const rs = conta.rateios.filter((r) => r.caminhaoId && ids.has(r.caminhaoId));

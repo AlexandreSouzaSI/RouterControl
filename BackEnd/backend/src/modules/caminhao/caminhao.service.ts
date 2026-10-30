@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { dentroDaFaixa, faixaDoMes } from '../../common/mes.util';
+import { receitasDoCaminhao } from '../../common/antecipacao.util';
 
 // Data que decide em qual mês uma conta a pagar cai: o vencimento (mesma
 // regra do filtro de mês de Contas a Pagar).
@@ -221,17 +222,14 @@ export class CaminhaoService {
             })).filter((r) => dentroDaFaixa(dataRefPagar(r.contaPagar), faixa));
             totalDespesa += rateiosPagar.reduce((acc, r) => acc + r.valor, 0);
 
-            // Contas a Receber já recebidas (conciliadas) viram receita do caminhão.
-            const recebidas = (await this.prisma.contaReceber.findMany({
-                where: { caminhaoId: caminhao.id, empresaId, status: 'RECEBIDA' },
-                select: { valor: true, valorRecebido: true, recebidoEm: true, vencimento: true, dataEmissao: true },
-            })).filter((c) => dentroDaFaixa(c.dataEmissao ?? c.recebidoEm ?? c.vencimento, faixa));
-            totalReceitaFinal += recebidas.reduce((acc, c) => acc + (c.valorRecebido ?? c.valor), 0);
-            const rateiosReceber = (await this.prisma.contaReceberRateio.findMany({
-                where: { caminhaoId: caminhao.id, contaReceber: { empresaId, status: 'RECEBIDA' } },
-                select: { valor: true, contaReceber: { select: { recebidoEm: true, vencimento: true, dataEmissao: true } } },
-            })).filter((r) => dentroDaFaixa(r.contaReceber.dataEmissao ?? r.contaReceber.recebidoEm ?? r.contaReceber.vencimento, faixa));
-            totalReceitaFinal += rateiosReceber.reduce((acc, r) => acc + r.valor, 0);
+            // Contas a Receber já recebidas viram receita do caminhão, menos o que
+            // já tinha entrado por antecipação de recebíveis (ver antecipacao.util).
+            const { recebimentos, partes } = await receitasDoCaminhao(this.prisma, empresaId, caminhao.id);
+            totalReceitaFinal += recebimentos.filter((r) => dentroDaFaixa(r.dataRef, faixa)).reduce((acc, r) => acc + r.valor, 0);
+            // A parte da antecipação é receita na data em que o dinheiro entrou;
+            // a parte da taxa é despesa no vencimento da devolução.
+            totalReceitaFinal += partes.filter((p) => dentroDaFaixa(p.dataRecebimento, faixa)).reduce((acc, p) => acc + p.valor, 0);
+            totalDespesa += partes.filter((p) => dentroDaFaixa(p.vencimento, faixa)).reduce((acc, p) => acc + p.taxa, 0);
         }
 
         return {
@@ -304,31 +302,38 @@ export class CaminhaoService {
             status: r.contaPagar.status,
         }));
 
-        const recebidas = await this.prisma.contaReceber.findMany({
-            where: { caminhaoId: caminhao.id, empresaId, status: 'RECEBIDA' },
-        });
-        const daContasReceber = recebidas.map((c) => ({
-            id: `receber-${c.id}`,
+        const { recebimentos, partes } = await receitasDoCaminhao(this.prisma, empresaId, caminhao.id);
+        const brl = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const daContasReceber = recebimentos.map((r) => ({
+            id: r.chave,
             tipo: 'RECEITA' as const,
-            descricao: `${c.descricao}${c.cliente ? ` — ${c.cliente}` : ''} (Conta a Receber)`,
-            valor: c.valorRecebido ?? c.valor,
-            data: c.dataEmissao ?? c.recebidoEm ?? c.vencimento,
-            origem: 'CONTA_RECEBER' as const,
-        }));
-        const rateiosReceber = await this.prisma.contaReceberRateio.findMany({
-            where: { caminhaoId: caminhao.id, contaReceber: { empresaId, status: 'RECEBIDA' } },
-            include: { contaReceber: { include: { rateios: { select: { id: true } } } } },
-        });
-        const daRateioReceber = rateiosReceber.map((r) => ({
-            id: `rateio-receber-${r.id}`,
-            tipo: 'RECEITA' as const,
-            descricao: `${r.contaReceber.descricao} (Conta a Receber · dividida em ${r.contaReceber.rateios.length} carretas)`,
+            descricao: r.abatido > 0
+                ? `${r.descricao} — R$ ${brl(r.abatido)} de R$ ${brl(r.valorOriginal)} já entrou pela antecipação`
+                : r.descricao,
             valor: r.valor,
-            data: r.contaReceber.dataEmissao ?? r.contaReceber.recebidoEm ?? r.contaReceber.vencimento,
+            data: r.dataRef,
             origem: 'CONTA_RECEBER' as const,
         }));
+        const daAntecipacao = partes.flatMap((p) => [
+            {
+                id: `antecipacao-${p.id}`,
+                tipo: 'RECEITA' as const,
+                descricao: `Antecipação de recebíveis — ${p.credor} (parte de R$ ${brl(p.valorTotal)}; já abatido nos CT-es: R$ ${brl(p.consumido)})`,
+                valor: p.valor,
+                data: p.dataRecebimento,
+                origem: 'ANTECIPACAO' as const,
+            },
+            ...(p.taxa > 0 ? [{
+                id: `antecipacao-taxa-${p.id}`,
+                tipo: 'DESPESA' as const,
+                descricao: `Taxa da antecipação — ${p.credor}`,
+                valor: p.taxa,
+                data: p.vencimento,
+                origem: 'ANTECIPACAO' as const,
+            }] : []),
+        ]);
 
-        return [...manuais, ...daContasPagar, ...daRateioPagar, ...daContasReceber, ...daRateioReceber]
+        return [...manuais, ...daContasPagar, ...daRateioPagar, ...daContasReceber, ...daAntecipacao]
             .filter((l) => dentroDaFaixa(l.data, faixa))
             .sort(
             (a, b) => new Date(b.data).getTime() - new Date(a.data).getTime(),
