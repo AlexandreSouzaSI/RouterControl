@@ -112,15 +112,16 @@ services:
   # Financeiro → Recebimento automático). Só o backend fala com ele.
   evolution_api:
     image: ${EVOLUTION_IMAGE:-evoapicloud/evolution-api:latest}
-    container_name: evolution_api
+    # Nome próprio: a VPS já tem outro container chamado "evolution_api".
+    # (O backend acha este pelo nome do serviço, evolution_api, na rede do projeto.)
+    container_name: evolution_rota
     restart: unless-stopped
     depends_on:
       evolution_db_init:
         condition: service_completed_successfully
-    ports:
-      - "127.0.0.1:8085:8080"
+    # Sem porta aberta pra fora: só o backend fala com ele, pela rede interna.
     environment:
-      SERVER_URL: http://localhost:8085
+      SERVER_URL: http://evolution_api:8080
       AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY no .env}
       DATABASE_ENABLED: "true"
       DATABASE_PROVIDER: postgresql
