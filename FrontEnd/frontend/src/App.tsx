@@ -32,6 +32,7 @@ import { EnviarConta } from './pages/EnviarConta';
 import { LancarContas } from './pages/LancarContas';
 import { ConciliacaoExtrato, ConciliacaoExtratoDetalhe } from './pages/ConciliacaoExtrato';
 import { ConciliarExtratoPublico } from './pages/ConciliarExtratoPublico';
+import { RecebimentoAutomatico } from './pages/RecebimentoAutomatico';
 import { PagarHoje } from './pages/PagarHoje';
 import { Cadastros } from './pages/Cadastros';
 import { Admin } from './pages/Admin';
@@ -92,6 +93,7 @@ export default function App() {
                     <Route path="/financeiro-nf/lancar-contas" element={<LancarContas />} />
                     <Route path="/financeiro-nf/conciliacao-extrato" element={<ConciliacaoExtrato />} />
                     <Route path="/financeiro-nf/conciliacao-extrato/:id" element={<ConciliacaoExtratoDetalhe />} />
+                    <Route path="/financeiro-nf/recebimento-automatico" element={<RecebimentoAutomatico />} />
                     <Route path="/cadastros" element={<Cadastros />} />
                     <Route path="/admin" element={<Admin />} />
                   </Routes>

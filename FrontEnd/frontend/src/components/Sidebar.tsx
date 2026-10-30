@@ -16,6 +16,7 @@ import {
     ClipboardList,
     PieChart,
     Scale,
+    Inbox,
     type LucideIcon,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
@@ -77,6 +78,7 @@ const grupos: MenuGroup[] = [
             { name: 'Contas a Pagar', icon: Wallet, path: '/financeiro-nf/contas-pagar' },
             { name: 'Contas a Receber', icon: Banknote, path: '/financeiro-nf/contas-receber', pfOculto: true },
             { name: 'Conciliação do Extrato', icon: Scale, path: '/financeiro-nf/conciliacao-extrato' },
+            { name: 'Recebimento automático', icon: Inbox, path: '/financeiro-nf/recebimento-automatico' },
         ],
     },
     {

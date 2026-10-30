@@ -74,6 +74,16 @@ services:
       TRUCKS_URL: ${TRUCKS_URL:?defina TRUCKS_URL no .env}
       TRUCKS_LOGIN: ${TRUCKS_LOGIN:?defina TRUCKS_LOGIN no .env}
       TRUCKS_SENHA: ${TRUCKS_SENHA:?defina TRUCKS_SENHA no .env}
+      # Recebimento automático — WhatsApp (Evolution API, container abaixo)
+      EVOLUTION_URL: http://evolution_api:8080
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY no .env}
+      EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-financeiro}
+      WEBHOOK_BASE_URL: http://backend_rota:3000
+      # Recebimento automático — e-mail dos boletos (IMAP). Vazio = desligado.
+      IMAP_HOST: ${IMAP_HOST:-}
+      IMAP_PORT: ${IMAP_PORT:-993}
+      IMAP_USER: ${IMAP_USER:-}
+      IMAP_PASS: ${IMAP_PASS:-}
     volumes:
       # Sem isso, todo "docker compose up -d --build" recria o container
       # do zero e apaga o certificado digital (.pfx) e os XMLs de NF já
@@ -81,6 +91,52 @@ services:
       # um arquivo que já era. Com o volume, os arquivos sobrevivem a
       # rebuilds normalmente (igual o Controle NF já faz).
       - backend_rota_storage:/app/storage
+
+  # Cria (uma vez) o banco "evolution" dentro do mesmo Postgres. Roda e sai.
+  evolution_db_init:
+    image: postgres:15
+    depends_on:
+      - postgres_rota
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    entrypoint:
+      - sh
+      - -c
+      - >
+        until pg_isready -h postgres_rota -U postgres; do sleep 2; done;
+        psql -h postgres_rota -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='evolution'" | grep -q 1
+        || psql -h postgres_rota -U postgres -c "CREATE DATABASE evolution"
+    restart: "no"
+
+  # WhatsApp do financeiro (não oficial; conecta lendo QR code na tela
+  # Financeiro → Recebimento automático). Só o backend fala com ele.
+  evolution_api:
+    image: ${EVOLUTION_IMAGE:-evoapicloud/evolution-api:latest}
+    container_name: evolution_api
+    restart: unless-stopped
+    depends_on:
+      evolution_db_init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8085:8080"
+    environment:
+      SERVER_URL: http://localhost:8085
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY no .env}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres_rota:5432/evolution?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: evolution_rota
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+      CONFIG_SESSION_PHONE_CLIENT: Financeiro
+      CONFIG_SESSION_PHONE_NAME: Chrome
+    volumes:
+      - evolution_instances:/evolution/instances
 
   frontend_rota:
     build:
@@ -97,3 +153,4 @@ services:
 volumes:
   postgres_rota_data:
   backend_rota_storage:
+  evolution_instances:

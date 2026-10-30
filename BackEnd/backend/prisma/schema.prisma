@@ -222,6 +222,8 @@ model Empresa {
   conciliacoesExtrato ConciliacaoExtrato[]
   conciliacaoVinculos ConciliacaoVinculo[]
   antecipacoesRecebiveis AntecipacaoRecebivel[]
+  integracoesEntrada     IntegracaoEntrada[]
+  entradasAutomaticas    EntradaAutomatica[]
 
   // Link secreto (sem login) pra o proprietário só enviar avisos de pagamento.
   tokenAvisoPagamento String? @unique
@@ -1765,4 +1767,43 @@ model AntecipacaoRecebivelParte {
 
   @@index([caminhaoId])
   @@index([antecipacaoId])
+}
+
+// =============================================================================
+// Recebimento automático: boletos/notas por e-mail (IMAP) e boletos, notas e
+// comprovantes pelo WhatsApp (Evolution API). Tudo que chega vira pendência:
+// boleto/nota → "Lançar contas" (ContaEnviada); comprovante → "Registrar
+// pagamentos" (PagamentoAvisado). Ninguém lança nada sozinho.
+// =============================================================================
+model IntegracaoEntrada {
+  id        String  @id @default(uuid())
+  canal     String  @unique // WHATSAPP | EMAIL
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  ativo     Boolean @default(true)
+  segredo   String? // parte secreta da URL do webhook do WhatsApp
+
+  ultimoEvento DateTime?
+  ultimoErro   String?
+  updatedAt    DateTime  @updatedAt
+}
+
+model EntradaAutomatica {
+  id            String  @id @default(uuid())
+  empresaId     String
+  empresa       Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  canal         String // WHATSAPP | EMAIL
+  externoId     String  @unique // id da mensagem (+ anexo), evita processar duas vezes
+  remetente     String?
+  nomeRemetente String?
+  assunto       String?
+  arquivoNome   String?
+  tipo          String // BOLETO_NOTA | COMPROVANTE
+  status        String // OK | DUPLICADO | ERRO
+  mensagem      String?
+  destinoTipo   String? // CONTA_ENVIADA | PAGAMENTO_AVISADO
+  destinoId     String?
+  createdAt     DateTime @default(now())
+
+  @@index([empresaId, createdAt])
 }
