@@ -11,13 +11,55 @@ import { juntarExtratos, lerExtrato, ExtratoLido } from './extrato-parser';
 // partes de caminhão como despesa (LancamentoCaminhao) do mês.
 // =============================================================================
 
-export type Parte = { k: string; v: number };
+// c = carreta (sub-categoria do cavalo), ex.: "FQM4596" ou "IRC".
+export type Parte = { k: string; v: number; c?: string };
 export const FIXOS = ['GERAL', 'SOCIO', 'AGREGADO', 'NAO', 'JA_LANCADO'] as const;
 
 const norm = (s: string) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
 const placaLimpa = (p: string) => norm(p).replace(/[^A-Z0-9]/g, '');
 const cent = (v: number) => Math.round(v * 100);
 const DIVIDIR = /TODAS? (AS )?PLACAS|TODOS (OS )?(CAVALOS|CAMINHOES|CARROS|VEICULOS)|DIVIDIR (EM|PARA|ENTRE) TOD/;
+
+const RE_PLACA = /\b([A-Z]{3})-?(\d[A-Z0-9]\d{2})\b/g;
+const NOMES_COMUNS = ['JOAO', 'JOSE', 'ANTONIO', 'FRANCISCO', 'CARLOS', 'PAULO', 'PEDRO', 'LUCAS', 'LUIZ', 'MARCOS', 'MARIA', 'ANA'];
+
+// Lê blocos de conjunto: "Motorista: X / Cavalo: ABC-1D23 / Carretas: ... / Dolly: ...".
+// Também aceita bloco só com placas (1ª = cavalo, demais = carretas). Linhas de
+// rastreador/TAG são ignoradas.
+export function lerConjuntos(texto: string) {
+    const out: { cavalo: string; carretas: string[]; motorista: string | null }[] = [];
+    let cur: { cavalo: string | null; carretas: string[]; motorista: string | null } | null = null;
+    const fechar = () => { if (cur?.cavalo) out.push({ cavalo: cur.cavalo, carretas: [...new Set(cur.carretas.filter((c) => c !== cur!.cavalo))], motorista: cur.motorista }); };
+    for (const bruta of String(texto ?? '').split(/\r?\n/)) {
+        let l = norm(bruta).trim();
+        if (!l) continue;
+        if (/^\[\d{1,2}:\d{2}/.test(l)) { fechar(); cur = null; l = l.replace(/^\[[^\]]*\]\s*[^:]*:\s*/, ''); }
+        if (!cur) cur = { cavalo: null, carretas: [], motorista: null };
+        if (/RASTREADOR|ONIX|\bTAG\b|\bID\b/.test(l)) continue;
+        const placas = [...l.matchAll(RE_PLACA)].map((m) => m[1] + m[2]);
+        if (/^MOTORISTA/.test(l)) {
+            const nome = l.replace(/^MOTORISTA\s*:?\s*/, '').trim();
+            if (nome && !placas.length) cur.motorista = nome;
+            continue;
+        }
+        if (/CAVALO/.test(l) && placas.length) {
+            if (cur.cavalo && cur.cavalo !== placas[0]) { fechar(); cur = { cavalo: null, carretas: [], motorista: null }; }
+            cur.cavalo = placas[0]; cur.carretas.push(...placas.slice(1)); continue;
+        }
+        if (/CARRETA|DOLLY/.test(l)) { cur.carretas.push(...placas); continue; }
+        if (placas.length && !l.replace(RE_PLACA, '').replace(/[^A-Z]/g, '')) {
+            if (!cur.cavalo) { cur.cavalo = placas[0]; cur.carretas.push(...placas.slice(1)); } else cur.carretas.push(...placas);
+            continue;
+        }
+        if (!placas.length && /^[A-Z ]{5,}$/.test(l) && !cur.motorista) cur.motorista = l;
+    }
+    fechar();
+    // Motorista vira o 1º nome (ou os 2 primeiros, se o 1º for muito comum: "JOAO BATISTA").
+    return out.map((c) => {
+        const p = (c.motorista ?? '').split(/\s+/).filter(Boolean);
+        return { ...c, motorista: p.length ? (NOMES_COMUNS.includes(p[0]) && p[1] ? `${p[0]} ${p[1]}` : p[0]) : null };
+    });
+}
 
 function dividirIgual(valor: number, ks: string[]): Parte[] {
     const t = cent(valor);
@@ -29,12 +71,41 @@ function dividirIgual(valor: number, ks: string[]): Parte[] {
 export class ConciliacaoExtratoService {
     constructor(private readonly prisma: PrismaService) { }
 
-    private caminhoes(empresaId: string) {
+    private caminhoesTodos(empresaId: string) {
         return this.prisma.caminhao.findMany({
             where: { OR: [{ empresaId }, { empresaId: null }], ativo: true },
             select: { id: true, placa: true },
             orderBy: { placa: 'asc' },
         });
+    }
+
+    // Caminhões da conciliação = cavalos. Uma carreta cadastrada como caminhão
+    // (placa ligada a outro caminhão nos vínculos) não vira card/botão próprio.
+    private async caminhoes(empresaId: string) {
+        const [todos, vinc] = await Promise.all([
+            this.caminhoesTodos(empresaId),
+            this.prisma.conciliacaoVinculo.findMany({ where: { empresaId, tipo: 'PLACA' }, select: { termo: true, destino: true } }),
+        ]);
+        const idsTodos = new Set(todos.map((c) => c.id));
+        return todos.filter((c) => {
+            const p = placaLimpa(c.placa);
+            return !vinc.some((v) => v.destino !== c.id && idsTodos.has(v.destino) && (p === v.termo || (v.termo.length === 3 && p.startsWith(v.termo))));
+        });
+    }
+
+    // Carretas de cada cavalo (dos vínculos de placa): { idDoCavalo: ['FQM4596', 'FQL0363'] }.
+    private async carretasPorCavalo(empresaId: string, cavalos?: { id: string }[]) {
+        const ids = new Set((cavalos ?? (await this.caminhoes(empresaId))).map((c) => c.id));
+        const vinc = await this.prisma.conciliacaoVinculo.findMany({ where: { empresaId, tipo: 'PLACA' }, select: { termo: true, destino: true } });
+        const out: Record<string, string[]> = {};
+        for (const v of vinc) if (ids.has(v.destino)) (out[v.destino] ??= []).push(v.termo);
+        for (const k of Object.keys(out)) {
+            const l = out[k];
+            const completas = l.filter((t) => t.length > 3);
+            // Prefixo (3 letras) só aparece se não houver placa completa com ele (ex.: AXS sozinho).
+            out[k] = [...new Set([...completas, ...l.filter((t) => t.length === 3 && !completas.some((c) => c.startsWith(t)))])].sort();
+        }
+        return out;
     }
 
     private async daEmpresa(id: string, empresaId: string) {
@@ -122,7 +193,31 @@ export class ConciliacaoExtratoService {
             porPrefixo.set(pre, [...(porPrefixo.get(pre) ?? []), c.id]);
         }
         for (const [pre, l] of porPrefixo) if (l.length === 1 && !termosPlaca.has(pre)) termosPlaca.set(pre, l[0]);
-        for (const v of vinculos) if (v.tipo === 'PLACA' && validos(v.destino)) termosPlaca.set(placaLimpa(v.termo), v.destino);
+        // Vínculos de placa = carretas (ou apelidos). A placa completa também vale
+        // pelas 3 letras, se essas letras não forem de outro cavalo.
+        const carretaDe = new Map<string, string>(); // termo -> rótulo da carreta
+        const prefixoDe = new Map<string, string | null>();
+        const completasDe = new Map<string, string[]>(); // destino -> placas completas
+        for (const v of vinculos) {
+            if (v.tipo !== 'PLACA' || !validos(v.destino)) continue;
+            const t = placaLimpa(v.termo);
+            termosPlaca.set(t, v.destino);
+            if (ids.has(v.destino)) carretaDe.set(t, t);
+            if (t.length > 3) {
+                completasDe.set(v.destino, [...(completasDe.get(v.destino) ?? []), t]);
+                const pre = t.slice(0, 3);
+                const atual = prefixoDe.get(pre);
+                prefixoDe.set(pre, atual === undefined || atual === v.destino ? v.destino : null);
+            }
+        }
+        for (const [pre, dest] of prefixoDe) {
+            if (!dest || (termosPlaca.has(pre) && termosPlaca.get(pre) !== dest && !carretaDe.has(pre))) continue;
+            termosPlaca.set(pre, dest);
+            if (ids.has(dest)) {
+                const c = (completasDe.get(dest) ?? []).filter((x) => x.startsWith(pre));
+                carretaDe.set(pre, c.length ? c.sort().join('/') : pre); // "ASW" = as duas carretas ASW
+            }
+        }
         const termosNome = vinculos.filter((v) => v.tipo === 'NOME' && validos(v.destino)).map((v) => ({ termo: norm(v.termo).trim(), destino: v.destino }));
 
         // Contas a Pagar já pagas perto da data, pra não contar a despesa duas vezes.
@@ -151,7 +246,9 @@ export class ConciliacaoExtratoService {
         for (const it of itens) {
             if (!refazer(it)) continue;
             const texto = norm(`${it.nome} ${it.descricao}`);
-            const palavras = texto.split(/[^A-Z0-9]+/).filter(Boolean);
+            const palavras = texto.split(/[^A-Z0-9]+/).filter(Boolean)
+                // "EVU 9E79" (placa com espaço) vira "EVU9E79".
+                .reduce<string[]>((acc, w, i, l) => { if (/^\d[A-Z0-9]\d{2}$/.test(w) && i > 0 && /^[A-Z]{3}$/.test(l[i - 1])) acc[acc.length - 1] += w; else acc.push(w); return acc; }, []);
             let partes: Parte[] = [];
             let motivo: string | null = null;
             let contaPagar: string | null = null;
@@ -191,15 +288,30 @@ export class ConciliacaoExtratoService {
             if (!partes.length) {
                 const achados: string[] = [];
                 const citadas: string[] = [];
+                const carDe = new Map<string, Set<string>>(); // cavalo -> carretas citadas
+                const cavaloCitado = new Set<string>();
                 for (const w of palavras) {
                     let dest = termosPlaca.get(w);
                     let termo = w;
                     if (!dest && /^[A-Z]{3}\d/.test(w)) { dest = termosPlaca.get(w.slice(0, 3)); termo = w.slice(0, 3); }
-                    if (dest) { citadas.push(termo); if (!achados.includes(dest)) achados.push(dest); }
+                    if (!dest) continue;
+                    citadas.push(termo);
+                    if (!achados.includes(dest)) achados.push(dest);
+                    const rot = carretaDe.get(termo);
+                    if (rot) {
+                        const placaInteira = /^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(w) ? w : rot;
+                        if (!carDe.has(dest)) carDe.set(dest, new Set());
+                        carDe.get(dest)!.add(placaInteira);
+                    } else cavaloCitado.add(dest);
                 }
                 if (achados.length) {
-                    partes = dividirIgual(it.valor, achados);
-                    motivo = `placa ${[...new Set(citadas)].join('/')}${achados.length > 1 ? ' → dividido igual' : ''}`;
+                    // Só carreta citada (sem o cavalo) → vai pro cavalo com a sub-categoria Carreta.
+                    partes = dividirIgual(it.valor, achados).map((p) => {
+                        const cs = carDe.get(p.k);
+                        return cs && !cavaloCitado.has(p.k) ? { ...p, c: [...cs].join('/') } : p;
+                    });
+                    const comCarreta = partes.some((p) => p.c);
+                    motivo = `placa ${[...new Set(citadas)].join('/')}${comCarreta ? ' (carreta)' : ''}${achados.length > 1 ? ' → dividido igual' : ''}`;
                 }
             }
 
@@ -259,7 +371,8 @@ export class ConciliacaoExtratoService {
             this.prisma.conciliacaoVinculo.findMany({ where: { empresaId }, orderBy: { termo: 'asc' } }),
             this.prisma.lancamentoCaminhao.aggregate({ where: { conciliacaoExtratoId: id }, _count: true, _sum: { valor: true } }),
         ]);
-        return { ...c, caminhoes, vinculos, lancados: { quantidade: lancados._count, total: Number(lancados._sum.valor ?? 0) } };
+        const carretas = await this.carretasPorCavalo(empresaId, caminhoes);
+        return { ...c, caminhoes, carretas, vinculos, lancados: { quantidade: lancados._count, total: Number(lancados._sum.valor ?? 0) } };
     }
 
     // Valida e grava a classificação de vários itens (tela ou link).
@@ -278,7 +391,11 @@ export class ConciliacaoExtratoService {
             const data: Prisma.ConciliacaoExtratoItemUpdateInput = {};
             if (b.partes !== undefined) {
                 const partes = (Array.isArray(b.partes) ? b.partes : [])
-                    .map((p) => ({ k: String(p?.k ?? ''), v: Math.round(Number(p?.v) * 100) / 100 }))
+                    .map((p) => {
+                        const k = String(p?.k ?? '');
+                        const c = ids.has(k) && typeof p?.c === 'string' ? norm(p.c).replace(/[^A-Z0-9/]/g, '').slice(0, 40) : '';
+                        return { k, v: Math.round(Number(p?.v) * 100) / 100, ...(c ? { c } : {}) };
+                    })
                     .filter((p) => p.v > 0);
                 for (const p of partes) {
                     if (!ids.has(p.k) && !(FIXOS as readonly string[]).includes(p.k)) throw new BadRequestException(`Destino inválido no pagamento ${it.ordem}.`);
@@ -348,7 +465,7 @@ export class ConciliacaoExtratoService {
                     empresaId,
                     placa: pl.toUpperCase(),
                     tipo: 'DESPESA',
-                    descricao: `Extrato ${m}/${y}: ${it.nome}${it.descricao ? ` — ${it.descricao}` : ''}${dividido}`.slice(0, 250),
+                    descricao: `${p.c ? `[Carreta ${p.c}] ` : ''}Extrato ${m}/${y}: ${it.nome}${it.descricao ? ` — ${it.descricao}` : ''}${dividido}`.slice(0, 250),
                     valor: new Prisma.Decimal(p.v.toFixed(2)),
                     data: it.data,
                     conciliacaoExtratoId: id,
@@ -416,6 +533,29 @@ export class ConciliacaoExtratoService {
         };
         let salvos = 0;
         const erros: string[] = [];
+        // Texto de "conjuntos" (Cavalo: X / Carretas: Y e Z / Dolly: W / Motorista: ...) — o
+        // jeito que vem no WhatsApp. Cada carreta e dolly vira vínculo de placa pro cavalo.
+        const conjuntos = /CAVALO|CARRETA|DOLLY/i.test(texto ?? '') ? lerConjuntos(texto) : [];
+        if (conjuntos.length) {
+            const salvar = async (termo: string, tipo: 'PLACA' | 'NOME', destino: string, rotulo: string) => {
+                try { await this.salvarVinculo(empresaId, { termo, tipo, destino }); salvos++; } catch (e: any) { erros.push(`${rotulo}: ${e?.message ?? 'erro'}`); }
+            };
+            for (const cj of conjuntos) {
+                const destino = destinoDe(cj.cavalo);
+                if (!destino) { erros.push(`Cavalo ${cj.cavalo} não está cadastrado em Caminhões`); continue; }
+                const prefixos = new Set<string>();
+                for (const car of cj.carretas) {
+                    await salvar(car, 'PLACA', destino, `${car} → ${cj.cavalo}`);
+                    if (car.slice(0, 3) !== cj.cavalo.slice(0, 3)) prefixos.add(car.slice(0, 3));
+                }
+                for (const pre of prefixos) {
+                    const deOutro = conjuntos.some((o) => o.cavalo !== cj.cavalo && o.carretas.some((c) => c.startsWith(pre)));
+                    if (!deOutro) await salvar(pre, 'PLACA', destino, `${pre} → ${cj.cavalo}`);
+                }
+                if (cj.motorista) await salvar(cj.motorista, 'NOME', destino, `${cj.motorista} → ${cj.cavalo}`);
+            }
+            return { salvos, erros, conjuntos: conjuntos.length };
+        }
         for (const linhaBruta of String(texto ?? '').split(/\r?\n/).slice(0, 500)) {
             const linha = linhaBruta.trim();
             if (!linha || linha.startsWith('#')) continue;
@@ -472,7 +612,7 @@ export class ConciliacaoExtratoService {
             totalPagamentos: c.totalPagamentos, nPagamentos: c.nPagamentos, totalRecebimentos: c.totalRecebimentos,
             saldoAnterior: c.saldoAnterior, saldoFinal: c.saldoFinal,
             linkEnviadoEm: c.linkEnviadoEm, linkEnviadoPor: c.linkEnviadoPor,
-            caminhoes, itens,
+            caminhoes, carretas: await this.carretasPorCavalo(c.empresaId, caminhoes), itens,
         };
     }
 

@@ -30,6 +30,8 @@ type Props = {
     // Quem estava pendente no último salvar/carregar. A aba "Pendentes" usa
     // isto: o que você classifica continua na aba até salvar/enviar.
     pendentesBase?: Set<string>;
+    // Carretas de cada cavalo (dos vínculos): { idCavalo: ['FQM4596', ...] }.
+    carretas?: Record<string, string[]>;
 };
 
 // Divide igual em centavos (o último leva a sobra).
@@ -38,7 +40,7 @@ function igualEntre(valor: number, ks: string[]): Parte[] {
     return ks.map((k, i) => ({ k, v: (i === ks.length - 1 ? c - b * (ks.length - 1) : b) / 100 }));
 }
 
-export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagamentos, totalRecebimentos, saldoAnterior, saldoFinal, alterados, onChange, onVincular, onDesvincular, topoFixo = 0, pendentesBase }: Props) {
+export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagamentos, totalRecebimentos, saldoAnterior, saldoFinal, alterados, onChange, onVincular, onDesvincular, topoFixo = 0, pendentesBase, carretas = {} }: Props) {
     const [aba, setAba] = useState<Aba>('pend');
     const [card, setCard] = useState<string | null>(null);
     const [busca, setBusca] = useState('');
@@ -78,8 +80,13 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
         if (FIXOS[k]) return onChange(it.id, { partes: atual.length === 1 && atual[0].k === k ? [] : [{ k, v: it.valor }] });
         const sel = atual.every((p) => !FIXOS[p.k]) ? atual.map((p) => p.k) : [];
         const novos = sel.includes(k) ? sel.filter((x) => x !== k) : [...sel, k];
-        onChange(it.id, { partes: novos.length ? igualEntre(it.valor, novos) : [] });
+        // Mantém a carreta que já estava escolhida em cada cavalo.
+        onChange(it.id, { partes: novos.length ? igualEntre(it.valor, novos).map((p) => { const a = atual.find((x) => x.k === p.k); return a?.c ? { ...p, c: a.c } : p; }) : [] });
     }, [onChange, caminhoes]);
+
+    const escolherCarreta = useCallback((it: ItemExtrato, k: string, c: string) => {
+        onChange(it.id, { partes: it.partes.map((p) => (p.k === k ? (c ? { ...p, c } : { k: p.k, v: p.v }) : p)) });
+    }, [onChange]);
 
     // Atalhos de teclado no pagamento destacado.
     const estado = useRef({ visiveis, focoReal, aba, card, caminhoes, base: pendentesBase, definir });
@@ -134,6 +141,12 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
 
     const sCam = caminhoes.reduce((s, c) => s + cent(t.por[c.id]?.tot ?? 0), 0) / 100;
     const vk = (k: string) => t.por[k]?.tot ?? 0;
+    // Quanto de cada cavalo foi pras carretas.
+    const naCarreta = useMemo(() => {
+        const m: Record<string, number> = {};
+        for (const it of itens) for (const p of it.partes) if (p.c) m[p.k] = (m[p.k] ?? 0) + p.v;
+        return m;
+    }, [itens]);
     // Parte de cada caminhão que já está em Contas a Pagar (não é lançada de novo no Aplicar).
     const jaCP = useMemo(() => {
         const m: Record<string, number> = {};
@@ -160,6 +173,7 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
                             </div>
                             <div className="mt-1 font-bold tabular-nums text-gray-900 dark:text-white truncate">{moeda(vk(c.id))}</div>
                             <div className="text-[11px] text-gray-500">{t.por[c.id]?.n ?? 0} lanç.</div>
+                            {(naCarreta[c.id] ?? 0) > 0 && <div className="text-[10px] text-orange-600 truncate" title="Parte classificada na sub-categoria Carreta">{moeda(naCarreta[c.id])} em carretas</div>}
                             {(jaCP[c.id] ?? 0) > 0 && <div className="text-[10px] text-emerald-600 truncate" title="Já está em Contas a Pagar — não é lançado de novo">{moeda(jaCP[c.id])} já em C. Pagar</div>}
                         </button>
                     ))}
@@ -231,7 +245,8 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
                     {visiveis.map((it, ix) => (
                         <Linha key={it.id} it={it} ix={ix} foco={ix === focoReal} alterado={!!alterados?.has(it.id)}
                             caminhoes={caminhoes} rotulo={rotulo} onFoco={setFoco} definir={definir} onDividir={setDividindo}
-                            onNota={mudarNota} onVincular={onVincular} onDesvincular={onDesvincular} />
+                            onNota={mudarNota} onVincular={onVincular} onDesvincular={onDesvincular}
+                            carretas={carretas} onCarreta={escolherCarreta} />
                     ))}
                 </div>
             )}
@@ -239,7 +254,11 @@ export function ClassificadorExtrato({ itens, caminhoes, totalPagamentos, nPagam
             {dividindo && (
                 <DividirModal item={dividindo} caminhoes={caminhoes}
                     onFechar={() => setDividindo(null)}
-                    onConfirmar={(partes) => { onChange(dividindo.id, { partes }); setDividindo(null); }} />
+                    onConfirmar={(partes) => {
+                        const ant = new Map(dividindo.partes.map((p) => [p.k, p.c]));
+                        onChange(dividindo.id, { partes: partes.map((p) => (ant.get(p.k) ? { ...p, c: ant.get(p.k) } : p)) });
+                        setDividindo(null);
+                    }} />
             )}
         </div>
     );
@@ -252,9 +271,11 @@ type LinhaProps = {
     onDividir: (it: ItemExtrato) => void; onNota: (id: string, nota: string) => void;
     onVincular?: (it: ItemExtrato) => void;
     onDesvincular?: (id: string) => void;
+    carretas: Record<string, string[]>;
+    onCarreta: (it: ItemExtrato, k: string, c: string) => void;
 };
 
-const Linha = memo(function Linha({ it, ix, foco, alterado, caminhoes, rotulo, onFoco, definir, onDividir, onNota, onVincular, onDesvincular }: LinhaProps) {
+const Linha = memo(function Linha({ it, ix, foco, alterado, caminhoes, rotulo, onFoco, definir, onDividir, onNota, onVincular, onDesvincular, carretas, onCarreta }: LinhaProps) {
     const ps = it.partes;
     const sel = ps.length === 1 ? ps[0].k : null;
     const dividido = ps.length > 1;
@@ -316,11 +337,25 @@ const Linha = memo(function Linha({ it, ix, foco, alterado, caminhoes, rotulo, o
             {(ps.length > 0 || it.motivo || it.contaPagar) && (
                 <div className="col-span-2 md:col-start-2 md:col-span-2 flex flex-wrap items-center gap-1.5 text-xs">
                     {ps.length > 0 && <span className="text-gray-400">→</span>}
-                    {ps.map((p) => (
-                        <span key={p.k} className={`px-2 py-0.5 rounded-full border font-bold ${placaCor(p.k, rotulo)}`}>
-                            {rotulo(p.k)}{dividido ? ` ${moeda(p.v)}` : ''}
-                        </span>
-                    ))}
+                    {ps.map((p) => {
+                        const cs = carretas[p.k] ?? [];
+                        const opcoes = [...new Set([...(cs.length > 1 ? [cs.join('/')] : []), ...cs, ...(p.c ? [p.c] : [])])];
+                        return (
+                            <span key={p.k} className="inline-flex items-center gap-1">
+                                <span className={`px-2 py-0.5 rounded-full border font-bold ${placaCor(p.k, rotulo)}`}>
+                                    {rotulo(p.k)}{p.c ? ` · carreta ${p.c}` : ''}{dividido ? ` ${moeda(p.v)}` : ''}
+                                </span>
+                                {opcoes.length > 0 && (
+                                    <select value={p.c ?? ''} onClick={(e) => e.stopPropagation()} onChange={(e) => onCarreta(it, p.k, e.target.value)}
+                                        title="Sub-categoria: é do cavalo ou de uma carreta dele?"
+                                        className={`px-1.5 py-0.5 rounded-md border text-[11px] bg-white dark:bg-[#0B1120] ${p.c ? 'border-orange-400 text-orange-700 dark:text-orange-300' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300'}`}>
+                                        <option value="">Cavalo</option>
+                                        {opcoes.map((o) => <option key={o} value={o}>{o.includes('/') ? `Carretas (${o.split('/').length})` : `Carreta ${o}`}</option>)}
+                                    </select>
+                                )}
+                            </span>
+                        );
+                    })}
                     {it.origem === 'AUTO' && it.motivo && <span className="px-2 py-0.5 rounded-full border border-dashed border-gray-300 dark:border-gray-600 text-gray-500">automático · {it.motivo}</span>}
                     {it.origem === 'LINK' && <span className="px-2 py-0.5 rounded-full border border-dashed border-violet-300 text-violet-600">pelo link</span>}
                     {it.contaPagar && (

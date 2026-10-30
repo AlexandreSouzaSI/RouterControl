@@ -22,7 +22,7 @@ type Resumo = {
 type Vinculo = { id: string; termo: string; tipo: 'PLACA' | 'NOME'; destino: string };
 type Detalhe = Resumo & {
     totalRecebimentos: number; nRecebimentos: number; saldoAnterior: number | null; saldoFinal: number | null;
-    token: string | null; aplicadoPor: string | null; itens: ItemExtrato[]; caminhoes: CaminhaoOpcao[]; vinculos: Vinculo[];
+    token: string | null; aplicadoPor: string | null; itens: ItemExtrato[]; caminhoes: CaminhaoOpcao[]; carretas: Record<string, string[]>; vinculos: Vinculo[];
     lancados: { quantidade: number; total: number };
 };
 
@@ -276,6 +276,7 @@ export function ConciliacaoExtratoDetalhe() {
                 onChange={onChange}
                 onDesvincular={onDesvincular}
                 pendentesBase={pendentesBase}
+                carretas={d.carretas}
                 onVincular={(it) => setVinculoDe(it)}
             />
 
@@ -341,7 +342,7 @@ function VinculosModal({ caminhoes, vinculos, item, onFechar, onMudou }: {
     const [destino, setDestino] = useState(item?.partes.length === 1 && item.partes[0].k !== 'JA_LANCADO' ? item.partes[0].k : '');
     const [erro, setErro] = useState<string | null>(null);
     const [lote, setLote] = useState('');
-    const [resLote, setResLote] = useState<{ salvos: number; erros: string[] } | null>(null);
+    const [resLote, setResLote] = useState<{ salvos: number; erros: string[]; conjuntos?: number } | null>(null);
 
     async function salvarLote() {
         setResLote(null);
@@ -395,13 +396,13 @@ function VinculosModal({ caminhoes, vinculos, item, onFechar, onMudou }: {
                 {!item && (
                     <details className="rounded-lg border border-gray-200 dark:border-gray-800 px-3 py-2">
                         <summary className="text-sm font-semibold text-gray-900 dark:text-white cursor-pointer">Colar vários de uma vez</summary>
-                        <p className="text-xs text-gray-500 mt-2">Um por linha: <code>TERMO → DESTINO</code> (também vale <code>=</code> ou <code>;</code>). Destino = placa do caminhão, <code>GERAL</code>, <code>SOCIOS</code>, <code>AGREGADOS</code> ou <code>NAO</code>. Linha começando com # é ignorada.</p>
+                        <p className="text-xs text-gray-500 mt-2">Um por linha: <code>TERMO → DESTINO</code> (também vale <code>=</code> ou <code>;</code>). Destino = placa do caminhão, <code>GERAL</code>, <code>SOCIOS</code>, <code>AGREGADOS</code> ou <code>NAO</code>. Linha começando com # é ignorada.<br />Também dá pra colar os <b>conjuntos</b> como vêm no WhatsApp (<code>Motorista: …</code> / <code>Cavalo: SEV-6G75</code> / <code>Carretas: FQM-4596 e FQL-0363</code> / <code>Dolly: …</code>): cada carreta e dolly fica ligada ao cavalo (sub-categoria Carreta) e o nome do motorista também.</p>
                         <textarea value={lote} onChange={(e) => setLote(e.target.value)} rows={8} placeholder={'FQA → POZ\nGJP → POZ\nGIOVANNI → POZ\nNU GALHO → SOCIOS'}
                             className="mt-2 w-full px-3 py-2 rounded-lg text-sm font-mono bg-white dark:bg-[#0B1120] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white" />
                         <button onClick={salvarLote} disabled={!lote.trim()} className="mt-2 px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold disabled:opacity-50">Salvar todos</button>
                         {resLote && (
                             <div className="mt-2 text-xs space-y-0.5">
-                                <p className="text-emerald-600 font-semibold">{resLote.salvos} vínculo(s) salvos.</p>
+                                <p className="text-emerald-600 font-semibold">{resLote.salvos} vínculo(s) salvos{resLote.conjuntos ? ` de ${resLote.conjuntos} conjunto(s)` : ''}.</p>
                                 {resLote.erros.map((er) => <p key={er} className="text-red-600">{er}</p>)}
                             </div>
                         )}

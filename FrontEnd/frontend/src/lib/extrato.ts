@@ -1,6 +1,7 @@
 // Tipos e contas da Conciliação do Extrato (tela interna e link público).
 
-export type Parte = { k: string; v: number };
+// c = carreta (sub-categoria do cavalo), ex.: "FQM4596".
+export type Parte = { k: string; v: number; c?: string };
 export type ItemExtrato = {
     id: string;
     ordem: number;

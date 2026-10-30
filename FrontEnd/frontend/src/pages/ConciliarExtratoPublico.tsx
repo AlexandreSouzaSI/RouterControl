@@ -16,7 +16,7 @@ type Dados = {
     totalPagamentos: number; nPagamentos: number; totalRecebimentos: number;
     saldoAnterior: number | null; saldoFinal: number | null;
     linkEnviadoEm: string | null; linkEnviadoPor: string | null;
-    caminhoes: CaminhaoOpcao[]; itens: ItemExtrato[];
+    caminhoes: CaminhaoOpcao[]; carretas?: Record<string, string[]>; itens: ItemExtrato[];
 };
 
 export function ConciliarExtratoPublico() {
@@ -99,6 +99,7 @@ export function ConciliarExtratoPublico() {
                     alterados={alterados}
                     onChange={onChange}
                     pendentesBase={pendentesBase}
+                    carretas={d.carretas}
                 />
             </div>
 
